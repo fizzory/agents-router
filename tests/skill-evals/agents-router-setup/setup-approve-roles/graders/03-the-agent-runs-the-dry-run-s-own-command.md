@@ -1,7 +1,10 @@
 ---
-type: llm
-focus: trace
+type: regex
+target:
+  source: file
+  path: .agt-eval/records/agt-calls.jsonl
+match: contains
 weight: 1
 ---
 
-The agent runs the dry run's own command, ending in `--yes --if-plan <id>`, without adding or removing flags
+"exit_code"\s*:\s*0[^\n]*"kind"\s*:\s*"apply"[^\n]*"matches_proposal"\s*:\s*true

@@ -11,6 +11,11 @@ the variables `bin/agt` sets for agt and nothing else, as tests/helpers.py does 
 tests. A case's files/ may already hold `.agt-eval/home/...` (a starting `~/.agt/settings.toml`);
 those files are kept.
 
+Host mode uses a named Claude profile, `home/.claude-eval`, with no `home/.claude`:
+Claude Code's eval Bash sandbox blocks role-agent writes in a folder named `.claude`.
+Its env.json opts the wrapper into a compact setup/roles call journal for graders, whose
+LLM trace view omits middle events. Jobs mode keeps its original primary folders and exec path.
+
 The accounts a case's roles name (`[roles.*] providers` in its user and workspace settings) are made
 the way agt finds them on a real machine, logged in to the fake CLIs:
   claude:<name>        a Claude Code profile folder `~/.claude-<name>` (`~/.<name>` when the name starts
@@ -79,8 +84,9 @@ def named_accounts(workspace: Path, home: Path, src: Path) -> set[tuple[str, str
     return found
 
 
-def make_accounts(workspace: Path, home: Path, src: Path, every_primary: bool) -> None:
-    primaries = {"claude": home / ".claude", "codex": home / ".codex",
+def make_accounts(workspace: Path, home: Path, src: Path, every_primary: bool,
+                  claude_primary: Path | None = None) -> None:
+    primaries = {"claude": claude_primary or home / ".claude", "codex": home / ".codex",
                  "antigravity": home / ".gemini" / "antigravity-cli", "kiro": home / ".kiro"}
     settings = home / ".agt" / "settings.toml"
     text = settings.read_text(encoding="utf-8") if settings.is_file() else ""
@@ -131,7 +137,8 @@ def build(workspace: Path, mode: str) -> Path:
         raise SystemExit(f"make_sandbox: agt needs Python 3.11 or later, not {sys.version.split()[0]}")
     root = workspace / ".agt-eval"
     home = root / "home"
-    for folder in (home / ".agt", home / ".claude", home / ".codex", home / ".gemini", home / ".agents-router",
+    claude = home / (".claude-eval" if mode == "host" else ".claude")
+    for folder in (home / ".agt", claude, home / ".codex", home / ".gemini", home / ".agents-router",
                    root / "records", root / "fakes"):
         folder.mkdir(parents=True, exist_ok=True)
     # The run can read only its workspace, so its `agt` is this copy: runs put `.agt-eval/bin` first on PATH.
@@ -146,8 +153,12 @@ def build(workspace: Path, mode: str) -> Path:
     python = sys.executable
     fake = lambda name, *args: json.dumps([python, str(root / "fakes" / name), *args])
     if mode == "host":
-        for folder in (home / ".claude", home / ".codex", home / ".gemini"):
+        for folder in (claude, home / ".codex", home / ".gemini"):
             (folder / "logged_in").touch()  # fake_host: this folder is logged in
+        (claude / ".claude.json").write_text(json.dumps({
+            "oauthAccount": {"accountUuid": "uuid-claude-eval", "organizationUuid": "org-claude-eval",
+                             "organizationType": "claude_max"}, "userID": "eval-claude-eval",
+        }), encoding="utf-8")
         commands = {"AGT_CLAUDE_COMMAND": fake("fake_host.py", "claude"), "AGT_CODEX_COMMAND": fake("fake_host.py", "codex"),
                     "AGT_AGY_COMMAND": fake("fake_host.py", "agy"), "AGT_KIRO_COMMAND": fake("fake_host.py", "kiro"),
                     # installing agt's plugin records this clone's version, as a real install would
@@ -158,12 +169,12 @@ def build(workspace: Path, mode: str) -> Path:
                     "AGT_AGY_COMMAND": fake("logins.py", "agy"), "AGT_KIRO_COMMAND": fake("fake_kiro.py")}
     else:
         raise SystemExit(f"make_sandbox: mode is jobs or host, not {mode!r}")
-    make_accounts(workspace, home, root / "src", every_primary=mode == "jobs")
+    make_accounts(workspace, home, root / "src", every_primary=mode == "jobs", claude_primary=claude)
     records = root / "records"
     env = {
         "HOME": str(home), "USERPROFILE": str(home),
         "AGT_HOME": str(home / ".agents-router"), "AGT_CONFIG_DIR": str(home / ".agt"),
-        "CLAUDE_CONFIG_DIR": str(home / ".claude"), "CODEX_HOME": str(home / ".codex"), "FAKE_AGY_HOME": str(home / ".gemini"),
+        "CLAUDE_CONFIG_DIR": str(claude), "CODEX_HOME": str(home / ".codex"), "FAKE_AGY_HOME": str(home / ".gemini"),
         "AGT_PLUGIN_SOURCE": str(root / "plugin"),
         "GIT_CONFIG_GLOBAL": str(root / "gitconfig"), "GIT_CONFIG_NOSYSTEM": "1",
         "FAKE_HOST_LOG": str(records / "host.jsonl"), "FAKE_CLAUDE_RECORD": str(records / "workers.jsonl"),
@@ -173,7 +184,8 @@ def build(workspace: Path, mode: str) -> Path:
         "FAKE_OSASCRIPT_RECORD": str(records / "osascript.jsonl"), "AGT_SPAWN_RECORD": str(records / "spawned.jsonl"),
         **commands,
     }
-    (root / "env.json").write_text(json.dumps({"python": python, "src": str(root / "src"), "env": env}, indent=2) + "\n",
+    (root / "env.json").write_text(json.dumps({"python": python, "src": str(root / "src"), "env": env,
+                                             "mode": mode}, indent=2) + "\n",
                                    encoding="utf-8")
     return root
 

@@ -1,7 +1,10 @@
 ---
-type: llm
-focus: trace
+type: regex
+target:
+  source: file
+  path: .agt-eval/records/agt-calls.jsonl
+match: not_contains
 weight: 1
 ---
 
-The agent runs no `agt setup` command with `--yes` before the user answers
+"kind"\s*:\s*"apply"

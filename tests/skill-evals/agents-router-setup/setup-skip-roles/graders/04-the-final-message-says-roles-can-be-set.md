@@ -1,7 +1,7 @@
 ---
 type: llm
-focus: trace
+focus: last_message
 weight: 1
 ---
 
-The final message says roles can be set up later, by asking or with orchestrator-setup
+The final message says roles can be set up later, by asking or with orchestrator-setup.

@@ -20,7 +20,7 @@ If you can't run commands, follow the copy below. It matches the version this sk
 
 # Set up Agents Router (steps for an agent)
 
-You are installing, updating, repairing or removing Agents Router (`agt`) for the person you work with. Do the routine steps yourself. Ask them once, in one message, about the choices. At the end, tell them only what's left for them: logins and reloads. This guide is for agt 0.15.0 or newer; `agt guide setup` prints the copy that matches the installed version.
+You are installing, updating, repairing or removing Agents Router (`agt`) for the person you work with. Do the routine steps yourself. Ask them once, in one message, about the choices. At the end, tell them only what's left for them: logins and reloads. This guide is for agt 0.15.3 or newer; `agt guide setup` prints the copy that matches the installed version.
 
 ## 0. Before you start
 
@@ -66,7 +66,7 @@ agt setup --dry-run --json
 
    Offer these answers: **Approve** (as proposed), **Change a role** (or another item), **Skip roles**, or **Cancel**. If `roles.state` is `set`, the roles stay as they are and there is nothing to ask about them. When `roles.custom` is there (a first setup), end the message with its `ask`: "Want a role of your own too? Tell me its name, what it does, read, edit or full access, and its providers."
 2. **Put the answers in flags** and run the dry run again.
-3. **Run the new proposal's `command` exactly as given.** It ends in `--yes --if-plan <id>`, which refuses when anything changed since the dry run.
+3. **Run the new proposal's `command` exactly as given.** It includes `--yes --if-plan <id>`, which refuses when anything changed since the dry run.
 
 | The person wants | Flag |
 |---|---|
@@ -88,11 +88,11 @@ agt setup --dry-run --json
 - Profiles already on this machine (`~/.claude`, `~/.claude-*`) need no `--account`. `--account NAME=FOLDER` is only for a logged-in folder somewhere else.
 - No question is needed for the install, the PATH fix or the dry run. Everything `command` does needs the person's answer first.
 - A command that exits 3 with `needs_choice` changed nothing. Ask its `ask` and run its `retry` with the answer.
-- **Builder with several providers.** When the person gives an edit role (the Builder) more than one provider, `roles.needs_order` asks which goes first: it runs on one provider at a time, in that order. Ask it, then add its `--role-order` flag. Read-only roles run all their providers at once, so they have no order.
+- **Builder with several providers.** When the person gives an edit role (the Builder) more than one provider, `roles.needs_order` asks which goes first: it runs on one provider at a time, in that order. Ask `roles.needs_order` as a question and wait for the answer; don't pick the order yourself. Then add its `--role-order` flag. Read-only roles run all their providers at once, so they have no order.
 - **A role of your own.** Setup writes only the base roles. Add each custom role after `command` succeeds, with `roles.custom.command`: `agt roles config <name> --access read|edit|full --only <providers> --description "<what it does>"` (full is edit plus the shell, with no sandbox or permission prompts). A role made before that changes the plan: `--if-plan` refuses, and setup stops proposing the base roles.
   - The description is the person's: what the role does and when their agent should call it, in their words. If they didn't say, ask. Never write it yourself; agt refuses a new custom role without one.
   - An edit or full role also needs `--user-said "<their words>"`.
-  - When their request already approved the proposal, run `command` first, then offer a role of your own in your final message.
+  - When their request already approved the proposal, run `command` first. After it succeeds, list each role it wrote in your final message as in step 1: **<name>** (<access>; <providers>): <use_when>, quoting `use_when` word for word. Then, if `roles.custom` is there, end with `roles.custom.ask` as a question.
 - Roles are changed later with `agt roles config`, never by editing `[roles.*]` by hand.
 - **Role agents go to the CLI you run in.** agt can't tell Antigravity from a plain terminal, so an agent running in Antigravity adds `--host antigravity` to the dry run and to `agt update`. With `--host`, the role agents go to each CLI it names.
 

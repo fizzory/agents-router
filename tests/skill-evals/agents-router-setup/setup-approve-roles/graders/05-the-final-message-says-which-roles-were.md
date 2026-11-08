@@ -1,7 +1,7 @@
 ---
 type: llm
-focus: trace
+focus: last_message
 weight: 1
 ---
 
-The final message says which roles were written and that /reload-plugins or a restart loads the role agents
+The final message says which roles were written and that /reload-plugins or a restart loads the role agents.

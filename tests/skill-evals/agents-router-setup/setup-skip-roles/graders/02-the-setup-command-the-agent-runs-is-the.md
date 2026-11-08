@@ -1,7 +1,10 @@
 ---
-type: llm
-focus: trace
+type: regex
+target:
+  source: file
+  path: .agt-eval/records/agt-calls.jsonl
+match: contains
 weight: 1
 ---
 
-The setup command the agent runs is the dry run's skip-roles variant, so no [roles.*] table is written
+^(?![\s\S]*"kind"\s*:\s*"apply"[^\n]*"roles_off"\s*:\s*false)(?![\s\S]*"kind"\s*:\s*"roles_config"[^\n]*"writes"\s*:\s*true)[\s\S]*"argv"\s*:\s*\[\s*"setup"[^\n\]]*(?:"--roles"\s*,\s*"off"|"--roles=off")

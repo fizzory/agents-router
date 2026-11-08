@@ -1,7 +1,7 @@
 ---
 type: llm
-focus: trace
+focus: last_message
 weight: 1
 ---
 
-The agent asks the user which builder provider goes first, with a question tool or a question in its final message
+The final message asks the user which builder provider goes first: claude-work with opus or codex work with gpt-6.1-sol. It waits for the answer before applying setup.
