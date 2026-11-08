@@ -1,7 +1,9 @@
 ---
-type: llm
-focus: trace
+type: regex
+target: last_message
+match: contains
+flags: i
 weight: 1
 ---
 
-The final message asks whether the user wants a role of their own (a custom role), and asks them to say what it would do. The agent creates no custom role itself
+role of your own[^?]{0,80}\?[\s\S]{0,80}what it does

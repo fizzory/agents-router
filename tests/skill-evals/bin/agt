@@ -6,13 +6,23 @@ It finds `.agt-eval/` at or above the current folder (make_sandbox.py builds it 
 drops the variables of the session running it, sets the sandbox's HOME, AGT_HOME, CLAUDE_CONFIG_DIR,
 CODEX_HOME and fake CLIs for agt alone, and runs agt's copied code. With no sandbox it refuses (exit 2),
 so it can never reach the real ~/.agt, ~/.claude* or ~/.codex.
+
+Only env.json's explicit host mode journals setup and roles-config calls: full trace regex
+graders can see all events, but LLM trace graders see only the ends. The journal holds argv
+and computed proposal/order facts, never full output. All other calls still exec agt directly.
 """
 
 from __future__ import annotations
 
+import argparse
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
+import shlex
+import signal
+import subprocess
 import sys
 
 DROPPED_PREFIXES = ("CLAUDE", "CODEX_", "AGY_", "AGT_", "KIRO_", "ANTHROPIC_", "OPENAI_", "FAKE_")
@@ -27,6 +37,197 @@ def sandbox() -> Path | None:
         if (candidate / ".agt-eval" / "env.json").is_file():
             return candidate / ".agt-eval"
     return None
+
+
+def command_argv(command: object) -> list[str] | None:
+    if not isinstance(command, str):
+        return None
+    try:
+        args = shlex.split(command)
+    except ValueError:
+        return None
+    return args[1:] if args[:1] == ["agt"] else None
+
+
+def effective_argv(argv: list[str], src: str) -> list[str]:
+    """Skip the copied CLI's global options without changing the recorded argv."""
+
+    previous_path = sys.path[:]
+    try:
+        sys.path.insert(0, src)
+        from agents_router import cli, ui
+
+        # Like cli.main, --color is allowed on either side of the subcommand.
+        argv, _ = ui.take_color_flag(argv)
+        parser = argparse.ArgumentParser(add_help=False)
+        for action in cli.build_parser()._actions:
+            if action.option_strings:
+                parser._add_action(action)
+        parser.add_argument("subcommand", nargs=argparse.REMAINDER)
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            try:
+                return parser.parse_args(argv).subcommand
+            except (argparse.ArgumentError, SystemExit):
+                return []
+    except ValueError:  # invalid --color, rejected before dispatch by cli.main
+        return []
+    finally:
+        sys.path[:] = previous_path
+
+
+def setup_change(argv: list[str], src: str) -> bool:
+    """Every valid non-dry-run setup can write, including plain noninteractive setup."""
+
+    previous_path = sys.path[:]
+    try:
+        sys.path.insert(0, src)
+        from agents_router import cli
+
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            try:
+                args = cli.build_parser().parse_args(argv)
+            except (argparse.ArgumentError, SystemExit):
+                return False
+        return not args.dry_run
+    finally:
+        sys.path[:] = previous_path
+
+
+def roles_config_change(argv: list[str], src: str) -> tuple[str | None, bool]:
+    """Classify intent with the sandbox's parser, without loading a config or --from file.
+
+    A role name alone (or scope/format flags) is not a change. Bulk operations such
+    as --from and --disable can change settings without a positional role name.
+    """
+
+    previous_path = sys.path[:]
+    try:
+        sys.path.insert(0, src)
+        from agents_router import roles_cli
+
+        parser = argparse.ArgumentParser()
+        roles_cli.add_parser(parser.add_subparsers())
+        help_requested = "--help" in argv or "-h" in argv
+        # Parsing must not print a second help/error message after the real command.
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            try:
+                args = parser.parse_args([arg for arg in argv if arg not in ("--help", "-h")])
+            except (argparse.ArgumentError, SystemExit):
+                return None, False
+        if help_requested or args.dry_run:
+            return args.role, False
+        if args.from_file is not None:
+            return args.role, True
+        try:
+            return args.role, not roles_cli._edit_from_args(args).empty()
+        except roles_cli.RoleError:
+            return args.role, False
+    finally:
+        sys.path[:] = previous_path
+
+
+def journal(root: Path, argv: list[str], code: int, stdout: bytes) -> None:
+    """Best effort only: a broken journal must never alter the child's bytes or status."""
+
+    path = root / "records" / "agt-calls.jsonl"
+    try:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except FileNotFoundError:
+        rows = []
+    row = {"argv": argv, "exit_code": code}
+    src = json.loads((root / "env.json").read_text(encoding="utf-8"))["src"]
+    args = effective_argv(argv, src)
+    if args[:1] == ["setup"]:
+        if "--help" in args or "-h" in args:
+            row["kind"] = "help"
+        elif "--dry-run" in args:
+            row.update(kind="dry_run", before_any_apply=not any(item["kind"] == "apply" for item in rows))
+            if "--json" in args:
+                try:
+                    proposal = json.loads(stdout)
+                except (ValueError, UnicodeError):
+                    proposal = {}
+                if not isinstance(proposal, dict):
+                    proposal = {}
+                if command_argv(proposal.get("command")) is not None:
+                    row["command"] = proposal["command"]
+                # Some proposal versions supply a full skip command; a bare `--roles off`
+                # answer is not one. Today's guide asks for another dry run with that flag.
+                roles = proposal.get("roles")
+                answers = roles.get("answers") if isinstance(roles, dict) else None
+                skip = proposal.get("skip_roles_command") or (answers.get("Skip roles") if isinstance(answers, dict) else None)
+                if command_argv(skip) is not None:
+                    row["skip_roles_command"] = skip
+        elif setup_change(args, src):
+            # An unparseable newer dry run invalidates the old proposal as well.
+            latest = next((item for item in reversed(rows) if item["kind"] == "dry_run"), {})
+            if latest.get("exit_code") != 0 or "command" not in latest:
+                latest = {}
+            row.update(kind="apply", matches_proposal=argv == command_argv(latest.get("command")),
+                       matches_skip_roles_proposal=argv == command_argv(latest.get("skip_roles_command")),
+                       roles_off=("--roles=off" in args or any(
+                           args[i:i + 2] == ["--roles", "off"] for i in range(len(args)))
+                           or argv == command_argv(latest.get("skip_roles_command"))))
+        else:
+            row["kind"] = "other"
+    else:
+        role, writes = roles_config_change(args, src)
+        row.update(kind="roles_config", role=role, writes=writes,
+                   successful_matching_apply_before=any(
+                       item["kind"] == "apply" and item["exit_code"] == 0
+                       and (item.get("matches_proposal") or item.get("matches_skip_roles_proposal")) for item in rows))
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+
+
+def run_journaled(root: Path, command: list[str], env: dict[str, str], argv: list[str],
+                  args: list[str] | None = None) -> int:
+    captured = bytearray()
+    args = argv if args is None else args
+    proposal = args[:1] == ["setup"] and "--dry-run" in args and "--json" in args
+    relay = True
+    child = None
+    pending = []
+
+    def forward(signum, _frame):
+        if child is None:
+            pending.append(signum)
+        else:
+            try:
+                child.send_signal(signum)
+            except ProcessLookupError:
+                pass  # already exited; wait() still reaps it below
+
+    previous = {}
+    try:
+        for name in ("SIGTERM", "SIGINT", "SIGHUP"):
+            signum = getattr(signal, name, None)
+            if signum is not None:
+                previous[signum] = signal.signal(signum, forward)
+        with subprocess.Popen(command, env=env, stdout=subprocess.PIPE) as child:
+            for signum in pending:
+                forward(signum, None)
+            while chunk := child.stdout.read1(65536):
+                if proposal:
+                    captured.extend(chunk)
+                if relay:
+                    try:
+                        # os.write avoids buffered flushing at exit, including after `agt ... | head`.
+                        remaining = memoryview(chunk)
+                        while remaining:
+                            remaining = remaining[os.write(sys.stdout.fileno(), remaining):]
+                    except BrokenPipeError:
+                        relay = False  # still drain the child and capture its complete proposal
+            code = child.wait()
+        status = code if code >= 0 else 128 - code
+        try:
+            journal(root, argv, status, bytes(captured))
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            pass
+        return status
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 def main() -> int:
@@ -45,7 +246,13 @@ def main() -> int:
     env.update(spec["env"])
     env["PYTHONPATH"] = spec["src"]
     python = spec["python"]
-    os.execve(python, [python, "-c", "import sys; from agents_router.entry import main; sys.exit(main())", *sys.argv[1:]], env)
+    argv = sys.argv[1:]
+    command = [python, "-c", "import sys; from agents_router.entry import main; sys.exit(main())", *argv]
+    if spec.get("mode") == "host":
+        args = effective_argv(argv, spec["src"])
+        if args[:1] == ["setup"] or args[:2] == ["roles", "config"]:
+            return run_journaled(root, command, env, argv, args)
+    os.execve(python, command, env)
     return 1  # not reached
 
 
