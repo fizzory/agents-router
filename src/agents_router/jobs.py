@@ -29,7 +29,7 @@ import subprocess
 import time
 from typing import Any, Callable, Iterator
 
-from agents_router import levels, limits, quota, synclog
+from agents_router import health, levels, limits, quota, synclog
 from agents_router.config import jobs_dir, load_config, session_folder, set_session, state_dir
 from agents_router.fsutil import (
     file_lock,
@@ -156,6 +156,8 @@ def _create_job(
     start: bool = True,
     group: str | None = None,
     rules: str | None = None,
+    _role_try: bool = False,
+    _doctor_live: bool = False,
 ) -> dict[str, Any]:
     limits.validate_override(override)
     workspace = levels.find_workspace(cwd)
@@ -218,74 +220,123 @@ def _create_job(
         if not hasattr(get_runtime(runtime), "transfer_session"):
             # The session lives in one account's folder and can't be moved: stay there.
             account = resume_account or account
+            chosen = runtime_config.find(account) if account else None
+            if start and chosen is not None:
+                try:
+                    state = health.query_state(runtime_config, chosen, model)
+                except OSError:
+                    pass  # follow-ups also fail open when health storage is unavailable
+                else:
+                    if state.state == "unhealthy":
+                        raise ValueError(
+                            f"{account} is unhealthy; this session lives on that account, so the follow-up "
+                            "can't run yet. Try again after it recovers."
+                        )
 
-    admission = limits.admit(config, runtime, account=account, model=model, effort=effort, override=override) if start else None
-    if admission is not None:
-        effort = admission.effort
+    job_id = new_job_id()
+    claim = None
+    created = False
+    try:
+        admission = None
+        if start:
+            while True:
+                admission = limits.admit(config, runtime, account=account, model=model, effort=effort, override=override,
+                                         _doctor_live=_doctor_live)
+                if _role_try and admission.queue_reason:
+                    raise limits.TrialBusy(admission.queue_reason.removeprefix("queued · ")
+                                           .removesuffix(" (trial job running)"))
+                if admission.account is None or admission.health is None:
+                    break
+                chosen = runtime_config.find(admission.account)
+                try:
+                    claimed = health.claim_trial(runtime_config, chosen, model, job_id, generation=admission.health.generation,
+                                                 skip_rest=_doctor_live)
+                except OSError:
+                    break  # health storage failures leave ordinary admission in effect
+                if claimed is None:
+                    if _role_try:
+                        raise limits.TrialBusy(f"{chosen.name} recovering")
+                    continue  # a runner changed health or took the trial; rank again under admission's lock
+                if claimed.trials:
+                    claim = (chosen, claimed.generation)
+                break
+        if admission is not None:
+            effort = admission.effort
 
-    model = model or runtime_config.default_model
-    pool = quota.pool_for(runtime_config, model)
-    spec = JobSpec(
-        job_id=new_job_id(),
-        runtime=runtime,
-        prompt=prompt,
-        cwd=str(path.resolve()),
-        account=account or None,
-        model=model or None,
-        effort=effort or None,
-        override=override,
-        access=access,
-        max_turns=int(max_turns) if max_turns else None,
-        timeout_seconds=timeout_seconds,
-        add_dirs=directories,
-        resume_session=resume_session,
-        resume_account=resume_account,
-        resume_home=resume_home,
-        parent={**host_context(host, str(path.resolve())), "config_dir": str(session) if session else None},
-        depth=depth + 1,
-        created=time.time(),
-        rules=rules,
-    )
-    folder = job_dir(spec.job_id)
-    make_private_dir(folder.parent)
-    folder.mkdir(mode=0o700)
-    write_json(folder / "spec.json", spec.to_dict())
-    status = {
-        "job_id": spec.job_id,
-        "runtime": runtime,
-        "override": override,
-        "state": "queued",
-        "outcome": None,
-        "cwd": spec.cwd,
-        "account": None,
-        "assigned_account": admission.account if admission else account,
-        "pool": pool.name if pool else None,
-        "created_at": spec.created,
-        "updated_at": spec.created,
-        "attempts": [],
-        "warnings": [],
-        # The runner rewrites "warnings"; this key survives, and summarize() shows it with them.
-        "limit_notes": list(admission.warnings) if admission else [],
-    }
-    if group:
-        status["group"] = group
-    write_json(folder / "status.json", status)
-    if start:
-        try:
-            pid = spawn_detached(
-                [python_executable(), "-m", "agents_router", "_runner", spec.job_id],
-                folder / "runner.log",
-                env=_runner_env(),
-            )
-        except OSError as exc:
-            mark_pending(spec.job_id)
-            return update_status(
-                spec.job_id, state="done", outcome=ERROR, message=f"could not start the runner: {exc}", finished_at=time.time()
-            )
-        # The runner owns status.json; the launcher only leaves its PID beside it.
-        write_text(folder / "runner.pid", str(pid))
-        status["runner_pid"] = pid
-    return status
+        model = model or runtime_config.default_model
+        pool = quota.pool_for(runtime_config, model)
+        spec = JobSpec(
+            job_id=job_id,
+            runtime=runtime,
+            prompt=prompt,
+            cwd=str(path.resolve()),
+            account=account or None,
+            model=model or None,
+            effort=effort or None,
+            override=override,
+            access=access,
+            max_turns=int(max_turns) if max_turns else None,
+            timeout_seconds=timeout_seconds,
+            add_dirs=directories,
+            resume_session=resume_session,
+            resume_account=resume_account,
+            resume_home=resume_home,
+            parent={**host_context(host, str(path.resolve())), "config_dir": str(session) if session else None},
+            depth=depth + 1,
+            created=time.time(),
+            rules=rules,
+            _doctor_live=_doctor_live,
+        )
+        folder = job_dir(spec.job_id)
+        make_private_dir(folder.parent)
+        folder.mkdir(mode=0o700)
+        write_json(folder / "spec.json", spec.to_dict())
+        status = {
+            "job_id": spec.job_id,
+            "runtime": runtime,
+            "override": override,
+            "state": "queued",
+            "outcome": None,
+            "cwd": spec.cwd,
+            "account": None,
+            "assigned_account": admission.account if admission else account,
+            "pool": pool.name if pool else None,
+            "created_at": spec.created,
+            "updated_at": spec.created,
+            "attempts": [],
+            "warnings": [],
+            # The runner rewrites "warnings"; this key survives, and summarize() shows it with them.
+            "limit_notes": list(admission.warnings) if admission else [],
+        }
+        if group:
+            status["group"] = group
+        if admission and admission.queue_reason:
+            status["message"] = admission.queue_reason
+        write_json(folder / "status.json", status)
+        if start:
+            try:
+                pid = spawn_detached(
+                    [python_executable(), "-m", "agents_router", "_runner", spec.job_id],
+                    folder / "runner.log",
+                    env=_runner_env(),
+                )
+            except OSError as exc:
+                mark_pending(spec.job_id)
+                return update_status(
+                    spec.job_id, state="done", outcome=ERROR, message=f"could not start the runner: {exc}", finished_at=time.time()
+                )
+            # The runner owns status.json; the launcher only leaves its PID beside it.
+            write_text(folder / "runner.pid", str(pid))
+            status["runner_pid"] = pid
+        created = status.get("outcome") != ERROR
+        return status
+    finally:
+        if claim is not None and not created:
+            chosen, generation = claim
+            try:
+                health.release_claim(runtime_config, chosen, job_id, generation=generation)
+            except OSError:
+                pass  # a failed cleanup also has the 120 s claim deadline
 
 
 def _runner_env() -> dict[str, str]:

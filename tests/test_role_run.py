@@ -11,7 +11,8 @@ from unittest.mock import patch
 
 from helpers import TempHome
 
-from agents_router import accounts, cli, jobs, messages, profiles, tools, ui
+from agents_router import accounts, cli, health, jobs, messages, profiles, role_run, tools, ui
+from agents_router.config import load_config
 
 FRAME_RE = re.compile(r" · job ([a-z0-9-]+) · token ([0-9a-f]{32})$")
 GROUP_FOLLOW_RE = re.compile(r"^agt follow (g-[0-9a-f]+) --from (\d+)((?: --window \d+)?) # agt-token ([0-9a-f]{32})$", re.MULTILINE)
@@ -385,6 +386,235 @@ class RoleRunTests(TempHome):
         self.assertEqual(code, 0, text + err)
         spec = jobs.read_spec(jobs.group_members(self.frame(text)[0])[0])
         self.assertEqual(spec.prompt, "Look for injection bugs.\n\ncheck the login form")
+
+    # Provider circuit breaker (the CB-S tags are separate from the older role scenarios).
+
+    def circuit_roles(self, role="builder", providers=("codex", "claude:b"), extra=""):
+        other = self.root / "homes" / "b"
+        self.roles(f'[[claude.accounts]]\nname = "b"\nhome = {json.dumps(str(other))}\n'
+                   f'[roles.{role}]\nproviders = {json.dumps(providers)}\n'
+                   f'[codex]\nprimary = {json.dumps(str(self.root / "codex-primary"))}\ninclude_primary = true\n{extra}')
+        other.mkdir(parents=True, exist_ok=True)
+        (other / "logged_in").touch()
+        fake = os.path.join(os.path.dirname(__file__), "fake_codex.py")
+        self.enterContext(patch.dict(os.environ, {"AGT_CODEX_COMMAND": json.dumps([sys.executable, fake])}))
+        # The fake Codex stream has no `login status` command; these cases exercise health, not auth.
+        original = role_run.logged_in
+        self.enterContext(patch.object(role_run, "logged_in", side_effect=lambda runtime, account:
+                                      True if runtime.runtime == "codex" else original(runtime, account)))
+
+    def trip_provider(self, runtime="codex", account="primary", *, recovering=False, model=None,
+                      kind="transport", age=None):
+        runtime = load_config().runtime(runtime)
+        account = runtime.find(account)
+        when = time.time() - (age if age is not None else (61 if recovering else 1))
+        for _ in range(runtime.circuit_failure_threshold):
+            health.record_outcome(runtime, account, model, outcome="error", health_failure=kind,
+                                  generation=health.query_state(runtime, account, model).generation, now=when)
+        return when + runtime.circuit_open_seconds
+
+    def start_circuit_role(self, role="builder"):
+        code, text, err = self.agt("start", "--role", role, "--cwd", str(self.project), "do the task")
+        self.assertEqual(code, 0, text + err)
+        result = json.loads(text)
+        # Tests that hold a claim without spawning a runner still clean up their queued records.
+        for item in result["jobs"]:
+            self.addCleanup(jobs.update_status, item["job_id"], state="done", outcome="cancelled")
+        return result
+
+    def test_CB_S2_unhealthy_edit_provider_skips_to_the_other_runtime(self):
+        """CB-S2: a health skip is not quota and never suggests rebalance."""
+        self.circuit_roles()
+        until = self.trip_provider()
+        code, text, err = self.run_role("builder", task="fix it")
+        self.assertEqual(code, 0, text + err)
+        group = jobs.read_group(self.frame(text)[0])
+        reason = f"primary unhealthy until {time.strftime('%H:%M', time.localtime(until))}"
+        self.assertEqual(group["skipped"], [{"provider": "codex", "position": 1, "reason": reason, "quota": False}])
+        self.assertEqual(group["jobs"][0]["provider"], "claude:b")
+        self.assertEqual(jobs.read_status(group["jobs"][0]["job_id"])["account"], "b")
+        self.assertIn(f"skipped provider 1 codex — {reason}", text)
+        plain = "\n".join(role_run._plain_lines(group))
+        self.assertIn(f"skipped codex — {reason}", plain)
+        self.assertNotIn("rebalance", text + err + plain)
+        self.assertNotIn("usage limit", text + err + plain)
+
+    def test_CB_S2_pinned_unhealthy_provider_is_skipped(self):
+        """CB-S2: an account-naming provider skips its unhealthy pin."""
+        self.circuit_roles(providers=("claude:b", "codex"))
+        until = self.trip_provider("claude", "b", kind="launch")
+        with patch.object(jobs, "spawn_detached", return_value=99999999):
+            result = self.start_circuit_role()
+        self.assertEqual(result["jobs"][0]["provider"], "codex")
+        clock = time.strftime("%H:%M", time.localtime(until))
+        self.assertEqual(result["skipped"], [{"provider": "claude:b", "position": 1,
+                                             "reason": f"b unhealthy until {clock}", "quota": False}])
+
+    def test_CB_S3_read_role_runs_its_other_providers(self):
+        """CB-S3: unhealthy Kiro does not stop the other read providers or add a hint."""
+        self.circuit_roles("reviewer", ("codex", "claude:b", "kiro"),
+                           f'[kiro]\nprimary = {json.dumps(str(self.root / "kiro-primary"))}')
+        self.enterContext(patch.dict(os.environ, {"AGT_KIRO_COMMAND": json.dumps([
+            sys.executable, os.path.join(os.path.dirname(__file__), "fake_kiro.py")])}))
+        self.trip_provider("kiro")
+        code, text, err = self.run_role("reviewer")
+        self.assertEqual(code, 0, text + err)
+        group = jobs.read_group(self.frame(text)[0])
+        self.assertEqual([item["provider"] for item in group["jobs"]], ["codex", "claude:b"])
+        self.assertEqual([(item["provider"], item["quota"]) for item in group["skipped"]], [("kiro", False)])
+        self.assertIn("skipped kiro — primary unhealthy until ", text)
+        self.assertNotIn("rebalance", text + err)
+
+    def test_CB_S10_rest_elapsed_returns_to_first_provider_without_reset(self):
+        """CB-S10: real past timestamps let the next role job recover Codex, then stay there."""
+        self.circuit_roles()
+        self.trip_provider(recovering=True)
+        runtime = load_config().runtime("codex")
+        self.assertEqual(health.query_state(runtime, runtime.find("primary")).state, "recovering")
+        for _ in range(2):
+            code, text, err = self.run_role("builder", task="fix it")
+            self.assertEqual(code, 0, text + err)
+            group = jobs.read_group(self.frame(text)[0])
+            self.assertEqual(group["skipped"], [])
+            self.assertEqual(group["jobs"][0]["provider"], "codex")
+            status = jobs.read_status(group["jobs"][0]["job_id"])
+            self.assertEqual((status["outcome"], status["account"]), ("success", "primary"))
+            self.assertEqual(health.query_state(runtime, runtime.find("primary")).state, "healthy")
+
+    def test_CB_S12_back_to_back_roles_claim_only_one_trial(self):
+        """CB-S12: a second launch sees the claim before the first runner starts."""
+        self.circuit_roles()
+        self.trip_provider(recovering=True)
+        with patch.object(jobs, "spawn_detached", return_value=99999999):
+            first, second = self.start_circuit_role(), self.start_circuit_role()
+        self.assertEqual(first["jobs"][0]["provider"], "codex")
+        self.assertEqual(first["skipped"], [])
+        self.assertEqual(second["jobs"][0]["provider"], "claude:b")
+        self.assertEqual(second["skipped"], [{"provider": "codex", "position": 1,
+                                             "reason": "primary recovering", "quota": False}])
+        runtime = load_config().runtime("codex")
+        claim = health.read_record(runtime, runtime.find("primary"))["circuits"]["account"]["claim"]
+        self.assertEqual(claim["job"], first["jobs"][0]["job_id"])
+        self.assertEqual(len(self.job_ids()), 2)
+
+    def role_trial_claim_race(self, provider):
+        self.circuit_roles(providers=(provider, "claude:b"))
+        self.trip_provider(recovering=True)
+        original = health.claim_trial
+
+        def take_trial(runtime, account, model, job_id, **kwargs):
+            if runtime.runtime == "codex":
+                self.assertIsNotNone(original(runtime, account, model, "competitor", **kwargs))
+            return original(runtime, account, model, job_id, **kwargs)
+
+        with patch.object(health, "claim_trial", side_effect=take_trial), \
+                patch.object(jobs, "spawn_detached", return_value=99999999):
+            result = self.start_circuit_role()
+        self.assertEqual(result["jobs"][0]["provider"], "claude:b")
+        self.assertEqual(result["skipped"], [{"provider": provider, "position": 1,
+                                             "reason": "primary recovering", "quota": False}])
+        self.assertEqual(len(self.job_ids()), 1)  # no silently queued job for the lost claim
+
+    def test_CB_S12_lost_claim_race_tries_the_next_runtime(self):
+        """CB-S12: losing the claim during creation is a soft skip."""
+        self.role_trial_claim_race("codex")
+
+    def test_CB_S12_pinned_provider_lost_claim_race_tries_the_next_runtime(self):
+        """CB-S12: naming an account cannot turn a lost claim into an immediate queue."""
+        self.role_trial_claim_race("codex:primary")
+
+    def test_CB_S12_trial_taken_after_precheck_tries_the_next_runtime(self):
+        """CB-S12: creation also refuses a busy trial that precheck and admission missed."""
+        self.circuit_roles()
+        self.trip_provider(recovering=True)
+        original = jobs.create_job
+
+        def take_trial(**kwargs):
+            if kwargs["runtime"] == "codex":
+                runtime = load_config().runtime("codex")
+                self.assertIsNotNone(health.claim_trial(runtime, runtime.find("primary"), None, "competitor"))
+            return original(**kwargs)
+
+        with patch.object(jobs, "create_job", side_effect=take_trial), \
+                patch.object(jobs, "spawn_detached", return_value=99999999):
+            result = self.start_circuit_role()
+        self.assertEqual(result["jobs"][0]["provider"], "claude:b")
+        self.assertEqual(result["skipped"][0]["reason"], "primary recovering")
+        self.assertFalse(result["skipped"][0]["quota"])
+        self.assertEqual(len(self.job_ids()), 1)
+
+    def test_CB_S12_trial_taken_before_role_admission_is_soft_skipped(self):
+        """CB-S12: a busy trial found at role admission keeps the recovering skip text."""
+        from agents_router import limits
+
+        self.circuit_roles()
+        self.trip_provider(recovering=True)
+        original = limits.admit
+
+        def take_trial(config, runtime_name, **kwargs):
+            if runtime_name == "codex":
+                runtime = config.runtime("codex")
+                self.assertIsNotNone(health.claim_trial(runtime, runtime.find("primary"), None, "competitor"))
+            return original(config, runtime_name, **kwargs)
+
+        with patch.object(limits, "admit", side_effect=take_trial), \
+                patch.object(jobs, "spawn_detached", return_value=99999999):
+            result = self.start_circuit_role()
+        self.assertEqual(result["jobs"][0]["provider"], "claude:b")
+        self.assertEqual(result["skipped"], [{"provider": "codex", "position": 1,
+                                             "reason": "primary recovering", "quota": False}])
+
+    def test_CB_S12_busy_trial_is_only_queued_as_last_fallback(self):
+        """CB-S12: a role with no other usable provider can still wait behind its trial."""
+        self.circuit_roles(providers=("codex:primary", "claude:b"))
+        self.trip_provider(recovering=True)
+        self.trip_provider("claude", "b")
+        runtime = load_config().runtime("codex")
+        health.claim_trial(runtime, runtime.find("primary"), None, "competitor")
+        with patch.object(jobs, "spawn_detached", return_value=99999999):
+            result = self.start_circuit_role()
+        self.assertEqual(result["jobs"][0]["provider"], "codex:primary")
+        self.assertEqual([item["provider"] for item in result["skipped"]], ["claude:b"])
+        status = jobs.read_status(result["jobs"][0]["job_id"])
+        self.assertEqual(status["state"], "queued")
+        self.assertEqual(status["message"], "queued · primary recovering (trial job running)")
+
+    def test_CB_S3_read_role_soft_skips_a_claimed_trial(self):
+        """CB-S3, CB-S12: a read role runs its free provider before queueing a busy trial."""
+        self.circuit_roles("reviewer")
+        self.trip_provider(recovering=True)
+        runtime = load_config().runtime("codex")
+        health.claim_trial(runtime, runtime.find("primary"), None, "competitor")
+        with patch.object(jobs, "spawn_detached", return_value=99999999):
+            result = self.start_circuit_role("reviewer")
+        self.assertEqual([item["provider"] for item in result["jobs"]], ["claude:b"])
+        self.assertEqual(result["skipped"][0]["reason"], "primary recovering")
+        self.assertFalse(result["skipped"][0]["quota"])
+
+    def test_CB_S2_all_unhealthy_fails_without_usage_limit_text_or_hint(self):
+        """CB-S2: health-only failures never become quota failures."""
+        self.circuit_roles()
+        self.trip_provider()
+        self.trip_provider("claude", "b")
+        for follow in ((), ("--follow",)):
+            code, text, err = self.agt("run", *follow, "--role", "builder", "--cwd", str(self.project), "fix it")
+            self.assertEqual(code, 1, text + err)
+            self.assertIn("no builder provider can run: codex — primary unhealthy until ", text + err)
+            self.assertNotIn("usage limit", text + err)
+            self.assertNotIn("rebalance", text + err)
+        self.assertEqual(self.job_ids(), [])
+
+    def test_health_skip_names_the_model_and_soonest_clearing_blocker(self):
+        spare = self.root / "codex-spare"
+        self.circuit_roles(providers=("codex:/gpt-6.1-sol", "claude:b"),
+                           extra=f'[[codex.accounts]]\nname = "spare"\nhome = {json.dumps(str(spare))}')
+        self.trip_provider(model="gpt-6.1-sol", kind="capacity")
+        until = self.trip_provider(account="spare", model="gpt-6.1-sol", kind="capacity", age=10)
+        with patch.object(jobs, "spawn_detached", return_value=99999999):
+            result = self.start_circuit_role()
+        clock = time.strftime("%H:%M", time.localtime(until))
+        self.assertEqual(result["skipped"][0]["reason"], f"spare/gpt-6.1-sol unhealthy until {clock} (+1 more)")
+        self.assertFalse(result["skipped"][0]["quota"])
 
     # Role rules from the calling CLI's own agt-<role> file (S2, S6, S13) ---------------
 

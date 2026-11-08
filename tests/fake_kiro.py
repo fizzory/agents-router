@@ -11,7 +11,8 @@
 
   FAKE_KIRO_SCENARIO   success (default) | limit | auth | mcp | silent | json-answer | help-fails | help-hangs; with
                        stream-json also truncated (finalTextTruncated) | run-error (runFinished status
-                       "error", exit 0) | no-finish (no runFinished, exit 1)
+                       "error", exit 0) | no-finish (no runFinished, exit 1) |
+                       no_result (no runFinished, exit 0) | unknown_model
   FAKE_KIRO_DELAY      seconds a run waits before its answer (stream-json: before its runFinished): a slow job
   FAKE_KIRO_VERSION    the version `--version` prints (default 2.30.0)
   FAKE_KIRO_FLAGS      comma-separated flags out of --v2,--v3,--output-format that `chat --help` lists and
@@ -111,6 +112,9 @@ def main():
         return 3
     if scenario == "silent":
         return 0
+    if scenario == "unknown_model":
+        print("error: unknown model: fake-model", file=sys.stderr)
+        return 1
     task = prompt.strip().splitlines()[-1] if prompt.strip() else ""
     if "--output-format" in argv and argv[argv.index("--output-format") + 1:][:1] == ["stream-json"]:
         return stream(argv, version, scenario, task)
@@ -154,6 +158,8 @@ def stream(argv, version, scenario, task):
     if engine == "v2":
         emit("metadata", {"sessionId": session, "meteringUsage": [{"value": 0.08, "unit": "credit"}]})
     time.sleep(float(os.environ.get("FAKE_KIRO_DELAY") or 0))
+    if scenario == "no_result":
+        return 0
     if scenario == "no-finish":
         print("error: the connection to Kiro was reset", file=sys.stderr)
         return 1

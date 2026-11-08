@@ -54,6 +54,7 @@ from agents_router.config import Account, RuntimeConfig
 from agents_router.fsutil import no_window_kwargs
 from agents_router.runtimes.base import (
     AUTH, ERROR, SUCCESS, USAGE_LIMIT, AttemptResult, JobSpec, Launch, clean_environment,
+    stream_health_failure,
 )
 from agents_router.hosts import parent_note
 from agents_router.share.toolmap import KIRO_V2
@@ -65,6 +66,11 @@ WORKER_NOTE = (
 )
 LIMIT_RE = re.compile(r"(?i)usage limit|limit (?:reached|exceeded)|quota|throttl|too many requests|\b429\b|rate.?limit")
 AUTH_RE = re.compile(r"(?i)not logged in|kiro-cli login|log ?in again|unauthori[sz]ed|authenticat|KIRO_API_KEY|expired token")
+TRANSPORT_RE = re.compile(
+    r"\bconnection(?: to Kiro)? (?:was )?(?:failed|reset|closed|refused)|"
+    r"\b(?:stream|socket) (?:disconnected|closed|reset|broken)|\btransport error\b",
+    re.IGNORECASE,
+)
 EXIT_MESSAGES = {3: "a required MCP server didn't start", 4: "Kiro couldn't find the agent it was asked to use"}
 READ_TOOLS = ("Read", "Glob", "Grep", "WebSearch", "WebFetch")
 WRITE_TOOLS = ("Write",)
@@ -314,6 +320,11 @@ class KiroParser:
         if AUTH_RE.search(details):
             return AttemptResult(AUTH, message=message or "Kiro isn't logged in (`kiro-cli login`, or set KIRO_API_KEY)",
                                  **common)
+        # Answer chunks aren't diagnostics; a model can discuss connection errors.
+        terminal = "\n".join([*reasons, stderr])
+        common["health_failure"] = None if exit_code in EXIT_MESSAGES else stream_health_failure(
+            terminal, no_result=self.finished is None and (self.stream or not text), transport=TRANSPORT_RE,
+        )
         if not message and self.stream and not self.finished:
             message = "the run ended before Kiro reported a result"
         if exit_code == 0:

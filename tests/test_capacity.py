@@ -126,6 +126,8 @@ class CapacityRunnerTests(TempHome):
 
     def test_capacity_exhaustion_is_error_without_cooldown_or_failover(self):
         runner = self.runner()
+        # The breaker moves to the next account after exhausted retries; covered in tests/test_health_routing.py.
+        runner.runtime_config.circuit_breaker = False
         with patch.object(runner, "_wait_for_capacity", return_value=None) as wait:
             self.assertEqual(runner.run(), 1)
         self.assertEqual(wait.call_count, 3)
@@ -182,6 +184,8 @@ class CapacityRunnerTests(TempHome):
 
     def test_disable_retries(self):
         runner = self.runner()
+        # The breaker moves to the next account after exhausted retries; covered in tests/test_health_routing.py.
+        runner.runtime_config.circuit_breaker = False
         runner.runtime_config.capacity_retries = 0
         self.assertEqual(runner.run(), 1)
         self.assertEqual(len(runner.attempts), 1)

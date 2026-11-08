@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import errno
 import os
 from pathlib import Path
+import re
+import stat
 import subprocess
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, NoReturn, Protocol
 
 from agents_router.config import Account, RuntimeConfig
+from agents_router.fsutil import make_private_dir
 
 
 @dataclass(frozen=True)
@@ -31,6 +35,94 @@ CANCELLED = "cancelled"
 MAX_TURNS = "max_turns"
 NO_ACCOUNT = "no_account"
 LOST = "lost"
+
+# These diagnostics describe a rejected request or the machine, not a broken account.
+# This check affects health metadata only; adapters keep their existing outcomes.
+HEALTH_REJECTION_RE = re.compile(
+    r"\b(?:unknown|invalid|unsupported) (?:model|argument|request|configuration|config)\b|"
+    r"\bmodel\b[^\n]*(?:not found|does not exist|not available|not supported|do not have access)|"
+    r"\b(?:configuration|config|TOML) (?:error|invalid|parse)|"
+    r"(?:failed|unable) to (?:load|parse|read) (?:configuration|config)|"
+    r"permission denied|access denied|not permitted|not allowed|auto-denied|"
+    r"requires? (?:approval|permission)|cannot prompt for|"
+    r"invalid api key|authentication|unauthenticated|unauthori[sz]ed|not logged in|"
+    r"no space left|too many open files|cannot allocate memory|out of memory|"
+    r"resource temporarily unavailable|exec format error|bad cpu type|"
+    r"\b(?:unknown|unrecognized) (?:option|flag)s?\b|"
+    r"\b(?:unexpected|unrecognized) arguments?\b|\binvalid value for\b|\bno such option\b|"
+    r"no session .+ found|no conversation found|(?:required )?MCP server .+ failed to start",
+    re.IGNORECASE,
+)
+
+
+def stream_health_failure(terminal: str, *, no_result: bool, transport: re.Pattern[str]) -> str | None:
+    """Classify terminal diagnostics only, after the adapter's outcome checks."""
+
+    if HEALTH_REJECTION_RE.search(terminal):
+        return None
+    if transport.search(terminal):
+        return "transport"
+    return "no_result" if no_result else None
+
+
+class HealthLaunchError(OSError):
+    """An explicitly identified account-local failure to start a worker.
+
+    Never wrap generic launch exceptions in this type: missing/incompatible binaries,
+    request/configuration/permission/auth rejections and machine-wide errors are neutral.
+    """
+
+
+def prepare_account_home(home: Path, *, create: bool = True) -> None:
+    """Validate one account's home, creating a managed home when needed.
+
+    Only a non-directory root or a permission failure proven to belong to that
+    root is a health failure. Shared-parent creation and uncertain attribution
+    keep their ordinary exceptions; callers may report them as setup warnings.
+    """
+
+    home = Path(home)
+
+    def permission_failure(exc: OSError) -> NoReturn:
+        if exc.errno in (errno.EACCES, errno.EPERM):
+            try:
+                # A denied shared ancestor can make a root operation fail too.
+                # A link's target may have different ancestors: stay neutral.
+                local = (not home.is_symlink() and home.parent.is_dir()
+                         and os.access(home.parent, os.R_OK | os.W_OK | os.X_OK))
+            except OSError:
+                local = False
+            if local:
+                raise HealthLaunchError(exc.errno, "account home is not accessible", str(home)) from exc
+        raise exc
+
+    try:
+        mode = home.stat().st_mode
+    except FileNotFoundError:
+        if not create:
+            return
+        # Failures here concern shared ancestors, never this account alone.
+        make_private_dir(home.parent)
+        try:
+            try:
+                home.mkdir(mode=0o700)
+            except FileExistsError:
+                pass  # another preparer may have created the root; validate it below
+            mode = home.stat().st_mode
+        except OSError as exc:
+            permission_failure(exc)
+    except OSError as exc:
+        permission_failure(exc)
+    if not stat.S_ISDIR(mode):
+        raise HealthLaunchError(errno.ENOTDIR, "account home is not a directory", str(home))
+    try:
+        with os.scandir(home):
+            pass
+        if not os.access(home, os.R_OK | os.W_OK | os.X_OK):
+            raise PermissionError(errno.EACCES, "account home is not accessible", str(home))
+    except OSError as exc:
+        permission_failure(exc)
+
 
 # Environment variables that identify or authenticate the *host* session.
 # A worker must never inherit them, or it may run as the host's account.
@@ -112,6 +204,7 @@ class JobSpec:
     created: float = 0.0
     override: str | None = None  # user's words authorizing this start to exceed agt's caps
     rules: str | None = None  # the Role rules block the role call put before the task; a fresh-session follow-up repeats it
+    _doctor_live: bool = False  # explicit live checks skip circuit rest, while still owning every required trial
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -144,6 +237,7 @@ class AttemptResult:
     error_text: str = ""  # the error output the outcome was judged from (Retry-After hints and the like)
     before_start: bool = False  # ended by a runtime's preflight check; the worker never ran
     at_capacity: bool = False  # terminal provider overload; stays ERROR, never a quota cooldown
+    health_failure: str | None = None  # launch, transport, no_result, parser or exhausted capacity
 
 
 class Parser(Protocol):

@@ -84,6 +84,42 @@ class PrecedenceTests(LevelsBase):
         self.assertIsNone(load_config(cwd=self.root).runtime("claude").default_model)
 
 
+class CircuitBreakerTests(LevelsBase):
+    def test_settings_round_trip_for_every_runtime(self):
+        values = {"circuit_breaker": False, "circuit_failure_threshold": 3,
+                  "circuit_failure_window_seconds": 120, "circuit_open_seconds": 30,
+                  "circuit_max_open_seconds": 180}
+        fields = "\n".join(f"{key} = {str(value).lower()}" for key, value in values.items())
+        self.user("\n".join(f"[{runtime}]\n{fields}" for runtime in config.RUNTIMES))
+        loaded = load_config(cwd=self.project)
+        config.save_config(loaded)
+        for runtime in config.RUNTIMES:
+            for key, expected in values.items():
+                with self.subTest(runtime=runtime, key=key):
+                    self.assertEqual(getattr(loaded.runtime(runtime), key), expected)
+                    self.assertEqual(getattr(load_config(cwd=self.project).runtime(runtime), key), expected)
+
+    def test_integer_settings_refuse_non_positive_values_and_other_types(self):
+        for runtime in config.RUNTIMES:
+            for key in ("circuit_failure_threshold", "circuit_failure_window_seconds",
+                        "circuit_open_seconds", "circuit_max_open_seconds"):
+                for value in ("0", "-1", "true", "1.5", '"2"'):
+                    with self.subTest(runtime=runtime, key=key, value=value):
+                        self.user(f"[{runtime}]\n{key} = {value}\n")
+                        with self.assertRaisesRegex(levels.SettingsError,
+                                                    rf"settings.toml:2: .*{key} must be an integer at least 1"):
+                            load_config(cwd=self.project)
+
+    def test_breaker_refuses_non_booleans(self):
+        for runtime in config.RUNTIMES:
+            for value in ("0", "1", '"false"', "[]"):
+                with self.subTest(runtime=runtime, value=value):
+                    self.user(f"[{runtime}]\ncircuit_breaker = {value}\n")
+                    with self.assertRaisesRegex(levels.SettingsError,
+                                                r"settings.toml:2: .*circuit_breaker must be true or false"):
+                        load_config(cwd=self.project)
+
+
 class SubagentsTests(LevelsBase):
     def test_prefer_roles_defaults_to_true_and_user_false_wins(self):
         self.assertTrue(config.defaults().subagents.prefer_roles)
@@ -178,6 +214,30 @@ class WorkspaceTests(LevelsBase):
 
 
 class UserOnlyTests(LevelsBase):
+    def test_circuit_settings_in_workspace_and_local_files_are_noted_and_ignored(self):
+        user_values = {"circuit_breaker": False, "circuit_failure_threshold": 3,
+                       "circuit_failure_window_seconds": 120, "circuit_open_seconds": 120,
+                       "circuit_max_open_seconds": 180}
+        fields = "\n".join(f"{key} = {str(value).lower()}" for key, value in user_values.items())
+        self.user("\n".join(f"[{runtime}]\n{fields}" for runtime in config.RUNTIMES))
+        team_fields = ("circuit_breaker = true\ncircuit_failure_threshold = 2\n"
+                       "circuit_failure_window_seconds = 300\ncircuit_open_seconds = 30\n"
+                       "circuit_max_open_seconds = 900\n")
+        team_text = "\n".join(f"[{runtime}]\n{team_fields}" for runtime in config.RUNTIMES)
+        self.workspace(self.project, team_text, local=team_text)
+        loaded = load_config(cwd=self.project)
+        self.assertEqual(len(loaded.notes), 2 * len(config.RUNTIMES) * len(user_values))
+        for runtime in config.RUNTIMES:
+            for key, expected in user_values.items():
+                with self.subTest(runtime=runtime, key=key):
+                    self.assertEqual(getattr(loaded.runtime(runtime), key), expected)
+                    for name in ("settings.toml", "settings.local.toml"):
+                        file = self.project / ".agt" / name
+                        self.assertTrue(any(note.startswith(f"{file}:") and
+                                            f"[{runtime}] {key} is set in your user settings only "
+                                            f"({self.home / 'settings.toml'}); ignored here" in note
+                                            for note in loaded.notes))
+
     def test_machine_wide_keys_in_a_workspace_file_are_noted_and_ignored(self):
         self.user(f'[claude]\nprimary = {json.dumps(str(self.primary))}\n')
         self.workspace(self.project, '[claude]\nprimary = "/elsewhere"\nbinary = "/bin/false"\nmax_jobs = 2\n\n'

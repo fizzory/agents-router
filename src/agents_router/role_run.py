@@ -5,7 +5,7 @@ one group id (`g-<hex>`); each job goes through the usual admission on its own (
 cooldowns, usage ceiling, the nested-delegation depth). An edit or full role starts one
 job, with the role's access: on the first provider in its order that `limits.admit`
 accepts, preferring one below the runtime's usage ceiling. A provider whose account is
-unknown, logged out, turned off or cooling down is skipped with the reason; with none
+unknown, logged out, turned off, cooling down or unhealthy is skipped with the reason; with none
 left the call fails at once (exit 1).
 An edit or full job that fails mid-run is not retried on the next provider: the main
 session judges partial edits.
@@ -42,7 +42,7 @@ class Check:
     reason: str | None = None  # why it can't (or shouldn't) take the job
     quota: bool = False  # the reason is quota: worth the rebalance hint
     until: float | None = None  # cooling down until then
-    soft: bool = False  # above the usage ceiling: only when no provider below it is admitted
+    soft: bool = False  # above the usage ceiling or trial busy: only when no better provider is admitted
 
 
 @dataclass
@@ -102,6 +102,15 @@ def _clock(when: float) -> str:
     return time.strftime("%H:%M", time.localtime(when))
 
 
+def _health_reason(blockers: list[accounts.Blocker]) -> str:
+    """The soonest-clearing health blocker, with the same account/model label as Room."""
+
+    first = min(blockers, key=lambda blocker: blocker.until if blocker.until is not None else float("-inf"))
+    label = first.account + ("/" + first.scope[6:] if first.scope.startswith("model:") else "")
+    reason = f"{label} recovering" if first.state == "recovering" else f"{label} unhealthy until {_clock(first.until)}"
+    return reason + (f" (+{len(blockers) - 1} more)" if len(blockers) > 1 else "")
+
+
 def precheck(config: Config, provider: Provider, now: float) -> Check:
     """The provider's account, and why it can't take a job now, if agt can tell before admission."""
 
@@ -109,16 +118,22 @@ def precheck(config: Config, provider: Provider, now: float) -> Check:
     name = provider.account  # a short provider (`codex`) leaves the account to agt's usual choice
     model = provider.model or runtime.default_model
     try:
-        ranked, earliest = accounts.ranked_accounts(runtime, pinned=name, model=model,
-                                                    pool=quota.pool_for(runtime, model), now=now)
+        ranking = accounts.ranked_accounts(runtime, pinned=name, model=model,
+                                           pool=quota.pool_for(runtime, model), now=now)
     except ValueError as exc:
         if name and runtime.find(name) is None:
             return Check(name, f"no {provider.runtime} account named {name} (removed, renamed or logged out)")
         return Check(name, str(exc))
     who = name or f"every {provider.runtime} account"
+    ranked, earliest = ranking.accounts, ranking.cooldown_end
     if not ranked:
+        health = [blocker for blocker in ranking.blockers if blocker.kind == "health"]
+        if ranking.trial_busy:
+            return Check(name, _health_reason(health), soft=True)
         if earliest:
             return Check(name, f"{who} at its limit until {_clock(earliest)}", quota=True, until=earliest)
+        if health:
+            return Check(name, _health_reason(health))
         if not name:
             return Check(name, f"no {provider.runtime} account can take jobs from here")
         account = runtime.find(name)
@@ -259,12 +274,13 @@ def launch(args: argparse.Namespace) -> Launch:
     started: list[tuple[int, Provider, dict[str, Any]]] = []
     skips: list[Skip] = []
 
-    def create(provider: Provider, account: str | None) -> dict[str, Any]:
+    def create(provider: Provider, account: str | None, *, queue_trial: bool = False) -> dict[str, Any]:
         return jobs.create_job(
             runtime=provider.runtime, prompt=prompt, cwd=cwd, account=account, model=provider.model,
             effort=provider.effort or args.effort, override=args.override, access=access, max_turns=args.max_turns,
             timeout_seconds=args.timeout, add_dirs=[str(Path(item).resolve()) for item in args.add_dir], group=group,
             rules=rules,
+            _role_try=not queue_trial,
         )
 
     def check_for(provider: Provider) -> Check:
@@ -274,9 +290,9 @@ def launch(args: argparse.Namespace) -> Launch:
     def skip(position: int, provider: Provider, check: Check, reason: str | None = None) -> None:
         skips.append(Skip(provider, position, reason or check.reason or "unusable", check.quota, check.until))
 
+    fallback: tuple[int, Provider, Check] | None = None
     try:
         if role.access in ONE_AT_A_TIME:
-            fallback: tuple[int, Provider, Check] | None = None
             for position, provider in enumerate(role.providers, 1):
                 check = check_for(provider)
                 if check.reason and not check.soft:
@@ -288,6 +304,9 @@ def launch(args: argparse.Namespace) -> Launch:
                 except limits.LimitError as exc:
                     skip(position, provider, check, check.reason if check.soft else _refusal(exc))
                     continue
+                if admission.queue_reason:
+                    check = Check(check.account, admission.queue_reason.removeprefix("queued · ")
+                                  .removesuffix(" (trial job running)"), soft=True)
                 if check.soft or admission.account is None:
                     # Admitted, but above the ceiling or only to wait in the queue: used when nothing better is.
                     fallback = fallback or (position, provider, check)
@@ -296,26 +315,38 @@ def launch(args: argparse.Namespace) -> Launch:
                 try:
                     started.append((position, provider, create(provider, check.account)))
                     break
+                except limits.TrialBusy as exc:
+                    check = Check(check.account, str(exc), soft=True)
+                    fallback = fallback or (position, provider, check)
+                    skip(position, provider, check)
                 except limits.LimitError as exc:  # taken since admit looked: try the next one
                     skip(position, provider, check, _refusal(exc))
-            if not started and fallback is not None:
-                position, provider, check = fallback
-                try:
-                    started.append((position, provider, create(provider, check.account)))
-                    skips = [item for item in skips if item.position != position]
-                except limits.LimitError as exc:
-                    skips = [item if item.position != position else Skip(provider, position, _refusal(exc), check.quota)
-                             for item in skips]
         else:
             for position, provider in enumerate(role.providers, 1):
                 check = check_for(provider)
                 if check.reason and not check.soft:
                     skip(position, provider, check)
                     continue
+                if check.soft and not check.quota:
+                    fallback = fallback or (position, provider, check)
+                    skip(position, provider, check)
+                    continue
                 try:
                     started.append((position, provider, create(provider, check.account)))
+                except limits.TrialBusy as exc:
+                    check = Check(check.account, str(exc), soft=True)
+                    fallback = fallback or (position, provider, check)
+                    skip(position, provider, check)
                 except limits.LimitError as exc:
                     skip(position, provider, check, check.reason if check.soft else _refusal(exc))
+        if not started and fallback is not None:
+            position, provider, check = fallback
+            try:
+                started.append((position, provider, create(provider, check.account, queue_trial=True)))
+                skips = [item for item in skips if item.position != position]
+            except limits.LimitError as exc:
+                skips = [item if item.position != position else Skip(provider, position, _refusal(exc), check.quota)
+                         for item in skips]
     finally:
         record = {
             "group": group,

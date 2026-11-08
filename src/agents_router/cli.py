@@ -11,7 +11,7 @@ import sys
 import time
 from typing import Any
 
-from agents_router import __version__, accounts, config_cli, roles_cli, helptext, jobs, levels, plans, rules, setup, sync, synclog, tools, ui
+from agents_router import __version__, accounts, config_cli, roles_cli, health, health_view, helptext, jobs, levels, plans, rules, setup, sync, synclog, tools, ui
 from agents_router.config import NAME_RE, Account, homes_dir, load_config, save_accounts, user_settings_path
 from agents_router.entry import HOOK_ACTIONS
 from agents_router.hosts import HOST_LABELS
@@ -111,8 +111,10 @@ def cmd_accounts(args: argparse.Namespace) -> int:
         if not args.name or runtime_config.find(args.name) is None:
             print(f"No {args.runtime} account named '{args.name or ''}'. See: agt accounts list")
             return 1
-        cleared = accounts.clear_cooldown(args.runtime, args.name)
-        print(f"{args.runtime} account '{args.name}': " + ("cooldown cleared" if cleared else "had no cooldown"))
+        cooldown_cleared = accounts.clear_cooldown(args.runtime, args.name)
+        health_cleared = health.reset(runtime_config, runtime_config.find(args.name))
+        cleared = [label for label, changed in (("cooldown", cooldown_cleared), ("health", health_cleared)) if changed]
+        print(f"{args.runtime} account '{args.name}': " + (" and ".join(cleared) + " cleared" if cleared else "nothing to clear"))
         return 0
 
     if not args.name or not NAME_RE.match(args.name) or args.name == "primary":
@@ -374,6 +376,8 @@ def _account_rows(entry: dict[str, Any], *, method: bool = False) -> list[ui.Lin
         detail.append(f"{running} running" if running else "no jobs running")
     if entry.get("cooldown_until"):
         detail.append(ui.warn(f"cooling down until {entry['cooldown_until']}"))
+    if text := health_view.account_detail(entry):
+        detail.append(ui.warn(text))
     if entry.get("usage"):
         detail.append(ui.muted("used " + ", ".join(f"{share}% of {window}" for window, share in entry["usage"].items())))
     detail.append(_limits_text(entry).replace("no cap on jobs", "no cap") if method else _limits_text(entry))
@@ -538,6 +542,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             access="read",
             max_turns=1,
             timeout_seconds=180,
+            _doctor_live=True,
         )
         started.append((account.name, status["job_id"]))
     loaded: dict[str, dict[str, Any]] = {}
@@ -801,14 +806,31 @@ def cmd_launch(args: argparse.Namespace, extra: list[str]) -> int:
             return 1
     else:
         try:
-            ranked, _ = accounts.ranked_accounts(runtime_config)
+            ranking = accounts.ranked_accounts(runtime_config)
         except ValueError as exc:
             print(exc)
             return 1
-        if not ranked:
-            print(f"Every {args.runtime} account is cooling down after a usage limit.")
+        if not ranking.accounts:
+            unhealthy = [blocker for blocker in ranking.blockers if blocker.kind == "health" and blocker.state == "unhealthy"]
+            recovering = any(blocker.kind == "health" and blocker.state == "recovering" for blocker in ranking.blockers)
+            limited = any(blocker.kind == "quota" for blocker in ranking.blockers)
+            if unhealthy:
+                until = time.strftime("%H:%M", time.localtime(min(blocker.until for blocker in unhealthy)))
+                if limited:
+                    print(f"Every {args.runtime} account is unavailable: some unhealthy (available again around {until}), some at a usage limit.")
+                elif recovering:
+                    print(f"Every {args.runtime} account is unavailable: some unhealthy (available again around {until}), some recovering with a trial running.")
+                else:
+                    print(f"Every {args.runtime} account is unhealthy; available again around {until}.")
+            elif recovering:
+                if limited:
+                    print(f"Every {args.runtime} account is unavailable: some recovering with a trial running, some at a usage limit.")
+                else:
+                    print(f"Every {args.runtime} account is recovering and its trial job is running; try again when one finishes.")
+            else:
+                print(f"Every {args.runtime} account is cooling down after a usage limit.")
             return 1
-        account = ranked[0]
+        account = ranking.accounts[0]
     setup = runtime.prepare(runtime_config, account, _probe_spec(args.runtime))
     argv, env = runtime.interactive(runtime_config, account, setup)
     print(f"Starting {args.runtime} on account '{account.name}'", file=sys.stderr)
@@ -849,7 +871,7 @@ def build_parser() -> argparse.ArgumentParser:
     accounts_parser = sub.add_parser("accounts", help="List, add, log in, sync, reset or remove accounts.")
     accounts_parser.add_argument(
         "action", nargs="?", choices=("list", "add", "login", "sync", "remove", "enable", "disable", "reset"),
-        help="reset clears an account's usage-limit cooldown.",
+        help="reset clears an account's usage-limit cooldown and health.",
     )
     accounts_parser.add_argument("name", nargs="?")
     accounts_parser.add_argument("--runtime", choices=RUNTIMES, help="Claude unless you name one; list shows every runtime.")

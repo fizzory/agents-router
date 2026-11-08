@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 from helpers import TempHome
 
-from agents_router import accounts, jobs, limits, plans, tools, usage_view
-from agents_router.config import dump_config, load_config, save_config
+from agents_router import accounts, health, jobs, limits, plans, tools, usage_view
+from agents_router.config import Account, dump_config, load_config, save_config
 
 
 class LimitTests(TempHome):
@@ -231,6 +231,73 @@ class LimitTests(TempHome):
         entry = tools.account_report("claude")["accounts"][0]
         self.assertEqual(entry["limits"]["max_jobs"], 4)
         self.assertIn("auto-detected", entry["limits"]["max_jobs_from"])
+
+
+class HealthAdmissionTests(TempHome):
+    def trip(self, *, model=None, kind="transport", default_model=None, queue=False):
+        path = self.root / "codex"
+        text = f'[codex]\nprimary = {json.dumps(str(path))}\n'
+        if default_model:
+            text += f'default_model = {json.dumps(default_model)}\n'
+        if queue:
+            text += 'when_full = "queue"\n'
+        (self.home / "settings.toml").write_text(text, encoding="utf-8")
+        config = load_config()
+        runtime = config.runtime("codex")
+        when = time.time() - 1
+        for _ in range(runtime.circuit_failure_threshold):
+            health.record_outcome(runtime, runtime.find("primary"), model, outcome="error",
+                                  health_failure=kind, generation=0, now=when)
+        return config, time.strftime("%H:%M", time.localtime(when + runtime.circuit_open_seconds))
+
+    def test_every_account_unhealthy_refuses_with_the_health_sentence(self):
+        config, until = self.trip()
+        with self.assertRaises(limits.LimitError) as raised:
+            limits.admit(config, "codex")
+        self.assertEqual(str(raised.exception).splitlines()[0],
+                         f"every codex account is unhealthy; retrying around {until}")
+        self.assertNotIn("usage limit", str(raised.exception))
+        self.assertNotIn(limits.OVERRIDE_HINT, str(raised.exception))
+
+    def test_unhealthy_model_refusal_uses_the_job_model_or_default_consistently(self):
+        for model, default_model, expected in ((None, None, "default"),
+                                                (None, "gpt-6.1-sol", "gpt-6.1-sol"),
+                                                ("other-model", "gpt-6.1-sol", "other-model")):
+            with self.subTest(model=model, default_model=default_model):
+                config, until = self.trip(model=model, kind="capacity", default_model=default_model)
+                with self.assertRaises(limits.LimitError) as raised:
+                    limits.admit(config, "codex", model=model)
+                self.assertEqual(str(raised.exception).splitlines()[0],
+                                 f"every codex account is unhealthy for {expected}; retrying around {until}")
+                self.assertNotIn("None", str(raised.exception))
+
+    def test_pinned_unhealthy_refusal_has_error_and_recovery_advice(self):
+        config, until = self.trip()
+        for override in (None, "run more jobs"):
+            with self.subTest(override=override), self.assertRaises(limits.LimitError) as raised:
+                limits.admit(config, "codex", account="primary", override=override)
+            self.assertEqual(str(raised.exception).splitlines()[0],
+                             f"primary is unhealthy until {until} · last error: connection failed. "
+                             "Omit account to let agt pick another, or wait for it to recover.")
+            self.assertNotIn(limits.OVERRIDE_HINT, str(raised.exception))
+
+    def test_queue_setting_does_not_bypass_pinned_unhealthy_refusal(self):
+        config, until = self.trip(queue=True)
+        with self.assertRaises(limits.LimitError) as raised:
+            limits.admit(config, "codex", account="primary")
+        self.assertTrue(str(raised.exception).startswith(f"primary is unhealthy until {until}"))
+        # The unpinned queue contract is unchanged: its runner reports no_account.
+        self.assertIsNone(limits.admit(config, "codex").account)
+
+    def test_mixed_health_and_quota_keeps_the_usage_limit_sentence(self):
+        config, _ = self.trip()
+        config.runtime("codex").accounts.append(Account("quota-account", self.root / "quota-account"))
+        until = time.time() + 3600
+        accounts.set_cooldown("codex", "quota-account", until, "usage limit")
+        with self.assertRaises(limits.LimitError) as raised:
+            limits.admit(config, "codex")
+        clock = time.strftime("%H:%M", time.localtime(until))
+        self.assertTrue(str(raised.exception).startswith(f"Codex is at its usage limit until {clock}."))
 
 
 class UsageViewTests(TempHome):

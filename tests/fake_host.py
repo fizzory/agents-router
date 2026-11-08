@@ -1,4 +1,4 @@
-"""Stand-in for the plugin and login-status commands of `claude`, `codex` and `agy`, and `kiro-cli whoami`.
+"""Stand-in for plugin/login commands of `claude`, `codex` and `agy`, and Kiro's whoami/chat help.
 
 The first argument picks the CLI (claude, codex, agy or kiro). State lives in a JSON file
 in the CLI's config folder: CLAUDE_CONFIG_DIR, CODEX_HOME, or FAKE_AGY_HOME for agy.
@@ -62,6 +62,12 @@ def main():
             print("Not logged in. Run kiro-cli login to sign in.", file=sys.stderr)
             return 1
         print(json.dumps({"accountType": "BuilderId"}))
+        return 0
+    if kind == "kiro" and argv == ["chat", "--help"]:
+        print("Usage: kiro-cli chat [OPTIONS] [INPUT]\n\nOptions:")
+        print("      --v2                      Launch the V2 agent")
+        print("      --v3                      Launch the V3 agent")
+        print("      --output-format <FORMAT>  text or stream-json")
         return 0
     if kind == "claude" and argv[:1] == ["mcp"]:
         return claude_mcp(argv[1:])

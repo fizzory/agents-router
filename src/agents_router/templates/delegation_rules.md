@@ -47,8 +47,8 @@ or confirmed after you warned them and told them how much of the 5-hour window i
 Use agt's reported usage and reset time; say when the window is unknown.
 Pass the user's own words as a relay option line `override=<their words>`, the start tool's `override` field,
 or `--override "<their words>"` on `agt run` or `agt start`. Empty values are rejected.
-It bypasses only agt's job caps, quota steps, usage ceiling, pool budgets and queueing.
-Real usage-limit cooldowns, model and effort restrictions, login, depth and access still apply.
+It bypasses only agt's job caps, quota steps, usage ceiling, pool budgets and queueing;
+usage-limit cooldowns, unhealthy accounts, model and effort restrictions, login, depth and access still apply.
 Override jobs still count toward later starts; each new start needs its own override.
 
 The main session starts at most {main_limit} home vendor subagents at once.

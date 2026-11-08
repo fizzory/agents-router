@@ -2,7 +2,9 @@
 
   FAKE_CODEX_LIMITED   comma-separated CODEX_HOME folder names that are "out of quota"
   FAKE_CODEX_SCENARIO  success (default) | recovered_errors | success_exit_1 | success_pause |
-                      success_quota | success_auth | success_failed | capacity | capacity_no_session
+                      success_quota | success_auth | success_failed | capacity | capacity_no_session |
+                      no_result | empty_exit_1 | transport | unknown_model
+  FAKE_CODEX_SCENARIOS JSON object overriding the scenario by account folder name
   FAKE_CODEX_CAPACITY_FAILURES  number of capacity failures before success (default 100)
   FAKE_CLAUDE_RECORD   file to append {"argv", "env", "stdin"} records to (shared with fake_claude)
 """
@@ -28,7 +30,10 @@ def main():
             handle.write(json.dumps({"argv": argv, "env": dict(os.environ), "stdin": prompt}) + "\n")
     account = Path(os.environ.get("CODEX_HOME", "default")).name
     limited = [item for item in os.environ.get("FAKE_CODEX_LIMITED", "").split(",") if item]
-    scenario = os.environ.get("FAKE_CODEX_SCENARIO", "success")
+    scenario = json.loads(os.environ.get("FAKE_CODEX_SCENARIOS", "{}")).get(
+        account, os.environ.get("FAKE_CODEX_SCENARIO", "success"))
+    if scenario == "empty_exit_1":
+        return 1
     capacity = False
     if scenario in ("capacity", "capacity_no_session"):
         counter = Path(os.environ["CODEX_HOME"]) / "fake-capacity-attempts"
@@ -40,6 +45,14 @@ def main():
             return 1
     emit({"type": "thread.started", "thread_id": f"thread-{account}"})
     emit({"type": "turn.started"})
+    if scenario == "no_result":
+        return 0
+    if scenario in ("transport", "unknown_model"):
+        error = {"transport": "stream disconnected before completion: error sending request",
+                 "unknown_model": "unknown model: fake-model"}[scenario]
+        emit({"type": "error", "message": error})
+        emit({"type": "turn.failed", "error": {"message": error}})
+        return 1
     if capacity:
         emit({"type": "item.completed", "item": {"type": "agent_message", "text": "partial progress"}})
         emit({"type": "error", "message": "Selected model is at capacity. Please try a different model."})

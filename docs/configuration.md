@@ -20,7 +20,7 @@ Which workspace you're in:
 
 A worktree without its own `settings.local.toml` reads the main checkout's, so your own picks follow you into it. agt never creates `.agt/` on its own; only `agt config set` run in a workspace does.
 
-Some keys are machine-wide and count only in your user file: `primary`, `binary` and the account tables (`[[claude.accounts]]` and the like). A workspace file that sets one is reported with its file and line (`agt config show` and `agt doctor` list it), and the value is ignored. `[share]` is read from your user file only, for now: a repo's own share settings come with sharing a repo's items. A workspace can still pick which of your accounts its jobs use, by name, usually in its local file:
+Some keys are machine-wide and count only in your user file: `primary`, `binary`, the five [unhealthy-account settings](#unhealthy-accounts) and the account tables (`[[claude.accounts]]` and the like). A workspace file that sets one is reported with its file and line (`agt config show` and `agt doctor` list it), and the value is ignored. `[share]` is read from your user file only, for now: a repo's own share settings come with sharing a repo's items. A workspace can still pick which of your accounts its jobs use, by name, usually in its local file:
 
 ```toml
 [claude]
@@ -51,7 +51,7 @@ In effect here: 1. Applies at the next job start (running jobs keep theirs).
 Undo: agt config set codex.max_jobs 2 --workspace
 ```
 
-Where a change goes: in a workspace, its `.agt/settings.toml`; in your home folder, your user file. Account picks (`claude.accounts` and the like) go to the local file, because they're yours. `primary`, `binary` and the `share.*` keys always go to your user file. `--user`, `--workspace` and `--local` pick the file. `unset` removes the key from the file whose value is in effect here, unless you name one. A new local file is added to the repo's `.git/info/exclude`.
+Where a change goes: in a workspace, its `.agt/settings.toml`; in your home folder, your user file. Account picks (`claude.accounts` and the like) go to the local file, because they're yours. `primary`, `binary`, the five unhealthy-account settings and the `share.*` keys always go to your user file. `--user`, `--workspace` and `--local` pick the file. `unset` removes the key from the file whose value is in effect here, unless you name one. A new local file is added to the repo's `.git/info/exclude`.
 
 A few keys raise a limit or loosen safety:
 
@@ -98,9 +98,86 @@ capacity_retries = 3          # additional attempts; 0 disables capacity retries
 capacity_retry_seconds = 30   # initial wait, doubled for each retry
 ```
 
-`capacity_retries` must be a nonnegative integer; `capacity_retry_seconds` must be a positive integer. Both default to the values above for every runtime. During a wait, status shows the retry number and delay, and `agt follow` prints a `[agt] model at capacity, retrying in 30 s (1 of 3)` notice with its job ID and token. The account slot stays reserved, and cancellation and the task timeout still apply. Capacity retries and waits share the task's timeout budget. Exhausting the retries ends the job as `error` with `model at capacity after 3 retries`. Capacity failures do not set quota cooldowns or switch accounts.
+`capacity_retries` must be a nonnegative integer; `capacity_retry_seconds` must be a positive integer. Both default to the values above for every runtime. During a wait, status shows the retry number and delay, and `agt follow` prints a `[agt] model at capacity, retrying in 30 s (1 of 3)` notice with its job ID and token. The account slot stays reserved, and cancellation and the task timeout still apply. Capacity retries and waits share the task's timeout budget. Exhausting the retries records one health failure for that account and model. A read job can then move to another account under the rules below; otherwise it ends as `error` with `model at capacity after 3 retries`. Capacity failures do not set usage-limit cooldowns.
 
 See [the signal research](research/capacity-errors.md) for the overload messages each runtime recognizes.
+
+## Unhealthy accounts
+
+agt learns account health from real jobs. By default, two health failures within 300 seconds of the streak's first failure make an account **unhealthy** for 60 seconds. A failure outside that window starts a new streak. Health belongs to each account folder, even when two folders share a login. It is separate from usage-limit cooldowns.
+
+| Health failure | What becomes unhealthy |
+|---|---|
+| Model at capacity after all retries, on Claude, Codex or Antigravity | That account and model only; other models keep working |
+| Worker process could not start for that account folder | The account, for every model |
+| Broken connection or stream | The account, for every model |
+| Worker ended without a terminal result | The account, for every model |
+| Runner could not read the result | The account, for every model |
+
+Each attempt counts once, after capacity retries end. Usage limits, auth errors, timeouts, lost or cancelled jobs, turn limits and `no_account` do not count. Neither do task, CLI argument, model, configuration or permission rejections, missing or incompatible binaries, machine-wide resource failures or unclassified launch exceptions. An unsupported flag such as `--effort` on an older CLI is neutral. Kiro has no capacity signal; its other health failures still count.
+
+### Rest and recovery
+
+Unhealthy accounts are skipped without a prompt. When the rest ends, the account becomes **recovering** at its normal priority. The next real job that would use it claims the single trial. Other jobs use another eligible account or wait behind the trial. No background model probes run; an unused account stays recovering until a job needs it.
+
+A successful trial clears the account's health and that model's health, and resets their rest to 60 seconds. A health failure during a trial doubles the rest: 120, 240, 480, then at most 900 seconds. agt keeps trying after each rest, with no reset or prompt. A success from a job already running also clears the account and tested-model health. A neutral trial outcome, such as cancellation or timeout, releases the trial and leaves it recovering.
+
+### Routing and follow-ups
+
+With `failover = "on-limit"`, an unpinned job can move to another account of the same runtime after a health failure, even before the failure threshold is reached. That folder is excluded for the rest of the job. Read jobs can move mid-run; edit and full jobs move only before the worker starts. A handoff note names the cause. `agt follow` shows the move warning only when a job moves, for example `work is unhealthy (model at capacity); continuing on another account`.
+
+A role skips an unhealthy provider and tries the next one. A recovering provider with its trial taken is skipped in favour of another provider; waiting behind that trial is the last fallback. Later role calls return to the provider at its normal priority after its rest. A started job never moves to another runtime. Health skips do not suggest a role rebalance or change the proposed role table.
+
+A pin (`account=NAME`, or a role provider such as `claude:claude-work`) never switches accounts. A plain pin to an unhealthy account is refused before a job is created; a role skips that provider. A pin to a recovering account claims the trial if it is free, or queues within the existing queue deadline if it is taken. Neither `override` nor `when_full = "queue"` bypasses an unhealthy account. When every account is unhealthy, a normal start is refused at once; with `when_full = "queue"`, the created job ends `no_account` at once instead of waiting out the rest.
+
+Follow-ups through `agt message` or `subagent_message` to Codex, Antigravity and Kiro stay on their session's account. They are refused while it is unhealthy, run as the trial once it is recovering, or queue behind an existing trial. Claude follow-ups can still transfer the session to another account.
+
+### Settings
+
+All five keys apply under `[claude]`, `[codex]`, `[antigravity]` and `[kiro]`. They are user-only because health state is machine-wide. Workspace and local values are ignored with a file-and-line notice.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `circuit_breaker` | `true` | `false` disables health reads, writes and health-driven moves and warnings for this runtime |
+| `circuit_failure_threshold` | `2` | Health failures that make an account or account and model unhealthy |
+| `circuit_failure_window_seconds` | `300` | Failures must fall within this many seconds of the streak's first |
+| `circuit_open_seconds` | `60` | First rest, in seconds |
+| `circuit_max_open_seconds` | `900` | Longest rest, in seconds; must be at least `circuit_open_seconds` |
+
+The four numeric values must be positive integers. For example:
+
+```bash
+agt config set codex.circuit_open_seconds 30 --user
+agt config set codex.circuit_breaker false --user
+```
+
+`circuit_breaker = false` restores the runtime's behaviour before health tracking. `failover = "off"` turns switching off but still skips unhealthy accounts; for Antigravity it also keeps unpinned jobs on the primary account.
+
+### Reports and reset
+
+`agt accounts`, `subagent_accounts` and the Room line show health without making model calls. Examples:
+
+| Surface | Text |
+|---|---|
+| Account detail | `claude-work unhealthy until 14:05 · last error: worker could not start` |
+| Model detail | `work/gpt-6.1-sol unhealthy until 14:02 · last error: model at capacity` |
+| Recovering account | `claude-work recovering · last error: worker could not start` |
+| Room line or role skip | `claude-work unhealthy until 14:05` or `claude-work recovering`; the soonest-clearing blocker, then `(+N more)` |
+| Every account unhealthy | `every codex account is unhealthy; retrying around 14:05` |
+| Every account unhealthy for a model | `every codex account is unhealthy for gpt-6.1-sol; retrying around 14:05` |
+| Plain pin refused | `claude-work is unhealthy until 14:05 · last error: worker could not start. Omit account to let agt pick another, or wait for it to recover.` |
+| Waiting behind a trial | `queued · claude-work recovering (trial job running)` |
+| Follow-up refused | `work is unhealthy; this session lives on that account, so the follow-up can't run yet. Try again after it recovers.` |
+
+`agt launch` exits when no account is available. It reports `Every claude account is unhealthy; available again around 14:05.` when all are unhealthy. The time is the soonest unhealthy rest end. When every account's trial is running, it reports `Every claude account is recovering and its trial job is running; try again when one finishes.` When some are unhealthy and the rest have running trials, it reports `Every claude account is unavailable: some unhealthy (available again around 14:05), some recovering with a trial running.`
+
+When health blockers are mixed with usage limits, `agt launch` reports `Every claude account is unavailable: some unhealthy (available again around 14:05), some at a usage limit.` With only running trials and usage limits, it reports `Every claude account is unavailable: some recovering with a trial running, some at a usage limit.` Usage-limit-only failures keep `Every claude account is cooling down after a usage limit.`
+
+`agt accounts --json` and `subagent_accounts` add `unhealthy_until` (local `YYYY-MM-DD HH:MM`), `unhealthy_reason` and `recovering`. Model-specific health appears in `unhealthy_models`, a list of entries with `model` and the same three fields. Healthy accounts omit these fields. Health appears as text in the Room line; the usage JSON fields stay unchanged.
+
+`agt accounts reset <name> --runtime <runtime>` clears health and usage-limit cooldowns. It prints `health cleared`, `cooldown cleared`, `cooldown and health cleared` or `nothing to clear` after the runtime and account name. Outcomes from jobs started before the reset do not restore the cleared health.
+
+`agt doctor --live` can check an unhealthy account before its rest ends and records the outcome. A success clears the account and tested-model health. Account pins, usage limits, access and single-trial rules still apply. It runs real jobs and uses quota; it is a manual check, not an automatic probe.
 
 ## The settings
 
@@ -117,7 +194,7 @@ prefer_roles = true         # prefer installed agt role agents in Claude Code
 [claude]
 primary = "~/.claude"        # the shared setup (default: CLAUDE_CONFIG_DIR or ~/.claude)
 include_primary = false      # also run workers on the primary account
-failover = "on-limit"        # continue on the next account at a usage limit; "off" to stop
+failover = "on-limit"        # next account at a usage limit or a health failure safe to move; "off" to stop
 # max_jobs_per_account = 1   # most workers at once per account folder; extra jobs wait (default: no cap)
 connectors = "account"       # "account" keeps each account's claude.ai connectors; "off" hides them
 edit_permission_mode = "auto"  # permission mode for access="edit"
@@ -274,7 +351,7 @@ agt run --runtime codex --override "user asked for 6 Codex agents" "Review the p
 
 Never set override on your own judgment; use it only when the user asked for more jobs in this conversation, or confirmed after you warned them and told them how much of the 5-hour window is left. Otherwise follow the refusal's suggestion or use the home model. Use the reported usage and reset time; if the 5-hour window is unknown, say so.
 
-Override bypasses agt's global, runtime and per-account job caps (including plan presets and `max_jobs_per_account`), `max_jobs_by_room`, `usage_ceiling`, pool `per_account`, `total` and `weekly_jobs`, and `when_full` queueing. Real quota or usage-limit cooldowns still apply, including pool cooldowns. Account `models` and `max_effort`, login requirements, depth limits and access levels still apply too.
+Override bypasses agt's global, runtime and per-account job caps (including plan presets and `max_jobs_per_account`), `max_jobs_by_room`, `usage_ceiling`, pool `per_account`, `total` and `weekly_jobs`, and `when_full` queueing. Usage-limit cooldowns, including pool cooldowns, and unhealthy accounts still apply. Account `models` and `max_effort`, login requirements, depth limits and access levels still apply too.
 
 Override jobs count toward later starts and keep their normal quota records. The override text is stored in the job's spec and status, and shown by `agt jobs`, the `agt run --follow` header, `subagent_status` and `subagent_result`. It applies to that start only; continuing a finished job does not inherit it.
 

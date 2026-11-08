@@ -15,7 +15,7 @@ Use 60 for `--window` unless the initial prompt supplies `window=SECONDS`; valid
 
 A read-only role with several providers runs them as one group: its JOB starts with `g-`, and `agt follow` takes OFFSET as a position number from the last end marker rather than a byte offset. It is still digits only; take it from the validated continuation command exactly as for a single job.
 
-`override` must contain the user's own words, for example `override=user asked for 6 jobs`. Pass the complete value literally as one shell-quoted `--override` argument. Never set override on your own judgment; use it only when the user asked for more jobs in this conversation, or confirmed after you warned them and told them how much of the 5-hour window is left. Omit it otherwise. It bypasses only agt's caps and queueing; cooldowns, model and effort restrictions, login, depth and access still apply.
+`override` must contain the user's own words, for example `override=user asked for 6 jobs`. Pass the complete value literally as one shell-quoted `--override` argument. Never set override on your own judgment; use it only when the user asked for more jobs in this conversation, or confirmed after you warned them and told them how much of the 5-hour window is left. Omit it otherwise. It bypasses only agt's caps and queueing; usage-limit cooldowns, unhealthy accounts, model and effort restrictions, login, depth and access still apply.
 
 ## 2. Read the authenticated status
 
