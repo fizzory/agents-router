@@ -11,6 +11,7 @@ This is the procedure. The facts it relies on, such as the layout, the rules for
 
 1. Run `git status` and `git branch --show-current`. Never commit to `main`; branch first (`git switch -c claude/<topic>`).
 2. Read `AGENTS.md`, then the files you'll change and their tests.
+3. If this checkout holds another branch's uncommitted work, make the new fix in a worktree off `main` (`git worktree add ../<repo>-<topic> -b claude/<topic> main`), and tell every delegate the other checkout is off-limits. To bring a merged `main` under the waiting work later: save `git diff > <backup>.patch`, `git stash`, `git merge --ff-only origin/main`, `git stash pop`, then settle the version lines as §4 says.
 
 ## 2. Change
 
@@ -33,10 +34,11 @@ Which docs move with which change:
 
 ```bash
 export PYTHONPATH=src:tests
-python3 -m unittest discover -s tests -t tests        # everything, about 3-4 minutes
+python3 -m unittest discover -s tests -t tests        # everything: over 10 minutes, longer than one shell call can hold
 python3 -m unittest test_setup test_guide             # one or a few modules
 ```
 
+- **The full run.** Start it in the background with its output in a log (`python3 -m unittest discover -s tests -t tests > "$TMPDIR/agt-suite.log" 2>&1`), then read only `grep -E '^(ERROR|FAIL):|^Ran |^OK|^FAILED' "$TMPDIR/agt-suite.log"`. Never pipe it through `tail -N`: that cuts the `ERROR:` header and the test's name. Any tester brief says the same.
 - **Known failure:** `test_help.test_other_commands_keep_argparse_help` fails on Python 3.15, whose argparse changed. Any other failure blocks.
 - **Unsure a failure is yours?** Run the same module on a clean tree with `git stash`, the test, then `git stash pop`.
 
@@ -48,6 +50,10 @@ Raise `version` in these three files together:
 - `.claude-plugin/plugin.json`
 - `pyproject.toml`
 - `src/agents_router/__init__.py`
+
+A **minor** bump also changes the setup guide's sentence "This guide is for agt X.Y.Z or newer" in `src/agents_router/guides/setup.md` (`tests/test_guide.py` checks it names the major.minor). Then run `python3 scripts/sync_guide.py`. That guide change selects the `agents-router-setup` eval test ([release.md](references/release.md) step 3), so plan for that test on every minor release.
+
+When `main` changed the version under a branch that also bumps it, five files conflict: the three above, `src/agents_router/guides/setup.md` and `skills/agents-router-setup/SKILL.md`. Take `main`'s text, re-apply the branch's version, run `python3 scripts/sync_guide.py`, then `python3 -m unittest test_guide`.
 
 Claude Code updates an installed plugin only when that version changes. `tests/test_guide.py` checks that the three match.
 
@@ -69,7 +75,7 @@ agt-sandbox <command>          # one command inside the sandbox; alone, a sandbo
 
 ## 6. Review
 
-- **An independent pass.** Start `agents-router:agt-codex` with `access=read`. Give it the diff (`git diff main...HEAD`) and the plan, never your conclusions, and ask for bugs and gaps.
+- **An independent pass.** Start `agents-router:agt-codex` with `access=read`. Give it the diff: `git diff main...HEAD` once the work is committed. Before that (the usual case, since you commit only when asked), run `git add -N <new files>` and give `git diff main`, which then includes the new files. Give it the plan too, never your conclusions, and ask for bugs and gaps.
 - **Open choices.** Settle them with the decision-maker agents (`system-decision-maker`, `ux-decision-maker`, `general-decision-maker`) instead of asking the person, unless the choice is theirs: scope, money or anything outward-facing.
 - **Fold the findings in.** Then tell the person what you left out, and why.
 
@@ -78,7 +84,7 @@ agt-sandbox <command>          # one command inside the sandbox; alone, a sandbo
 Steps and exact commands: [references/release.md](references/release.md).
 
 In short:
-1. Run the full suite. When the change touches a skill with cases in `tests/skill-evals/`, that skill's graded cases must pass too, and only those (`--tag <skill>`, `-j 4`): real model runs on the person's quota, so only with their OK. The benchmark and trigger tuning only advise.
+1. Run the full suite. When the change touches a skill with cases in `tests/skill-evals/`, that skill's graded cases must pass too, and only those (`--tag <skill>`, `-j 4`): the eval test, on the person's subscription quota: ask once, and never shape the work to avoid it. The benchmark and trigger tuning only advise.
 2. Raise the version.
 3. Commit with the subject `Agents Router X.Y.Z: <what changed for the person>`.
 4. Push the branch and open a pull request.
