@@ -505,6 +505,10 @@ def account_report(runtime_name: str, host: str | None = None, *, command: list[
             entry["cooldown_until"] = time.strftime("%Y-%m-%d %H:%M", time.localtime(until))
         entry.update(health_view.account_health(config, account, now))
         windows = record.get("windows") or {}
+        hold = usage_view.held_back(config, record, now)
+        entry["held_back"] = hold is not None
+        if hold:
+            entry["held_back_reason"] = hold
         if windows:
             entry["usage"] = {
                 name: round(float(window["utilization"]) * 100)
@@ -532,7 +536,7 @@ def room_note(runtimes: list[str] | None = None) -> str:
 
     try:
         config = load_config()
-        usage_view.refresh_codex(config)
+        usage_view.refresh_codex(config, live=False)
         return usage_view.room_line(config, runtimes)
     except Exception:
         return ""

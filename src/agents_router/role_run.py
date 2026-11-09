@@ -259,7 +259,7 @@ def _too_long(provider: Provider, prompt: str, cwd: str) -> str | None:
 def launch(args: argparse.Namespace) -> Launch:
     """Check the call, pick the providers and start their jobs under one new group. Raises RoleError (exit 2)."""
 
-    from agents_router import role_agents
+    from agents_router import role_agents, usage_view
 
     check_flags(args)
     cwd = str(Path(args.cwd).resolve())
@@ -268,6 +268,10 @@ def launch(args: argparse.Namespace) -> Launch:
     rules = rules_block(role, found.text, found.source) if found.source is not None else None
     prompt = _task(args, role, rules)
     set_session(config, session_folder(detect_host()))  # as create_job does: the session's own profile is never used
+    if any(provider.runtime == "codex" for provider in role.providers):
+        pinned = next((provider.account for provider in role.providers
+                       if provider.runtime == "codex" and provider.account is not None), None)
+        usage_view.refresh_codex(config, pinned=pinned)  # before precheck/admit can skip a held-back provider
     group = jobs.new_group_id()
     now = time.time()
     access = role.access
@@ -281,6 +285,7 @@ def launch(args: argparse.Namespace) -> Launch:
             timeout_seconds=args.timeout, add_dirs=[str(Path(item).resolve()) for item in args.add_dir], group=group,
             rules=rules,
             _role_try=not queue_trial,
+            _codex_usage_refreshed=True,
         )
 
     def check_for(provider: Provider) -> Check:

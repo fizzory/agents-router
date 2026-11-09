@@ -175,7 +175,7 @@ When health blockers are mixed with usage limits, `agt launch` reports `Every cl
 
 `agt accounts --json` and `subagent_accounts` add `unhealthy_until` (local `YYYY-MM-DD HH:MM`), `unhealthy_reason` and `recovering`. Model-specific health appears in `unhealthy_models`, a list of entries with `model` and the same three fields. Healthy accounts omit these fields. Health appears as text in the Room line; the usage JSON fields stay unchanged.
 
-`agt accounts reset <name> --runtime <runtime>` clears health and usage-limit cooldowns. It prints `health cleared`, `cooldown cleared`, `cooldown and health cleared` or `nothing to clear` after the runtime and account name. Outcomes from jobs started before the reset do not restore the cleared health.
+`agt accounts reset <name> --runtime <runtime>` clears health and usage-limit cooldowns. It prints `health cleared`, `cooldown cleared`, `cooldown and health cleared` or `nothing to clear` after the runtime and account name. For Codex it also checks live usage at once and prints the percentages or `usage check failed`. Outcomes from jobs started before the reset do not restore the cleared health.
 
 `agt doctor --live` can check an unhealthy account before its rest ends and records the outcome. A success clears the account and tested-model health. Account pins, usage limits, access and single-trial rules still apply. It runs real jobs and uses quota; it is a manual check, not an automatic probe.
 
@@ -339,7 +339,13 @@ Room: Claude 2 accounts (no usage data) · Codex primary 8% left (5h, resets 03:
 
 The `Room:` line is also in the `subagent_start` and `subagent_accounts` results. With quota steps or pools configured, it appears in the `agt run --follow` header too. It shows what is already known, marks old data with its age (`as of 2 h ago`) and leaves out accounts with no data. Codex usage is read from the newest rollout file in each Codex account folder (the `rate_limits` field only). Claude usage comes from the events of jobs that already ran. Antigravity shows job counts and cooldowns, with no remaining-quota estimate. Nothing starts a job to measure usage.
 
+A Codex start checks held-back accounts through `codex app-server` before taking the admission lock. A role with a Codex provider checks before choosing its providers. Each refresh checks all due held-back accounts together and waits at most about 10 seconds in total. A pinned account comes first, then accounts checked least recently; each account is checked at most once every 10 minutes. `agt accounts` also refreshes usage. MCP reply Room lines and admission itself read local files only. None of these checks calls a model. `agt accounts reset <name> --runtime codex` checks that account at once, even if it was checked recently.
+
+Codex windows keep their observation time. Rollout refreshes and completed jobs use the `rate_limits` event's timestamp, falling back to the file's modification time for events without one; live checks use the response time. An older or equal observation cannot replace newer stored windows.
+
 `agt accounts`, `subagent_accounts` and `agt doctor` list each account's cap, effort cap and model list, and where each one comes from. Where usage is known, they show each window's percentage used (`usage`) and when it resets (`usage_resets`), in local time with a countdown, for example `"five_hour": "2026-10-18 01:26 (in 4 h 15 min)"`. For Claude accounts they also suggest a plan (read from `oauthAccount.userRateLimitTier` and `organizationRateLimitTier` in the account's `.claude.json`, nothing else). A suggestion is not applied until you set `plan`.
+
+An account at its usage ceiling shows `held back: at the 95% usage ceiling until ...`. JSON reports include `held_back` and, when true, `held_back_reason`.
 
 ### A user-authorized override
 

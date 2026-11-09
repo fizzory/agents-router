@@ -6,6 +6,9 @@
                       no_result | empty_exit_1 | transport | unknown_model
   FAKE_CODEX_SCENARIOS JSON object overriding the scenario by account folder name
   FAKE_CODEX_CAPACITY_FAILURES  number of capacity failures before success (default 100)
+  FAKE_CODEX_APP_SERVER  JSON rateLimits/read result | hang | garbage | error | eof (default)
+  FAKE_CODEX_APP_SERVERS JSON object overriding the app-server scenario by account folder name
+  FAKE_CODEX_REQUESTS    file to append app-server JSON-RPC requests to
   FAKE_CLAUDE_RECORD   file to append {"argv", "env", "stdin"} records to (shared with fake_claude)
 """
 
@@ -21,8 +24,41 @@ def emit(event):
     sys.stdout.flush()
 
 
+def app_server(argv):
+    record = os.environ.get("FAKE_CLAUDE_RECORD")
+    if record:
+        with open(record, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"argv": argv, "env": dict(os.environ), "stdin": ""}) + "\n")
+    scenario = json.loads(os.environ.get("FAKE_CODEX_APP_SERVERS", "{}")).get(
+        Path(os.environ["CODEX_HOME"]).name, os.environ.get("FAKE_CODEX_APP_SERVER", "eof"))
+    if scenario == "eof":
+        return 0
+    if scenario == "hang":
+        time.sleep(120)
+        return 0
+    if scenario == "garbage":
+        print("not JSON", flush=True)
+        return 0
+    for line in sys.stdin:
+        request = json.loads(line)
+        if path := os.environ.get("FAKE_CODEX_REQUESTS"):
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(request) + "\n")
+        if request["method"] == "initialize":
+            emit({"method": "notice", "params": {}})
+            emit({"id": 99, "result": {}})
+            emit({"id": request["id"], "result": {"userAgent": "fake-codex"}})
+        elif request["method"] == "account/rateLimits/read":
+            emit({"method": "notice", "params": {}})
+            emit({"id": request["id"], **({"error": {"code": -32601}} if scenario == "error"
+                                        else {"result": json.loads(scenario)})})
+    return 0
+
+
 def main():
     argv = sys.argv[1:]
+    if argv and argv[0] == "app-server":
+        return app_server(argv)
     prompt = sys.stdin.read()
     record = os.environ.get("FAKE_CLAUDE_RECORD")
     if record:

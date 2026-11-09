@@ -75,6 +75,8 @@ Servers that sign in through a browser (OAuth) have no token to pass on; log eac
 
 After each attempt, Agents Router reads the last `rate_limits` snapshot from the thread's rollout file (`sessions/YYYY/MM/DD/rollout-*-<thread>.jsonl` in the account's folder) and nothing else from it. The 5-hour and weekly percentages show in `agt accounts --runtime codex` and rank accounts like Claude ones. When a job hits the limit, the snapshot's reset time sets the cooldown unless the error carries a Retry-After value.
 
+Before a Codex start or a role's provider selection, agt re-checks all due held-back accounts together through `codex app-server`, without a model call or the admission lock. `agt accounts` also checks. Each refresh waits at most about 10 seconds in total. A pinned account comes first, then accounts attempted least recently. An account is checked at most once every 10 minutes. Admission and MCP reply Room lines only read local files. `agt accounts reset <name> --runtime codex` checks that account at once and reports the usage it finds. Rollout snapshots use the usage event's timestamp, so appending unrelated events cannot overwrite a newer live reading.
+
 Set optional `max_jobs_by_room` steps under `[codex]` to lower concurrency as the remaining 5-hour or weekly quota falls. Other caps still apply, and running jobs continue. See [Configuration](configuration.md#quota-scaled-caps).
 
 ## Web search
@@ -117,7 +119,7 @@ Pass `runtime: "codex"` to `subagent_start`, or `--runtime codex` to `agt run` a
 
 ## Limits
 
-`codex exec --json` doesn't report remaining quota. Agents Router reads local rollout snapshots to rank accounts by usage and get reset times, as described in [Quota](#quota). It recognizes a usage-limit failure from the error message and cools that account down until the `Retry-After` value or reported reset time, or else for `cooldown_minutes` (default 60), never more than 7 days. The job then restarts on the next account with the partial output attached; a Codex thread isn't moved between accounts. Failover is on by default. `agt accounts reset <name> --runtime codex` clears a cooldown. Set `failover = "off"` under `[codex]` to stop at the limit instead.
+`codex exec --json` doesn't report remaining quota. Agents Router reads local rollout snapshots to rank accounts by usage and get reset times, as described in [Quota](#quota). It recognizes a usage-limit failure from the error message and cools that account down until the `Retry-After` value or reported reset time, or else for `cooldown_minutes` (default 60), never more than 7 days. The job then restarts on the next account with the partial output attached; a Codex thread isn't moved between accounts. Failover is on by default. `agt accounts reset <name> --runtime codex` clears a cooldown and checks live usage. Set `failover = "off"` under `[codex]` to stop at the limit instead.
 
 ## Notes
 
