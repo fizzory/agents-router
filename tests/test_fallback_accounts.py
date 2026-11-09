@@ -26,12 +26,12 @@ class FallbackAccountTests(TempHome):
         # The regular accounts were used more recently than the fallback one.
         for name in ("primary", "paid"):
             accounts.update_usage("codex", name, last_used=time.time())
-        ranked, _ = accounts.ranked_accounts(runtime, now=time.time())
+        ranked = accounts.ranked_accounts(runtime, now=time.time()).accounts
         self.assertEqual([account.name for account in ranked][-1], "free")
         self.assertEqual(len(ranked), 3)
 
     def test_fallback_is_used_when_the_others_are_excluded(self):
-        ranked, _ = accounts.ranked_accounts(self.runtime(), exclude={"primary", "paid"})
+        ranked = accounts.ranked_accounts(self.runtime(), exclude={"primary", "paid"}).accounts
         self.assertEqual([account.name for account in ranked], ["free"])
 
     def test_fallback_survives_a_config_round_trip(self):

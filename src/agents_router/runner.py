@@ -15,7 +15,7 @@ import threading
 import time
 from typing import Any
 
-from agents_router import accounts, limits, messages, plans, quota
+from agents_router import accounts, health, limits, messages, plans, quota
 from agents_router.config import OPT_IN_FAILOVER, Account, RuntimeConfig, load_config, set_session
 from agents_router.fsutil import kill_tree, open_private, process_start_time, unlock, worker_process, write_text
 from agents_router.jobs import job_dir, mark_pending, read_spec, update_status
@@ -29,6 +29,8 @@ from agents_router.runtimes.base import (
     TIMEOUT,
     USAGE_LIMIT,
     AttemptResult,
+    HEALTH_REJECTION_RE,
+    HealthLaunchError,
     JobSpec,
 )
 
@@ -54,9 +56,11 @@ CAPACITY_CONTINUE_NOTE = (
 
 def handoff_prompt(original: str, previous: AttemptResult, account: str) -> str:
     partial = (previous.text or "").strip()
+    cause = health.REASONS.get(previous.health_failure)
+    stopped = cause if cause else "that account reached its usage limit"
     note = (
         "Note from Agents Router: an earlier attempt at this task ran on another account "
-        f"({account}) and stopped because that account reached its usage limit."
+        f"({account}) and stopped because {stopped}."
     )
     if partial:
         note += f" Its last output was:\n\n<previous_output>\n{partial[-4000:]}\n</previous_output>\n"
@@ -151,6 +155,7 @@ class Runner:
         prompt = self.spec.prompt
         excluded: set[str] = set()
         last: AttemptResult | None = None
+        move_warning: str | None = None
         failover = self.runtime_config.failover == "on-limit" and not self.spec.account
         # The conversation to continue and the account folder that holds it.
         session = self.spec.resume_session
@@ -169,9 +174,23 @@ class Runner:
                 if last is not None:
                     return self.finish(last.outcome, last.message, last)
                 return self.finish(NO_ACCOUNT, self._no_account_message(excluded))
+            if move_warning:
+                self.warnings.append(move_warning)
+                move_warning = None
             try:
                 fallback = handoff_prompt(self.spec.prompt, last, owner or "another account") if last else self.spec.prompt
                 last = self._attempt_with_capacity_retries(lease, prompt, session, owner, fallback)
+                # One write after all capacity retries, while both trial locks and
+                # the attempt's original generation still belong to this lease.
+                if self.runtime_config.circuit_breaker and lease.trial is not None:
+                    try:
+                        health.record_outcome(
+                            self.runtime_config, lease.account, self.spec.model, outcome=last.outcome,
+                            generation=lease.trial.generation, trials=lease.trial,
+                            health_failure=last.health_failure if last.outcome == ERROR else None,
+                        )
+                    except OSError as exc:
+                        self.warnings.append(f"could not record health for {lease.account.name}: {exc}")
             finally:
                 lease.release()
 
@@ -200,6 +219,27 @@ class Runner:
                 # The account has no login yet and nothing ran: try the next account.
                 excluded.add(lease.account.name)
                 self.warnings.append(f"{lease.account.name}: {last.message}")
+                continue
+            if (self.runtime_config.circuit_breaker and failover and not pinned
+                    and last.outcome == ERROR and last.health_failure in health.REASONS
+                    and (last.before_start or self.spec.access == "read")):
+                # Exclude the folder, including aliases, for the rest of this job.
+                key = accounts._home_key(lease.account.home)
+                excluded.update(a.name for a in [*self.runtime_config.all_accounts(), lease.account]
+                                if accounts._home_key(a.home) == key)
+                cause = health.REASONS[last.health_failure]
+                if last.session_id and hasattr(self.runtime, "transfer_session"):
+                    session, owner = last.session_id, lease.account.name
+                    self.owner_home = str(lease.account.home)
+                    prompt = (
+                        f"Note from Agents Router: the previous attempt stopped because {cause}. "
+                        "The conversation moved to another account. Continue the task from where you stopped. "
+                        "Check the current state of the files before redoing anything that may already be done."
+                    )
+                else:
+                    session, owner = None, None
+                    prompt = self._with_rules(handoff_prompt(self.spec.prompt, last, lease.account.name))
+                move_warning = f"{lease.account.name} is unhealthy ({cause}); continuing on another account"
                 continue
             if last.outcome != USAGE_LIMIT:
                 return self.finish(last.outcome, last.message, last)
@@ -240,7 +280,9 @@ class Runner:
             if result.outcome != ERROR or not result.at_capacity:
                 return result
             if retries >= self.runtime_config.capacity_retries:
-                return dataclasses.replace(result, message=f"model at capacity after {retries} retries: {result.message}")
+                rejected = HEALTH_REJECTION_RE.search(result.error_text or result.message)
+                return dataclasses.replace(result, message=f"model at capacity after {retries} retries: {result.message}",
+                                           health_failure=None if rejected else "capacity")
             # Attempts and their waits share the task's timeout, including the time
             # already spent inside the CLI's own retry loop.
             self.deadline = min(self.deadline, active_deadline)
@@ -301,6 +343,14 @@ class Runner:
         return self.runtime_config.find(owner)
 
     def _no_account_message(self, excluded: set[str]) -> str:
+        if self.runtime_config.circuit_breaker:
+            ranking = self._account_ranking(excluded)
+            unhealthy = [b for b in ranking.blockers if b.kind == "health" and b.state == "unhealthy"]
+            if unhealthy and not ranking.accounts and not ranking.cooldown_end:
+                when = time.strftime("%H:%M", time.localtime(min(b.until for b in unhealthy)))
+                model = self.spec.model or self.runtime_config.default_model or "default"
+                scoped = f" for {model}" if any(b.scope.startswith("model:") for b in unhealthy) else ""
+                return f"every {self.spec.runtime} account is unhealthy{scoped}; retrying around {when}"
         usage = accounts.load_usage(self.spec.runtime)
         ends = [
             max((end for end in (
@@ -319,18 +369,33 @@ class Runner:
             return "the job ran out of time before an account was free"
         return f"no {self.spec.runtime} account was free within {QUEUE_TIMEOUT_SECONDS // 60} minutes"
 
+    def _account_ranking(self, excluded: set[str], pinned: str | None = None) -> accounts.Ranking:
+        return accounts.ranked_accounts(
+            self.runtime_config, pinned=pinned or self.spec.account, exclude=excluded,
+            model=self.spec.model or self.runtime_config.default_model, pool=self.pool, job_id=self.job_id,
+            skip_rest=self.spec._doctor_live,
+        )
+
     def _wait_for_account(self, excluded: set[str], prefer: str | None = None,
                           pinned: str | None = None) -> accounts.Lease | None:
-        queued_since = time.time()
+        queued_since = time.monotonic()
         while True:
-            slots = limits.acquire_execution_slots(self.config, self.spec.runtime, self.spec.model, override=self.spec.override)
+            slots = None
             try:
+                if self.runtime_config.circuit_breaker:
+                    # Health refusals must not wait behind global/runtime caps.
+                    ranking = self._account_ranking(excluded, pinned)
+                    if not ranking.accounts and not ranking.trial_busy:
+                        return None
+                slots = limits.acquire_execution_slots(self.config, self.spec.runtime, self.spec.model, override=self.spec.override,
+                                                       _doctor_live=self.spec._doctor_live, job_id=self.job_id)
                 if slots is None:
                     lease, all_busy = None, True
                 else:
                     lease, _earliest, all_busy = accounts.acquire(
                         self.runtime_config, pinned=pinned or self.spec.account, exclude=excluded,
                         prefer=prefer, model=self.spec.model, job_id=self.job_id, override=self.spec.override,
+                        skip_rest=self.spec._doctor_live,
                     )
                     if lease is not None:
                         lease.pool_slots.extend(slots)
@@ -349,9 +414,15 @@ class Runner:
             if not all_busy:
                 return None
             now = time.time()
-            if self.cancelled() or now - queued_since > QUEUE_TIMEOUT_SECONDS or now >= self.deadline:
+            if self.cancelled() or time.monotonic() - queued_since > QUEUE_TIMEOUT_SECONDS or now >= self.deadline:
                 return None
-            self.status(state="queued", message="waiting for a free account slot")
+            message = "waiting for a free account slot"
+            if self.runtime_config.circuit_breaker:
+                ranking = self._account_ranking(excluded, pinned)
+                recovering = [b for b in ranking.blockers if b.kind == "health" and b.state == "recovering"]
+                if not ranking.accounts and recovering:
+                    message = f"queued · {recovering[0].account} recovering (trial job running)"
+            self.status(state="queued", message=message)
             time.sleep(3)
 
     def _with_rules(self, prompt: str) -> str:
@@ -403,6 +474,11 @@ class Runner:
             return blocked
         try:
             setup = self.runtime.prepare(self.runtime_config, account, spec)
+        except HealthLaunchError as exc:
+            result = AttemptResult(ERROR, message=f"could not start the worker: {exc}", session_id=session,
+                                   before_start=True, health_failure="launch")
+            attempt.update(ended_at=time.time(), outcome=result.outcome, message=result.message)
+            return result
         except Exception as exc:  # setup problems must not kill the job silently
             setup = {}
             self.warnings.append(f"shared setup for {account.name} failed: {type(exc).__name__}: {exc}")
@@ -413,7 +489,8 @@ class Runner:
         try:
             launch = self.runtime.launch(self.runtime_config, account, spec, prompt, setup)
         except Exception as exc:
-            result = AttemptResult(ERROR, message=f"could not start the worker: {exc}", session_id=session, before_start=True)
+            result = AttemptResult(ERROR, message=f"could not start the worker: {exc}", session_id=session, before_start=True,
+                                   health_failure="launch" if isinstance(exc, HealthLaunchError) else None)
             attempt.update(ended_at=time.time(), outcome=result.outcome, message=result.message)
             return result
         attempt["session_id"] = launch.session_id
@@ -453,7 +530,7 @@ class Runner:
                 if not attempt["before_start"]:
                     raise
                 result = AttemptResult(ERROR, message=f"could not start the worker: {exc}", session_id=session,
-                                       before_start=True)
+                                       before_start=True, health_failure="launch" if isinstance(exc, HealthLaunchError) else None)
                 attempt.update(ended_at=time.time(), outcome=result.outcome, message=result.message)
                 return result
             finally:
@@ -478,7 +555,8 @@ class Runner:
             try:
                 result = parser.finish(exit_code, stderr_tail)
             except Exception as exc:
-                result = AttemptResult(ERROR, message=f"could not read the result: {exc}", text=parser.last_text)
+                result = AttemptResult(ERROR, message=f"could not read the result: {exc}", text=parser.last_text,
+                                       health_failure="parser")
         if result.session_id is None:
             result.session_id = launch.session_id
         attempt.update(

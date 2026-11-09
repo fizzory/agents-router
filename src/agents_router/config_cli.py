@@ -100,6 +100,15 @@ def _runtime_keys(runtime: str) -> list[Key]:
         Key(r + "cooldown_minutes", "int", "Minutes an account rests after a usage limit.", minimum=1),
         Key(r + "capacity_retries", "int", "Retries when the service is out of capacity.", minimum=0),
         Key(r + "capacity_retry_seconds", "int", "The first wait before a capacity retry; it doubles each time.", minimum=1),
+        Key(r + "circuit_breaker", "bool", "Rest unhealthy accounts before trying them again.", user_only=True),
+        Key(r + "circuit_failure_threshold", "int", "Health failures before an account or model rests.",
+            minimum=1, user_only=True),
+        Key(r + "circuit_failure_window_seconds", "int", "Seconds in which health failures count together.",
+            minimum=1, user_only=True),
+        Key(r + "circuit_open_seconds", "int", "The first rest after health failures, in seconds.",
+            minimum=1, user_only=True),
+        Key(r + "circuit_max_open_seconds", "int", "The longest rest after health failures, in seconds.",
+            minimum=1, user_only=True),
     ]
     if runtime == "claude":
         keys += [

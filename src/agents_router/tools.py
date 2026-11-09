@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from agents_router import accounts, jobs, limits, messages, plans, quota, usage_view
+from agents_router import accounts, health_view, jobs, limits, messages, plans, quota, usage_view
 from agents_router.config import load_config, session_folder, set_session
 from agents_router.hosts import detect_host
 from agents_router.runtimes import AVAILABLE as RUNTIMES, get_runtime
@@ -59,7 +59,7 @@ DEFINITIONS = [
                 "override": {
                     "type": "string", "minLength": 1, "pattern": "\\S",
                     "description": "The user's own words authorizing more parallel jobs, e.g. 'user asked for 6 Codex agents'. "
-                    "Bypasses only agt's caps and queueing, never cooldowns, model or effort restrictions, login, depth or access. "
+                    "It bypasses only agt's caps and queueing; usage-limit cooldowns, unhealthy accounts, model and effort restrictions, login, depth and access still apply. "
                     "Never set this on your own judgment. Use it only when the user asked for more jobs in this conversation "
                     "or confirmed after you warned them and told them how much of the 5-hour window is left.",
                 },
@@ -135,7 +135,11 @@ DEFINITIONS = [
     },
     {
         "name": "subagent_accounts",
-        "description": "Installed runtimes, their accounts, login state, last known usage and cooldowns. Makes no model calls.",
+        "description": (
+            "Installed runtimes, their accounts, login state, last known usage, cooldowns and health. "
+            "Health fields: unhealthy_until, unhealthy_reason, recovering; unhealthy_models lists model-specific health "
+            "with model and the same three fields. Healthy accounts omit these fields. Makes no model calls."
+        ),
         "inputSchema": _schema({"runtime": {"type": "string", "enum": list(RUNTIMES)}}, []),
     },
 ]
@@ -499,6 +503,7 @@ def account_report(runtime_name: str, host: str | None = None, *, command: list[
         until = accounts.cooldown_until(record, now)
         if until:
             entry["cooldown_until"] = time.strftime("%Y-%m-%d %H:%M", time.localtime(until))
+        entry.update(health_view.account_health(config, account, now))
         windows = record.get("windows") or {}
         if windows:
             entry["usage"] = {

@@ -25,8 +25,10 @@ Only a custom role can have full access. Every provider of a full role gets it: 
 
 - **Read role:** every usable provider runs in parallel as an ordinary job, all under one group id (`g-…`). The result has one section per provider, plus FAILED and SKIPPED sections, and ends DONE if at least one succeeded. `agt follow`, `agt cancel`, `agt jobs` and `agt message` accept the group id.
 - **Edit or full role:** one job with the role's access, on the first provider in the role's order that agt's limits admit, preferring one below the usage ceiling. A job that fails partway is not retried on the next provider.
-- A provider whose account is unknown, logged out, cooling down or at its limit is skipped with the reason. If none can run, the call exits 1.
+- A provider whose account is unknown, logged out, cooling down, unhealthy or at its limit is skipped with the reason. A recovering provider whose trial is taken is skipped in favour of another provider; waiting behind its trial is the last fallback. If none can run, the call exits 1.
 - `agt run --role <name>` can't be combined with `--runtime`, `--account`, `--model` or `--access`: the role's providers set the first three, and the role's settings set its access.
+
+Health skips name the account and time, for example `claude-work unhealthy until 14:05`, or `claude-work recovering` while its trial is taken. After the rest, the next role call that would use that provider claims its trial at the normal priority. A success restores normal routing. Providers that name an account are pinned: their jobs never move to another account. A started job never moves to another runtime. See [unhealthy accounts](configuration.md#unhealthy-accounts).
 
 ## Settings
 
@@ -87,6 +89,8 @@ Add `--dry-run` to see a change without writing it. Name `--user`, `--workspace`
 From an agent, a change that widens access needs the user's words: `--user-said "<their words>"`. That is a provider added to an edit or full role, a new edit or full role, a role moved from read to edit or full, or from edit to full, and every `--enable`/`--disable`. Without them the command exits 3 and says what to ask. Narrowing access (full to edit, edit to read) needs no words.
 
 When agt skips a provider for quota, it suggests a rebalance: ask your agent to "rebalance my roles", and it proposes a new mapping with reasons and changes nothing before you approve.
+
+An unhealthy or recovering provider does not trigger that hint. Health does not change proposals or rebalance: a short rest must not change your standing role settings.
 
 ## Role agents
 

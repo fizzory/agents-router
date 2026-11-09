@@ -71,7 +71,7 @@ agt accounts
 agt doctor --live
 ```
 
-`agt accounts` shows each account's login state, plan, last known usage and cooldown without using quota. `doctor --live` runs one tiny job per account (on Haiku for Claude) and prints what each one loaded (model, permission mode, MCP servers, plugins, skills, agents), then lists any differences between accounts.
+`agt accounts` shows each account's login state, plan, last known usage, cooldown and health without making model calls. `doctor --live` runs one tiny job per account (on Haiku for Claude) and prints what each one loaded (model, permission mode, MCP servers, plugins, skills, agents), then lists any differences between accounts. It can check an unhealthy account before its rest ends and records the outcome; a success clears the account and tested-model health. Account pins, usage limits, access and single-trial rules still apply.
 
 ## 5. Use it
 
@@ -168,24 +168,32 @@ Two things stay per account because they belong to the account on Anthropic's si
 
 ## Choosing accounts and failover
 
-With no `account` given, a job goes to the account with the lowest recent usage that has a free slot. Usage comes from the `rate_limit_event` messages Claude Code reports during each run (5-hour and weekly utilization, plus reset times).
+With no `account` given, a job goes to the account with the lowest recent usage that has a free slot. It skips accounts in cooldown, unhealthy accounts and recovering accounts whose trial is taken. Usage comes from the `rate_limit_event` messages Claude Code reports during each run (5-hour and weekly utilization, plus reset times).
 
-When an account reaches its limit, it cools down and later jobs skip it. The cooldown ends at the first of these that is available: a `Retry-After` value in the error, the reset time Claude Code reported, or `cooldown_minutes` (default 60). It is never longer than 7 days. `agt accounts reset <name>` clears a cooldown early.
+When an account reaches its limit, it cools down and later jobs skip it. The cooldown ends at the first of these that is available: a `Retry-After` value in the error, the reset time Claude Code reported, or `cooldown_minutes` (default 60). It is never longer than 7 days. `agt accounts reset <name>` clears cooldowns and health early.
 
 Failover is on by default. A job that was running when the limit hit continues on the next account: Agents Router copies the session transcript into that account's folder (`transfer_session`) and resumes the same conversation there with a short note, so the subagent picks up where it stopped. (Checked with Claude Code 2.1.295: a transcript copied to another account folder resumes with its full history.) If the transcript can't be moved, the job restarts with the original task and the partial output. A job pinned to one account with `account` doesn't fail over.
 
-To stop at the limit instead, set:
+Health failures also allow an unpinned job to move within Claude: read jobs can move mid-run, while edit and full jobs move only before the worker starts. Capacity retries on the same account finish first. A failed folder is excluded for the rest of that job. No started job moves to another runtime; later role calls can skip an unhealthy Claude provider.
+
+By default, two health failures within 300 seconds make an account unhealthy for 60 seconds. Capacity affects only that account and model; account-local launch failures, broken connections, missing terminal results and unreadable results affect the whole account. After the rest, it is recovering and the next eligible real job claims a single trial. Success clears the account and tested-model health. A trial health failure doubles the rest up to 900 seconds. Recovery needs no reset or prompt. Health is tracked per folder, separately from usage limits. See [unhealthy accounts](configuration.md#unhealthy-accounts) for exclusions and user-only settings.
+
+A pin to an unhealthy account is refused before a job is created. Once recovering, it can run as the trial or queue behind a trial already taken. `agt accounts` shows `claude-work unhealthy until 14:05 · last error: worker could not start` or `claude-work recovering · last error: worker could not start`. Neither `override` nor queueing bypasses an unhealthy account. Follow-ups to Claude sessions keep the existing session-transfer behaviour.
+
+To turn switching off for usage limits and health failures, set:
 
 ```toml
 [claude]
 failover = "off"
 ```
 
+This still skips unhealthy accounts. `circuit_breaker = false` under `[claude]` in your user settings turns health tracking and health-driven moves off too.
+
 ## Limits
 
 agt counts the running jobs on the machine and refuses a start when your cap for that account or runtime is reached. It replies with one line, for example `Claude is at its limit: 2 of 2 subagents running (plan preset pro: 2 per account; change with max_jobs). Start this with runtime codex, or wait for one to finish.` Follow the suggestion; there is nothing to calculate. Set `plan`, `max_jobs`, optional `max_jobs_by_room` steps or model `pools` in `config.toml` to cap new starts. Pools can also set `per_account`, `total`, `weekly_jobs` and `cooldown_minutes` for model globs; other models keep working during a pool cooldown. If you set `plan = "auto"`, agt reads your plan from the account's login info. See [Configuration](configuration.md#limits).
 
-Only the user can authorize extra parallel jobs. Never set override on your own judgment; use it only when the user asked for more jobs in this conversation, or confirmed after you warned them and told them how much of the 5-hour window is left. Put their words in a relay option line such as `override=user asked for 6 Codex agents`, the `override` field of `subagent_start`, or `--override "user asked for 6 Codex agents"` on `agt run` or `agt start`. The value must contain text. It bypasses agt's job caps, quota steps, usage ceiling, pool budgets and queueing. Cooldowns after real usage-limit errors, model and effort restrictions, login, depth and access still apply. Override jobs still count toward later starts. Their override text appears in `agt jobs`, the follow header and status/result summaries. See [override details](configuration.md#a-user-authorized-override).
+Only the user can authorize extra parallel jobs. Never set override on your own judgment; use it only when the user asked for more jobs in this conversation, or confirmed after you warned them and told them how much of the 5-hour window is left. Put their words in a relay option line such as `override=user asked for 6 Codex agents`, the `override` field of `subagent_start`, or `--override "user asked for 6 Codex agents"` on `agt run` or `agt start`. The value must contain text. It bypasses agt's job caps, quota steps, usage ceiling, pool budgets and queueing; usage-limit cooldowns, unhealthy accounts, model and effort restrictions, login, depth and access still apply. Override jobs still count toward later starts. Their override text appears in `agt jobs`, the follow header and status/result summaries. See [override details](configuration.md#a-user-authorized-override).
 
 ## Interactive sessions with the shared setup
 
@@ -208,6 +216,6 @@ The pool only moves workers between accounts. Your main Claude Code session keep
 | `auth` outcome | Run `agt accounts login <name>` |
 | An account loads different tools | Run `agt doctor --live` and read the differences; `agt accounts sync <name>` re-links the shared setup |
 | Wrong organization after login | Log out with `claude auth logout` in that account (`CLAUDE_CONFIG_DIR` set to its folder), switch organization on claude.ai, log in again |
-| `no_account` | Every account is cooling down or busy; `agt accounts` shows when the earliest resets, and `agt accounts reset <name>` clears a cooldown you know is over |
+| `no_account` | Accounts are unavailable; `agt accounts` shows usage-limit cooldowns, unhealthy accounts and recovering trials. All unhealthy accounts end the job at once, even with queueing; retry after the rest. `agt accounts reset <name>` clears cooldowns and health |
 | Job state `lost` | The background runner stopped (for example the computer slept). Start the job again |
 | Need to see everything a worker did | `events_path` in the result points to the raw event log |

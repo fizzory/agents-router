@@ -67,6 +67,8 @@ from agents_router.runtimes.base import (
     Launch,
     clean_environment,
     parent_server,
+    prepare_account_home,
+    stream_health_failure,
 )
 
 MAX_PROMPT_CHARS = 24_000  # the prompt travels as one command-line argument
@@ -124,6 +126,11 @@ CAPACITY_RE = re.compile(
 AUTH_RE = re.compile(
     r"authentication (is )?required|authentication expired|not (currently )?signed in|unauthenticated"
     r"|not logged into antigravity|log back in|visit the url to log in",
+    re.IGNORECASE,
+)
+TRANSPORT_RE = re.compile(
+    r"\bconnection (?:failed|reset|closed|refused)|\b(?:stream|socket) (?:disconnected|closed|reset|broken)|"
+    r"\btransport error\b|\bECONNRESET\b|\bfetch failed\b",
     re.IGNORECASE,
 )
 # What agy prints on stderr when it has no usable login. A headless run then waits for a
@@ -378,7 +385,10 @@ class AntigravityParser:
             return AttemptResult(AUTH, message=message or "Antigravity needs a login", text=text, **common)
         status = result.get("status")
         detail = message or (f"result status {status}" if status else "no result")
-        return AttemptResult(ERROR, message=f"agy exited with status {exit_code}: {detail}", text=text, **common)
+        return AttemptResult(ERROR, message=f"agy exited with status {exit_code}: {detail}", text=text,
+                             health_failure=stream_health_failure(
+                                 haystack, no_result=self.result is None, transport=TRANSPORT_RE,
+                             ), **common)
 
     def _denied_message(self, denied: list[dict[str, Any]], stderr_tail: str) -> str:
         names = sorted({str(item.get("display_name") or item.get("action") or "?") for item in denied})
@@ -585,8 +595,9 @@ class AntigravityRuntime:
         if same_path(home, root.parent) or same_path(home, Path.home()):
             raise RuntimeError(f"{home} is your own home folder; an extra Antigravity account needs its own folder")
         with file_lock(state_dir() / "sync" / f"antigravity-{account.name}.lock", timeout=30):
-            make_private_dir(home)  # holds the account's login file (extra accounts)
+            prepare_account_home(home)  # holds the account's login file (extra accounts)
             gemini = home / ".gemini"
+            prepare_account_home(gemini)
             for folder, plan in self._plans(root, report, primary=account.is_primary):
                 part = sync.new_report()
                 sync.sync(root / folder if folder else root, gemini / folder if folder else gemini, plan, part)

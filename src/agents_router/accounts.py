@@ -10,6 +10,7 @@ import re
 import time
 from typing import Any, BinaryIO
 
+from agents_router import health
 from agents_router.config import Account, QuotaPool, RuntimeConfig, state_dir
 from agents_router.plans import account_cap, account_limits, model_allowed
 from agents_router.fsutil import file_lock, read_json, same_process, try_lock, unlock, write_json
@@ -218,6 +219,7 @@ class Lease:
     path: Path | None = None  # the slot's lock file
 
     pool_slots: list[tuple[BinaryIO, Path]] = field(default_factory=list)
+    trial: health.TrialLease | None = None
 
     def set_owner(self, pid: int, started: int | None, job_id: str | None = None) -> None:
         """Record the worker process, so the slot stays busy if the runner dies before it."""
@@ -225,8 +227,15 @@ class Lease:
         paths = ([self.path] if self.path is not None else []) + [path for _handle, path in self.pool_slots]
         for path in paths:
             write_json(_owner_path(path), {"pid": pid, "started": started, "job_id": job_id})
+        if self.trial is not None:
+            self.trial.set_owner(pid, started)
 
     def release(self) -> None:
+        if self.trial is not None:
+            try:
+                self.trial.release()
+            except OSError:
+                pass  # trial cleanup must not strand ordinary execution slots
         try:
             if self.path is not None:
                 _owner_path(self.path).unlink(missing_ok=True)
@@ -361,6 +370,31 @@ def busy_slots(runtime: RuntimeConfig, account: Account) -> int:
     return busy
 
 
+@dataclass(frozen=True)
+class Blocker:
+    account: str
+    kind: str  # quota, health, or model (model restrictions are never health failures)
+    until: float | None = None
+    reason: str | None = None
+    scope: str = "account"
+    state: str | None = None  # unhealthy or recovering for health blockers
+
+
+@dataclass
+class Ranking:
+    accounts: list[Account] = field(default_factory=list)
+    blockers: list[Blocker] = field(default_factory=list)
+    health: dict[str, health.HealthState] = field(default_factory=dict)
+
+    @property
+    def cooldown_end(self) -> float | None:
+        return min((b.until for b in self.blockers if b.kind == "quota" and b.until is not None), default=None)
+
+    @property
+    def trial_busy(self) -> bool:
+        return any(b.kind == "health" and b.state == "recovering" for b in self.blockers)
+
+
 def ranked_accounts(
     runtime: RuntimeConfig,
     *,
@@ -370,10 +404,12 @@ def ranked_accounts(
     model: str | None = None,
     pool: QuotaPool | None = None,
     now: float | None = None,
-) -> tuple[list[Account], float | None]:
-    """Usable accounts best-first, plus the earliest cooldown end if none are usable."""
+    job_id: str | None = None,
+    skip_rest: bool = False,
+) -> Ranking:
+    """Usable accounts best-first, with distinct quota, health and model blockers."""
 
-    now = now or time.time()
+    now = time.time() if now is None else now
     usage = load_usage(runtime.runtime)
     candidates = runtime.worker_accounts()
     if pinned:
@@ -386,20 +422,38 @@ def ranked_accounts(
     elif not candidates and runtime.session_home is not None:
         raise ValueError(_no_other_profile(runtime))
     exclude = exclude or set()
-    usable: list[Account] = []
-    earliest: float | None = None
+    result = Ranking()
+    usable = result.accounts
     for account in candidates:
         if account.name in exclude:
             continue
         if not account.enabled:
             continue
         if model and not model_allowed(runtime, account_limits(runtime, account), model):
+            result.blockers.append(Blocker(account.name, "model", reason="model not allowed", scope="model:" + model))
             continue  # the account's model list does not include it
         record = account_record(runtime, account, usage)
         ends = [cooldown_until(record, now), pool_cooldown_until(record, pool.name, now) if pool else None]
         until = max((end for end in ends if end is not None), default=None)
         if until is not None:
-            earliest = until if earliest is None else min(earliest, until)
+            pool_blocked = pool is not None and ends[1] == until
+            source = ((record or {}).get("pools") or {}).get(pool.name, {}) if pool_blocked else (record or {})
+            result.blockers.append(Blocker(account.name, "quota", until, source.get("cooldown_reason"),
+                                          "pool:" + pool.name if pool_blocked else "account"))
+            continue
+        try:
+            state = health.query_state(runtime, account, model, job_id=job_id, now=now, skip_rest=skip_rest)
+        except OSError:
+            usable.append(account)  # no trustworthy generation: route without a health lease
+            continue
+        result.health[account.name] = state
+        blocked = [c for c in state.circuits if c.state == "unhealthy" or c.trial_taken]
+        if blocked:
+            # A blocked account is not busy just because its other circuit has a trial.
+            unhealthy = [c for c in blocked if c.state == "unhealthy"]
+            for circuit in unhealthy or blocked:
+                result.blockers.append(Blocker(account.name, "health", circuit.until if unhealthy else None,
+                                              circuit.reason, circuit.scope, circuit.state))
             continue
         usable.append(account)
 
@@ -425,7 +479,7 @@ def ranked_accounts(
         )
 
     usable.sort(key=key)
-    return usable, (earliest if not usable else None)
+    return result
 
 
 def _others(runtime: RuntimeConfig) -> list[str]:
@@ -468,6 +522,7 @@ def _acquire(
     model: str | None = None,
     job_id: str | None = None,
     override: str | None = None,
+    skip_rest: bool = False,
 ) -> tuple[Lease | None, float | None, bool]:
     """Lease the best free account.
 
@@ -479,33 +534,56 @@ def _acquire(
 
     pool = quota.pool_for(runtime, model)
     state = quota.pool_state(runtime, limits.count_active(), time.time(), exclude_job=job_id) if pool else None
-    accounts, earliest = ranked_accounts(
-        runtime, pinned=pinned, exclude=exclude, prefer=prefer, model=model or runtime.default_model, pool=pool
-    )
-    if not override and pool and pool.total is not None and state.executing_totals.get(pool.name, 0) >= pool.total:
-        return None, earliest, bool(accounts)
-    budget_blocked = 0
-    for account in accounts:
-        if not override and pool and pool.weekly_jobs is not None and state.budget_used(account.name, pool.name) >= pool.weekly_jobs:
-            budget_blocked += 1
-            continue
-        if not override and pool and pool.per_account is not None and state.executing.get((account.name, pool.name), 0) >= pool.per_account:
-            continue
-        lease = try_lease(runtime, account, override=override)
-        if lease is not None:
-            if pool and not _lease_pool(lease, runtime, pool, override=override):
+    rejected: set[tuple[str, health.HealthState | None]] = set()
+    while True:
+        ranking = ranked_accounts(
+            runtime, pinned=pinned, exclude=exclude, prefer=prefer, model=model or runtime.default_model,
+            pool=pool, job_id=job_id, skip_rest=skip_rest,
+        )
+        earliest = ranking.cooldown_end if not ranking.accounts else None
+        if not override and pool and pool.total is not None and state.executing_totals.get(pool.name, 0) >= pool.total:
+            return None, earliest, bool(ranking.accounts) or ranking.trial_busy
+        budget_blocked = 0
+        rerank = False
+        for account in ranking.accounts:
+            snapshot = ranking.health.get(account.name)
+            if (account.name, snapshot) in rejected:
                 continue
-            if pool and job_id:
-                from agents_router.jobs import update_status
+            if not override and pool and pool.weekly_jobs is not None and state.budget_used(account.name, pool.name) >= pool.weekly_jobs:
+                budget_blocked += 1
+                continue
+            if not override and pool and pool.per_account is not None and state.executing.get((account.name, pool.name), 0) >= pool.per_account:
+                continue
+            lease = try_lease(runtime, account, override=override)
+            if lease is None:
+                continue
+            try:
+                if pool and not _lease_pool(lease, runtime, pool, override=override):
+                    continue
+                if snapshot is not None:
+                    try:
+                        lease.trial = health.acquire_trial(
+                            runtime, account, model, job_id or "", generation=snapshot.generation, skip_rest=skip_rest,
+                        )
+                    except OSError:
+                        pass  # fail open on health I/O, as at ranking and admission
+                    else:
+                        if lease.trial is None:
+                            lease.release()
+                            rejected.add((account.name, snapshot))
+                            rerank = True
+                            break
+                if pool and job_id:
+                    from agents_router.jobs import update_status
 
-                try:
                     update_status(job_id, account=None, assigned_account=account.name, pool=pool.name)
-                except OSError:
-                    lease.release()
-                    raise
-            update_usage(runtime.runtime, account.name, last_used=time.time())
-            return lease, None, False
-    return None, earliest, len(accounts) > budget_blocked
+                update_usage(runtime.runtime, account.name, last_used=time.time())
+                return lease, None, False
+            except BaseException:
+                lease.release()
+                raise
+        if not rerank:
+            return None, earliest, len(ranking.accounts) > budget_blocked or ranking.trial_busy
 
 
 def acquire(runtime: RuntimeConfig, **kwargs: Any) -> tuple[Lease | None, float | None, bool]:

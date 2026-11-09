@@ -3,7 +3,8 @@
 Behaviour is chosen by environment variables:
   FAKE_CLAUDE_LIMITED   comma-separated account folder names that are "out of quota"
   FAKE_CLAUDE_SCENARIO  success (default) | auth | slow | crash | nostdin | max_turns |
-                       success_exit_1 | success_pause | success_quota | success_auth
+                       success_exit_1 | success_pause | success_quota | success_auth |
+                       no_result | transport | unknown_model | capacity
   FAKE_CLAUDE_RECORD    file to append {"argv", "env", "stdin"} records to
 """
 
@@ -74,6 +75,14 @@ def main():
         "mcp_servers": [{"name": "shared-server", "status": "connected", "source": "user"}],
         "plugins": [{"name": "demo-plugin", "path": "x"}], "skills": ["alpha"], "agents": ["general-purpose"],
     })
+    if scenario == "no_result":
+        return 0
+    if scenario in ("transport", "unknown_model", "capacity"):
+        error = {"transport": "APIConnectionError: connection error", "unknown_model": "unknown model: fake-model",
+                 "capacity": "API Error: 529 overloaded_error"}[scenario]
+        emit({"type": "result", "subtype": "error_during_execution", "is_error": True,
+              "result": error, "session_id": session})
+        return 1
     if scenario == "slow":
         time.sleep(120)
     time.sleep(float(os.environ.get("FAKE_CLAUDE_DELAY", "0") or 0))

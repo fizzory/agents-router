@@ -71,7 +71,7 @@ Every worker run is a job with an ID and its own folder (`spec.json`, `status.js
 | `subagent_result` | Final answer, outcome, session ID, cost, warnings (`max_chars` up to 80000) |
 | `subagent_cancel` | Stop the job and its whole process tree |
 | `subagent_list` | Recent jobs |
-| `subagent_accounts` | Runtimes, accounts, login state, last known usage, cooldowns (no model calls) |
+| `subagent_accounts` | Runtimes, accounts, login state, last known usage, cooldowns and health (no model calls) |
 
 `subagent_start` and `subagent_status` take `wait_seconds` (up to 600, or 240 from a Codex host), so short jobs can be run and collected in one call.
 
@@ -165,12 +165,18 @@ This tool's own MCP server is not removed from the copied config. Each Codex wor
 
 ### Selection and failover
 
-- An explicit `account` on a job always wins.
-- Otherwise the pool skips accounts in cooldown and puts fallback accounts after regular accounts. Within each group, accounts below `usage_ceiling` (default 95%) come first, then the account that holds the conversation being continued, then the lowest reported utilization, then the one used least recently. With `when_full = "refuse"`, accounts at or above the ceiling get no new starts. A job waits up to 15 minutes for a busy slot.
+- An explicit `account` pins the job; it does not bypass an unhealthy state. A plain pin is refused before creation while unhealthy. Once recovering, it claims the trial or queues behind the trial already taken. A role provider that names an account is pinned too.
+- Otherwise the pool skips accounts in cooldown, unhealthy accounts and recovering accounts whose trial is taken, and puts fallback accounts after regular accounts. Within each group, accounts below `usage_ceiling` (default 95%) come first, then the account that holds the conversation being continued, then the lowest reported utilization, then the one used least recently. With `when_full = "refuse"`, accounts at or above the ceiling get no new starts. A job waits up to 15 minutes for a busy slot.
 - Limit detection for Claude: an error result that names a limit, together with a `rejected` `rate_limit_event` or HTTP 429, or the "hit your … limit" text. For Codex: an error message that mentions a usage limit. Codex usage comes from local rollout snapshots and ranks accounts by utilization, as for Claude.
-- The cooldown ends at the first value available: a `Retry-After` in the error, the reset time the CLI reported, then `cooldown_minutes`; never more than 7 days. `agt accounts reset <name>` clears it.
+- The cooldown ends at the first value available: a `Retry-After` in the error, the reset time the CLI reported, then `cooldown_minutes`; never more than 7 days. `agt accounts reset <name>` clears cooldowns and health.
 - On a usage limit the job continues on another account: the Claude session transcript is copied into that account's folder and resumed (verified with Claude Code 2.1.295). Codex restarts with a handoff note containing the task and the partial output. A job pinned to one `account` doesn't fail over.
+- Health is tracked per account folder. Capacity counts once after retries and affects only that account and model. Account-local launch failures, broken connections, missing terminal results and unreadable results affect the whole account. Task, CLI argument, model, configuration, permission and auth rejections, usage limits, missing binaries, machine-wide failures, timeouts, cancellations and lost jobs do not count.
+- Two health failures within 300 seconds make the account or account and model unhealthy for 60 seconds by default. After the rest it is recovering: one real job claims the trial. Success clears the account and tested-model health; a health failure during the trial doubles the rest up to 900 seconds. Neutral outcomes release the trial without changing health. Recovery needs no reset or background model probe.
+- With the breaker on and `failover = "on-limit"`, an unpinned job can move to another account of the same runtime after a health failure, before the threshold too. Read jobs can move mid-run; edit and full jobs move only before the worker starts. The failed folder is excluded for that job, and the warning and handoff name the cause. Started jobs never move to another runtime; later role launches skip unhealthy providers without a rebalance hint.
+- Follow-ups to Codex, Antigravity and Kiro stay on the session's account: refused while unhealthy, resumed as the trial once recovering, or queued behind a trial. Claude keeps its session-transfer behaviour. If every account is unhealthy, starts fail at once; `when_full = "queue"` creates a job that ends `no_account` at once. `override` never bypasses health.
 - `failover = "on-limit"` is the default for every runtime. Extra Antigravity accounts are at your own risk. `failover = "off"` turns switching off; for Antigravity it also keeps unpinned jobs on the primary account. See [provider-terms.md](research/provider-terms.md).
+
+The five health settings are user-only. `circuit_breaker = false` disables health reads, writes and health-driven moves for that runtime. `agt doctor --live` skips the rest for its real checks and records their outcomes, while keeping account pins, usage limits, access and trial exclusivity. See [unhealthy accounts](configuration.md#unhealthy-accounts) for settings and report fields.
 
 Concurrency: no cap on jobs per account folder by default. `.claude.json` has a history of corruption under concurrent writers, so `max_jobs_per_account = 1` brings back one running worker per account folder.
 

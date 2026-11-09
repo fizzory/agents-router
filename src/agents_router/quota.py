@@ -9,7 +9,6 @@ from typing import Any
 
 from agents_router.config import QuotaPool, RuntimeConfig, jobs_dir
 from agents_router.fsutil import read_json
-from agents_router.plans import account_limits, model_allowed
 
 WEEK = 7 * 86400
 
@@ -28,7 +27,8 @@ def job_pool(runtime: RuntimeConfig, status: dict, spec: dict) -> str | None:
     return pool.name if pool else None
 
 
-def room_cap(runtime: RuntimeConfig, now: float, model: str | None = None) -> tuple[int | None, float | None]:
+def room_cap(runtime: RuntimeConfig, now: float, model: str | None = None,
+             *, _doctor_live: bool = False, job_id: str | None = None) -> tuple[int | None, float | None]:
     """Cap and best remaining percent on regular, eligible accounts; unknown uses the top step."""
 
     from agents_router import accounts
@@ -38,12 +38,16 @@ def room_cap(runtime: RuntimeConfig, now: float, model: str | None = None) -> tu
         return None, None
     usage = accounts.load_usage(runtime.runtime)
     remaining = []
-    for account in runtime.worker_accounts():
-        if account.fallback or not model_allowed(runtime, account_limits(runtime, account), model):
+    chosen_model = model or runtime.default_model
+    try:
+        eligible = accounts.ranked_accounts(runtime, model=chosen_model, pool=pool_for(runtime, chosen_model), now=now,
+                                            skip_rest=_doctor_live, job_id=job_id).accounts
+    except ValueError:
+        eligible = []  # no other Claude profile: reports still show the unknown-usage cap
+    for account in eligible:
+        if account.fallback:
             continue
-        record = usage.get(account.name)
-        if accounts.cooldown_until(record, now):
-            continue
+        record = accounts.account_record(runtime, account, usage)
         used = utilization(record, now)
         if used is not None:
             remaining.append(round(max(0.0, min(100.0, (1 - used) * 100)), 10))

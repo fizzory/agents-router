@@ -41,6 +41,8 @@ from agents_router.runtimes.base import (
     JobSpec,
     Launch,
     clean_environment,
+    prepare_account_home,
+    stream_health_failure,
 )
 
 # agents/ linked whole, skills/ and plugins/ entry by entry, AGENTS.md hard-linked
@@ -59,6 +61,11 @@ WORKER_NOTE = (
 LIMIT_RE = re.compile(r"usage limit|rate limit|too many requests|\b429\b|quota|try again at", re.IGNORECASE)
 CAPACITY_RE = re.compile(r"selected model is at capacity|\bserver(?:[ _]is)?[ _]overloaded\b", re.IGNORECASE)
 AUTH_RE = re.compile(r"not logged in|\b401\b|unauthorized|log ?in again|token (has )?expired|refresh token", re.IGNORECASE)
+TRANSPORT_RE = re.compile(
+    r"\bstream (?:disconnected|closed|reset|broken)|\bconnection (?:failed|reset|closed|refused)|"
+    r"\berror sending request\b|\btransport error\b|\bhttp_connection_failed\b|\bresponse_stream_disconnected\b",
+    re.IGNORECASE,
+)
 TOOL_ITEMS = {"command_execution", "file_change", "mcp_tool_call", "web_search"}
 
 
@@ -505,7 +512,10 @@ class CodexParser:
         if AUTH_RE.search(haystack):
             return AttemptResult(AUTH, message=message or "authentication failed", text=self.last_text, **common)
         message = f"codex exited with status {exit_code}" + (f": {message}" if message else "")
-        return AttemptResult(ERROR, message=message, text=self.last_text, **common)
+        return AttemptResult(ERROR, message=message, text=self.last_text, health_failure=stream_health_failure(
+            "\n".join([*terminal, stderr_tail]), no_result=not self.completed and not self.failures,
+            transport=TRANSPORT_RE,
+        ), **common)
 
 
 class CodexRuntime:
@@ -604,6 +614,7 @@ class CodexRuntime:
         report = sync.new_report()
         if account.is_primary or same_path(account.home, config.primary):
             return report
+        prepare_account_home(account.home)
         with file_lock(state_dir() / "sync" / f"codex-{account.name}.lock", timeout=30):
             sync.sync(config.primary, account.home, SYNC_PLAN, report)
             self._write_config(config.primary, account.home, report)

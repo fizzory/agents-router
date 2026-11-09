@@ -195,6 +195,8 @@ sequenceDiagram
 
 Switching applies to subagent jobs; your main session stays on its own account. A job pinned with `account` never switches. Kiro jobs run on your one Kiro login, so they never switch.
 
+Unhealthy accounts are skipped automatically. After a health failure, an unpinned read job can move to another account of the same CLI; edit and full jobs move only before the worker starts. Capacity retries finish first. Later role calls skip unhealthy providers and return at their normal priority for a trial after the rest. No started job moves to another CLI. See [unhealthy accounts](docs/configuration.md#unhealthy-accounts).
+
 ## How the shared setup works
 
 Your normal config folder (`~/.claude`, `~/.codex`) is the one pool. Each extra account's folder holds only its login, state and session history, and is pointed at the pool before every run:
@@ -219,12 +221,18 @@ Your normal config folder (`~/.claude`, `~/.codex`) is the one pool. Each extra 
 | `max_jobs` | No cap | Subagents running at once on this machine |
 | `max_jobs_per_account` | No cap | Workers at once per account; extra jobs wait |
 | `usage_ceiling` | `0.95` | No new jobs on an account at or above 95% of a usage window it reports |
-| `failover` | `"on-limit"` | Continue on the next account at a usage limit |
+| `failover` | `"on-limit"` | Continue on the next account at a usage limit or a health failure safe to move |
+| `circuit_breaker` | `true` | Skip unhealthy accounts; `false` disables health tracking and health-driven moves |
+| `circuit_failure_threshold` | `2` | Health failures before an account or account and model becomes unhealthy |
+| `circuit_failure_window_seconds` | `300` | Failure window, in seconds from the streak's first failure |
+| `circuit_open_seconds` | `60` | First rest before one real job tries the recovering account |
+| `circuit_max_open_seconds` | `900` | Longest rest after failed trials; at least `circuit_open_seconds` |
 | `plan` | Not set | Plan preset caps; `"auto"` reads a Claude account's plan from its login |
 | `max_depth` | `1` | Workers can't start subagents of their own |
 
 - **Change a setting:** `agt config set <key> <value>`; per-CLI keys take the CLI first, e.g. `agt config set claude.max_jobs_per_account 1` ([configuration](docs/configuration.md#agt-config)).
-- **More jobs at once:** `override=<the user's own words>` (relay or MCP) or `--override "..."` (`agt run`, `agt start`) lifts agt's caps and queueing for one start. Cooldowns after real usage limits, model and effort limits, login, depth and access still apply ([details](docs/configuration.md#a-user-authorized-override)).
+- **Health settings:** all five `circuit_*` keys are user-only under each CLI, e.g. `agt config set codex.circuit_open_seconds 30 --user`. Workspace and local values are ignored with a notice ([details](docs/configuration.md#unhealthy-accounts)).
+- **More jobs at once:** `override=<the user's own words>` (relay or MCP) or `--override "..."` (`agt run`, `agt start`) lifts agt's caps and queueing for one start; usage-limit cooldowns, unhealthy accounts, model and effort restrictions, login, depth and access still apply ([details](docs/configuration.md#a-user-authorized-override)).
 
 ## Safety
 
@@ -278,7 +286,9 @@ Each extra account is its own config folder with its own login: `agt accounts ad
 <details>
 <summary><b>Does it switch accounts when one hits its usage limit?</b></summary>
 
-For subagent jobs, yes: a Claude, Codex or Gemini job continues on the next account, and a Claude conversation moves with its transcript. Your main session stays on its own account, and `failover = "off"` turns switching off. Extra Antigravity accounts are at your own risk; Kiro uses one account. See [Provider terms and your accounts](#provider-terms-and-your-accounts).
+For unpinned subagent jobs, yes: a Claude, Codex or Gemini job continues on the next account, and a Claude conversation moves with its transcript. Health failures can also move read jobs within the same CLI; edit and full jobs move only before the worker starts. Capacity retries finish first. Two health failures in 300 seconds make an account or account and model unhealthy for 60 seconds by default. After the rest, the next eligible job is the trial: success restores normal routing, while a health failure doubles the rest up to 15 minutes. Recovery needs no reset or prompt. Later role calls skip unhealthy providers; a started job never moves to another CLI. See [unhealthy accounts](docs/configuration.md#unhealthy-accounts).
+
+Your main session stays on its own account. `failover = "off"` turns switching off; user-only `circuit_breaker = false` turns health tracking off. Extra Antigravity accounts are at your own risk; Kiro uses one account. See [Provider terms and your accounts](#provider-terms-and-your-accounts).
 
 </details>
 

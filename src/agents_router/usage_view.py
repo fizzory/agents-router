@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agents_router import accounts, quota
+from agents_router import accounts, health_view, quota
 from agents_router.config import Config, RuntimeConfig
 from agents_router.limits import NAMES, utilization
 
@@ -157,12 +157,15 @@ def room_line(config: Config, runtimes: list[str] | None = None, now: float | No
                 text = (text or account.name) + " [" + "; ".join(pool["state"] for pool in pools) + "]"
             if text:
                 texts.append(text)
+        health_text = health_view.summary(runtime, listed, now)
+        if health_text:
+            texts.append(health_text)
         cap, left = quota.room_cap(runtime, now)
         if cap is not None:
             detail = f"{left:g}% left" if left is not None else "no usage data"
             effective = min(cap, runtime.max_jobs) if runtime.max_jobs is not None else cap
             texts.append(f"{cap} jobs at a time (max_jobs_by_room, {detail}; {counts.by_runtime.get(name, 0)} running; effective runtime cap {effective})")
-        if runtime.pools or cap is not None or any("%" in text or "limit until" in text for text in texts):
+        if health_text or runtime.pools or cap is not None or any("%" in text or "limit until" in text for text in texts):
             parts.append(f"{NAMES[name]} " + ", ".join(texts))
         elif _available_runtime(name):
             count = len(listed)

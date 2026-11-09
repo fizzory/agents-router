@@ -2,7 +2,8 @@
 
   FAKE_AGY_SCENARIO  success (default) | quota | login_prompt | denied | success_exit_1 |
                     success_pause | success_quota | success_auth |
-                    early_auth (stdout events, then the login prompt; keeps running)
+                    early_auth (stdout events, then the login prompt; keeps running) |
+                    no_result | transport | unknown_model | capacity
   FAKE_AGY_LIMITED   comma-separated account folder names (HOME basenames) that report a quota error
   FAKE_AGY_TOOLS     JSON list of tool calls ({"name", "args"}) the "model" makes. Like agy, the fake
                      runs every PreToolUse hook in HOME/.gemini/config/hooks.json for each call and
@@ -91,6 +92,13 @@ def main():
         return wait_for_login()
     conversation = argv[argv.index("--conversation") + 1] if "--conversation" in argv else "conv-1"
     emit({"event": "init", "conversation_id": conversation, "init": {"model": "gemini-test", "permission_mode": "request-review", "tools": ["a", "b"]}})
+    if scenario == "no_result":
+        return 0
+    if scenario in ("transport", "unknown_model", "capacity"):
+        error = {"transport": "connection reset: ECONNRESET", "unknown_model": "unknown model: fake-model",
+                 "capacity": "503 UNAVAILABLE: No capacity available for model fake-model"}[scenario]
+        emit({"event": "result", "result": {"conversation_id": conversation, "status": "ERROR", "error": error}})
+        return 1
     if reviewer:
         answer = os.environ.get("FAKE_AGY_REVIEW") or '{"decision":"allow","risk":"low","reason":"fake reviewer says fine"}'
         emit({"event": "result", "result": {"conversation_id": "review-1", "status": "SUCCESS", "response": answer + "\n", "num_turns": 1}})

@@ -114,6 +114,18 @@ class SetupJournalTests(unittest.TestCase):
                               claude_primary=home / ".claude-eval")
         self.assertFalse((home / ".claude").exists())
 
+    def test_host_kiro_doctor_reads_chat_help(self):
+        result = self.run_agt("doctor", "--runtime", "kiro", "--json")
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        report = json.loads(result.stdout)
+        self.assertNotIn("couldn't read", report["engine"]["reason"])
+        self.assertTrue(report["engine"]["stream_json"])
+        calls = [json.loads(line) for line in (self.root / "records" / "host.jsonl").read_text().splitlines()]
+        self.assertIn(["chat", "--help"], [row["argv"] for row in calls if row["kind"] == "kiro"])
+        rendered = self.run_agt("doctor", "--runtime", "kiro")
+        self.assertEqual(rendered.returncode, 0, rendered.stderr.decode())
+        self.assertNotIn(b"chat --help exited", rendered.stdout)
+
     def test_role_presentation_references_match_fixture_proposal(self):
         fixture = CASES / "setup-approve-roles"
         shutil.copytree(fixture / "files", self.workspace, dirs_exist_ok=True)

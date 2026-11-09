@@ -151,6 +151,63 @@ class SubagentsTests(ConfigBase):
         self.assertIn("prefer_roles must be true or false", shown["error"])
 
 
+class CircuitBreakerTests(ConfigBase):
+    def test_every_runtime_lists_the_defaults_as_user_only(self):
+        code, shown = self.json("config", "show")
+        self.assertEqual(code, 0)
+        rows = {row["key"]: row for row in shown["settings"]}
+        defaults = {"circuit_breaker": True, "circuit_failure_threshold": 2,
+                    "circuit_failure_window_seconds": 300, "circuit_open_seconds": 60,
+                    "circuit_max_open_seconds": 900}
+        for runtime in ("claude", "codex", "antigravity", "kiro"):
+            for field, value in defaults.items():
+                with self.subTest(runtime=runtime, field=field):
+                    row = rows[f"{runtime}.{field}"]
+                    self.assertEqual((row["value"], row["source"], row["user_only"]), (value, "default", True))
+
+    def test_set_open_seconds_and_toggle_the_breaker_in_the_user_file(self):
+        code, report = self.json("config", "set", "codex.circuit_open_seconds", "30")
+        self.assertEqual((code, report["old"], report["new"], report["level"]), (0, 60, 30, "user"))
+        self.assertEqual(load_config().runtime("codex").circuit_open_seconds, 30)
+        code, report = self.json("config", "set", "codex.circuit_breaker", "false")
+        self.assertEqual((code, report["old"], report["new"], report["level"]), (0, True, False, "user"))
+        self.assertFalse(load_config().runtime("codex").circuit_breaker)
+        code, shown = self.json("config", "show")
+        rows = {row["key"]: row for row in shown["settings"]}
+        self.assertEqual((code, rows["codex.circuit_open_seconds"]["value"],
+                          rows["codex.circuit_open_seconds"]["source"]), (0, 30, "user"))
+        self.assertFalse(rows["codex.circuit_breaker"]["value"])
+        self.assertFalse(self.team_file.exists())
+
+    def test_invalid_values_are_refused_without_changing_the_file(self):
+        self.assertEqual(self.agt("config", "set", "codex.circuit_open_seconds", "30")[0], 0)
+        before = self.text(self.user_file)
+        for field, value, message in (
+            ("circuit_failure_threshold", "0", "must be at least 1"),
+            ("circuit_failure_window_seconds", "0", "must be at least 1"),
+            ("circuit_open_seconds", "0", "must be at least 1"),
+            ("circuit_max_open_seconds", "0", "must be at least 1"),
+            ("circuit_max_open_seconds", "29", "circuit_max_open_seconds must be at least circuit_open_seconds"),
+            ("circuit_open_seconds", "901", "circuit_max_open_seconds must be at least circuit_open_seconds"),
+            ("circuit_breaker", "maybe", "takes true or false"),
+        ):
+            with self.subTest(field=field, value=value):
+                code, _, err = self.agt("config", "set", f"codex.{field}", value)
+                self.assertEqual(code, 2)
+                self.assertIn(message, err)
+                self.assertEqual(self.text(self.user_file), before)
+
+    def test_explicit_workspace_and_local_changes_are_refused(self):
+        for flag in ("--workspace", "--local"):
+            with self.subTest(flag=flag):
+                code, _, err = self.agt("config", "set", "codex.circuit_open_seconds", "30", flag)
+                self.assertEqual(code, 2)
+                self.assertIn("goes in your user settings only", err)
+        self.assertFalse(self.user_file.exists())
+        self.assertFalse(self.team_file.exists())
+        self.assertFalse(self.local_file.exists())
+
+
 class SetTests(ConfigBase):
     def test_set_writes_the_workspace_file_keeps_comments_and_saves_a_backup(self):
         self.team_file.write_text("# the team's\n[codex]\nmax_jobs = 2  # two at most\ncooldown_minutes = 9\n",

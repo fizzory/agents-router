@@ -140,6 +140,11 @@ class RuntimeConfig:
     cooldown_minutes: int = 60
     capacity_retries: int = 3
     capacity_retry_seconds: int = 30  # initial delay; doubles for each retry
+    circuit_breaker: bool = True
+    circuit_failure_threshold: int = 2
+    circuit_failure_window_seconds: int = 300
+    circuit_open_seconds: int = 60
+    circuit_max_open_seconds: int = 900
     windows_sandbox: str = "unelevated"  # [codex] only
     reasoning_summary: str = "detailed"  # [codex] only; off leaves the CLI default alone
     engine: str = "auto"  # [kiro] only: the agent engine jobs name (KIRO_ENGINES)
@@ -538,10 +543,23 @@ def _runtime_from(name: str, data: dict[str, Any]) -> RuntimeConfig:
         raise ValueError(f"[{name}] usage_ceiling must be above 0 and at most 1")
     capacity_retries = data.get("capacity_retries", 3)
     capacity_retry_seconds = data.get("capacity_retry_seconds", 30)
+    circuit_breaker = data.get("circuit_breaker", True)
+    if not isinstance(circuit_breaker, bool):
+        raise ValueError(f"[{name}] circuit_breaker must be true or false")
+    circuit_failure_threshold = data.get("circuit_failure_threshold", 2)
+    circuit_failure_window_seconds = data.get("circuit_failure_window_seconds", 300)
+    circuit_open_seconds = data.get("circuit_open_seconds", 60)
+    circuit_max_open_seconds = data.get("circuit_max_open_seconds", 900)
     for key, value, minimum in (("capacity_retries", capacity_retries, 0),
-                                ("capacity_retry_seconds", capacity_retry_seconds, 1)):
+                                ("capacity_retry_seconds", capacity_retry_seconds, 1),
+                                ("circuit_failure_threshold", circuit_failure_threshold, 1),
+                                ("circuit_failure_window_seconds", circuit_failure_window_seconds, 1),
+                                ("circuit_open_seconds", circuit_open_seconds, 1),
+                                ("circuit_max_open_seconds", circuit_max_open_seconds, 1)):
         if type(value) is not int or value < minimum:
             raise ValueError(f"[{name}] {key} must be an integer at least {minimum}")
+    if circuit_max_open_seconds < circuit_open_seconds:
+        raise ValueError(f"[{name}] circuit_max_open_seconds must be at least circuit_open_seconds")
     per_account = data.get("max_jobs_per_account")
     if per_account is not None and (type(per_account) is not int or per_account < 1):
         raise ValueError(f"[{name}] max_jobs_per_account must be an integer at least 1; remove the line for no cap")
@@ -560,6 +578,11 @@ def _runtime_from(name: str, data: dict[str, Any]) -> RuntimeConfig:
         cooldown_minutes=max(1, int(data.get("cooldown_minutes", 60))),
         capacity_retries=capacity_retries,
         capacity_retry_seconds=capacity_retry_seconds,
+        circuit_breaker=circuit_breaker,
+        circuit_failure_threshold=circuit_failure_threshold,
+        circuit_failure_window_seconds=circuit_failure_window_seconds,
+        circuit_open_seconds=circuit_open_seconds,
+        circuit_max_open_seconds=circuit_max_open_seconds,
         windows_sandbox=windows_sandbox,
         reasoning_summary=reasoning_summary,
         engine=kiro_engine,
@@ -586,7 +609,9 @@ def _runtime_from(name: str, data: dict[str, Any]) -> RuntimeConfig:
 
 
 TOP_KEYS = ("job_retention_days", "max_depth", "max_jobs")
-USER_ONLY = ("primary", "binary", "accounts", "ignore")  # machine-wide: a workspace file can't set them
+# Machine-wide: a workspace file can't set them.
+USER_ONLY = ("primary", "binary", "accounts", "ignore", "circuit_breaker", "circuit_failure_threshold",
+             "circuit_failure_window_seconds", "circuit_open_seconds", "circuit_max_open_seconds")
 _legacy_noted = False
 
 
@@ -793,6 +818,11 @@ def dump_config(config: Config) -> str:
             f"cooldown_minutes = {runtime.cooldown_minutes}",
             f"capacity_retries = {runtime.capacity_retries}",
             f"capacity_retry_seconds = {runtime.capacity_retry_seconds}",
+            f"circuit_breaker = {_toml_value(runtime.circuit_breaker)}",
+            f"circuit_failure_threshold = {runtime.circuit_failure_threshold}",
+            f"circuit_failure_window_seconds = {runtime.circuit_failure_window_seconds}",
+            f"circuit_open_seconds = {runtime.circuit_open_seconds}",
+            f"circuit_max_open_seconds = {runtime.circuit_max_open_seconds}",
         ]
         if runtime.binary:
             lines.append(f"binary = {_toml_value(runtime.binary)}")

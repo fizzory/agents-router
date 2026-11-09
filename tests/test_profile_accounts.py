@@ -150,12 +150,12 @@ class SessionTests(ProfileHome):
         with self.assertRaisesRegex(ValueError, "this session runs in"):
             accounts.ranked_accounts(config, pinned="claude")
         # A folder with the session's login is skipped unpinned, but may be named.
-        ranked, _ = accounts.ranked_accounts(config, pinned="claude-personal")
+        ranked = accounts.ranked_accounts(config, pinned="claude-personal").accounts
         self.assertEqual(self.names(ranked), ["claude-personal"])
 
     def test_a_short_name_picks_a_profile(self):
         self.session(self.default)
-        ranked, _ = accounts.ranked_accounts(self.claude(), pinned="ntb")
+        ranked = accounts.ranked_accounts(self.claude(), pinned="ntb").accounts
         self.assertEqual(self.names(ranked), ["claude-ntb"])
         with self.assertRaisesRegex(ValueError, "Known: .*claude-ntb"):
             accounts.ranked_accounts(self.claude(), pinned="nope")
@@ -182,14 +182,14 @@ class SessionTests(ProfileHome):
         self.session(self.ntb)
         config = self.claude('[claude]\norder = ["claude-personal", "claude"]\n')
         self.assertEqual(self.names(config.worker_accounts()), ["claude-personal"])
-        ranked, _ = accounts.ranked_accounts(config)
+        ranked = accounts.ranked_accounts(config).accounts
         self.assertEqual(self.names(ranked), ["claude-personal"])
 
     def test_agt_accounts_come_before_found_profiles(self):
         self.session(self.ntb)
         homes = self.agt / "homes" / "claude"
         config = self.claude(f'[[claude.accounts]]\nname = "pool"\nhome = {json.dumps(str(homes / "pool"))}\n')
-        ranked, _ = accounts.ranked_accounts(config)
+        ranked = accounts.ranked_accounts(config).accounts
         self.assertEqual(self.names(ranked), ["pool", "claude"])
 
     def test_two_sessions_at_once(self):
@@ -273,9 +273,9 @@ class UsageTests(ProfileHome):
         accounts.set_cooldown("claude", "claude-personal", time.time() + 600, "limit")
         claude = config.find("claude")
         self.assertIsNotNone(accounts.cooldown_until(accounts.account_record(config, claude, accounts.load_usage("claude"))))
-        usable, earliest = accounts.ranked_accounts(config)
-        self.assertEqual(usable, [])  # claude's login is cooling down through claude-personal
-        self.assertIsNotNone(earliest)
+        ranking = accounts.ranked_accounts(config)
+        self.assertEqual(ranking.accounts, [])  # claude's login is cooling down through claude-personal
+        self.assertIsNotNone(ranking.cooldown_end)
 
     def test_usage_from_another_login_is_ignored(self):
         self.session(self.ntb)

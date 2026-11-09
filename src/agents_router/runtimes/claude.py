@@ -55,6 +55,8 @@ from agents_router.runtimes.base import (
     JobSpec,
     Launch,
     clean_environment,
+    prepare_account_home,
+    stream_health_failure,
 )
 
 SYNC_PLAN = sync.SyncPlan(
@@ -137,6 +139,11 @@ LIMIT_HINT_RE = re.compile(r"limit|\b429\b", re.IGNORECASE)
 AUTH_RE = re.compile(
     r"invalid api key|please run /login|not logged in|log in to|login expired|"
     r"oauth token has expired|authentication_error|invalid bearer token",
+    re.IGNORECASE,
+)
+TRANSPORT_RE = re.compile(
+    r"\bAPIConnectionError\b|\bconnection (?:error|failed|reset|closed|refused)\b|"
+    r"\b(?:stream|socket) (?:disconnected|closed|reset|broken)|\bfetch failed\b",
     re.IGNORECASE,
 )
 
@@ -276,7 +283,9 @@ class ClaudeParser:
             message += f": {detail}"
         elif not self.result:
             message += " and no result"
-        return AttemptResult(ERROR, message=message, text=text, **common)
+        return AttemptResult(ERROR, message=message, text=text, health_failure=stream_health_failure(
+            terminal, no_result=self.result is None, transport=TRANSPORT_RE,
+        ), **common)
 
 
 def _timestamp(value: Any) -> float | None:
@@ -434,6 +443,7 @@ class ClaudeRuntime:
         report = sync.new_report()
         # A profile with its own setup ("own") runs as it is: nothing is linked or passed in.
         shared = account.setup != "own" and not (account.is_primary or same_path(account.home, config.primary))
+        prepare_account_home(account.home, create=shared)
         source = _setup_source(config, account) if shared else config.primary
         if shared:
             from agents_router.accounts import _home_key

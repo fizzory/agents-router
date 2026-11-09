@@ -13,10 +13,10 @@ from dataclasses import dataclass, field
 import time
 from typing import Any
 
-from agents_router import accounts, quota
+from agents_router import accounts, health, quota
 from agents_router.config import Config, RUNTIMES, jobs_dir, state_dir
 from agents_router.fsutil import pid_alive, read_json, unlock
-from agents_router.plans import Limits, account_limits, cap_effort, model_allowed
+from agents_router.plans import Limits, account_limits, cap_effort
 
 ACTIVE_STATES = ("queued", "starting", "running")
 LIMIT = "limit"
@@ -39,6 +39,10 @@ class LimitError(ValueError):
     """A job was refused because a limit is reached. The message says what to do instead."""
 
     outcome = LIMIT
+
+
+class TrialBusy(LimitError):
+    """A role provider's recovery trial was taken; try its next provider before queueing."""
 
 
 @dataclass
@@ -132,6 +136,8 @@ class Room:
     pool_full: bool = False
     pool_budget_hit: bool = False
     pool_budget_used: int = 0
+    blockers: list[accounts.Blocker] = field(default_factory=list)
+    health: dict[str, health.HealthState] = field(default_factory=dict)
 
 
 def _source(limits: Limits) -> str:
@@ -145,24 +151,22 @@ def _source(limits: Limits) -> str:
 
 
 def room(config: Config, runtime_name: str, counts: Counts, *, pinned: str | None, model: str | None,
-         now: float, override: str | None = None) -> Room:
+         now: float, override: str | None = None, _doctor_live: bool = False) -> Room:
     runtime = config.runtime(runtime_name)
     usage = accounts.load_usage(runtime_name)
-    ranked, earliest = accounts.ranked_accounts(runtime, pinned=pinned, now=now)
     pool = quota.pool_for(runtime, model)
+    ranking = accounts.ranked_accounts(runtime, pinned=pinned, model=model or runtime.default_model, pool=pool, now=now,
+                                       skip_rest=_doctor_live)
     state = quota.pool_state(runtime, counts, now)
-    result = Room(cooldown_end=earliest, pool=pool)
+    result = Room(cooldown_end=ranking.cooldown_end, pool=pool, blockers=ranking.blockers, health=ranking.health)
     if not override and pool and pool.total is not None and state.totals.get(pool.name, 0) >= pool.total:
         result.pool_total_hit = True
-    allowed = []
-    for account in ranked:
-        limits = account_limits(runtime, account)
-        if model_allowed(runtime, limits, model):
-            allowed.append((account, limits))
-        else:
-            result.allowed_models = limits.models or []
-            result.models_source = limits.models_source or ""
-    if ranked and not allowed:
+    allowed = [(account, account_limits(runtime, account)) for account in ranking.accounts]
+    if not allowed and ranking.blockers and all(b.kind == "model" for b in ranking.blockers):
+        blocked = runtime.find(ranking.blockers[-1].account)
+        limits = account_limits(runtime, blocked)
+        result.allowed_models = limits.models or []
+        result.models_source = limits.models_source or ""
         result.model_blocked = True
         return result
     if not override and pool and allowed and pool.weekly_jobs is not None:
@@ -268,10 +272,13 @@ class Admission:
     account: str | None = None  # best eligible account right now (the runner leases its own)
     effort: str | None = None
     warnings: list[str] = field(default_factory=list)
+    health: health.HealthState | None = None
+    queue_reason: str | None = None
 
 
 def acquire_execution_slots(config: Config, runtime_name: str, model: str | None = None,
-                            *, override: str | None = None) -> list | None:
+                            *, override: str | None = None, _doctor_live: bool = False,
+                            job_id: str | None = None) -> list | None:
     """Lease the global and runtime caps at execution, including jobs admitted to queue.
 
     These slots join the account lease, so its owner tracking and cleanup cover
@@ -279,7 +286,7 @@ def acquire_execution_slots(config: Config, runtime_name: str, model: str | None
     """
 
     runtime = config.runtime(runtime_name)
-    room_cap, _ = quota.room_cap(runtime, time.time(), model)
+    room_cap, _ = quota.room_cap(runtime, time.time(), model, _doctor_live=_doctor_live, job_id=job_id)
     runtime_caps = [cap for cap in (runtime.max_jobs, room_cap) if cap is not None]
     caps = [("global", config.max_jobs), (runtime_name, min(runtime_caps) if runtime_caps else None)]
     slots = []
@@ -307,6 +314,7 @@ def admit(
     effort: str | None = None,
     override: str | None = None,
     now: float | None = None,
+    _doctor_live: bool = False,
 ) -> Admission:
     """Raise LimitError if the job can't start now; else say which account is expected to take it."""
 
@@ -320,6 +328,17 @@ def admit(
     counts = count_active(now)
     queue = runtime.when_full == "queue" and not override
     name = NAMES.get(runtime_name, runtime_name)
+    current = None
+    if account and runtime.circuit_breaker:
+        current = room(config, runtime_name, counts, pinned=account, model=model, now=now, override=override,
+                       _doctor_live=_doctor_live)
+        unhealthy = [b for b in current.blockers if b.kind == "health" and b.state == "unhealthy"]
+        if unhealthy:
+            blocker = min(unhealthy, key=lambda b: b.until)
+            until = time.strftime("%H:%M", time.localtime(blocker.until))
+            raise _refusal(config,
+                f"{blocker.account} is unhealthy until {until} · last error: {blocker.reason}. "
+                "Omit account to let agt pick another, or wait for it to recover.", overridable=False)
     if not queue and not override:
         if config.max_jobs and counts.total >= config.max_jobs:
             raise _refusal(config, 
@@ -333,7 +352,7 @@ def admit(
                 f"{name} is at its limit: {running} of {runtime.max_jobs} subagents running "
                 f"(max_jobs under [{runtime_name}]). {_tail(found, WAIT)}"
             )
-    cap, left = quota.room_cap(runtime, now, model)
+    cap, left = quota.room_cap(runtime, now, model, _doctor_live=_doctor_live)
     running = counts.by_runtime.get(runtime_name, 0)
     if not override and cap is not None and running >= cap:
         found = _alternatives(config, runtime_name, counts, now)
@@ -341,11 +360,15 @@ def admit(
         tail = (f"Run this on {' or '.join(NAMES[other] for other in found)}, or {WAIT}."
                 if found else "Wait for quota to reset or a running job to finish.")
         raise _refusal(config, f"{name} {detail}, so {cap} jobs at a time (max_jobs_by_room); {running} are running. {tail}")
-    current = room(config, runtime_name, counts, pinned=account, model=model, now=now, override=override)
+    if current is None:
+        current = room(config, runtime_name, counts, pinned=account, model=model, now=now, override=override,
+                       _doctor_live=_doctor_live)
+    unhealthy = [b for b in current.blockers if b.kind == "health" and b.state == "unhealthy"]
     admission = Admission(effort=effort)
     if current.accounts:
         chosen, limits = current.accounts[0]
         admission.account = chosen.name
+        admission.health = current.health.get(chosen.name)
         capped = cap_effort(effort, limits)
         if capped != effort:
             admission.warnings.append(
@@ -367,6 +390,10 @@ def admit(
         tail = "Use Opus instead." if "claude" in found else _tail(found, "try again after the weekly budget resets")
         where = f"account '{account}'" if account else "every account"
         raise _refusal(config, f"{pool.name.capitalize()} budget used up: {current.pool_budget_used} of {pool.weekly_jobs} jobs this week on {where} (weekly_jobs in pool {pool.name}). {tail}")
+    recovering = [b for b in current.blockers if b.kind == "health" and b.state == "recovering"]
+    if recovering:
+        admission.queue_reason = f"queued · {recovering[0].account} recovering (trial job running)"
+        return admission
     if queue:
         return admission  # the runner waits for a free slot
     where = f"{name} account '{account}'" if account else name
@@ -394,4 +421,8 @@ def admit(
         until = time.strftime("%H:%M", time.localtime(current.cooldown_end))
         raise _refusal(config, f"{where} is at its usage limit until {until}. {_tail(found, f'try again after {until}')}",
                        overridable=False)
+    if unhealthy:
+        until = time.strftime("%H:%M", time.localtime(min(b.until for b in unhealthy)))
+        scoped = f" for {model or runtime.default_model or 'default'}" if any(b.scope.startswith("model:") for b in unhealthy) else ""
+        raise _refusal(config, f"every {runtime_name} account is unhealthy{scoped}; retrying around {until}", overridable=False)
     return admission  # no accounts at all: the runner reports that as before
