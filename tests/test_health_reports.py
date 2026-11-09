@@ -188,7 +188,8 @@ class HealthReportTests(TempHome):
                     self.seed("work", runtime=runtime)
                     self.seed("work", runtime=runtime, scope="model:gpt-6.1-sol", reason="model at capacity")
                 result, output = self.run_cli("accounts", "reset", "work", "--runtime", "codex")
-                self.assertEqual((result, output.strip()), (0, f"codex account 'work': {message}"))
+                detail = (message + "; ") if message != "nothing to clear" else ""
+                self.assertEqual((result, output.strip()), (0, f"codex account 'work': {detail}usage check failed"))
                 self.assertEqual(health_view.account_health(runtime, runtime.find("work"), self.now), {})
                 self.assertIsNone(accounts.cooldown_until(accounts.load_usage("codex").get("work"), self.now))
 

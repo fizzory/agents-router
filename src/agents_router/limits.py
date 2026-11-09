@@ -324,7 +324,7 @@ def admit(
     now = now or time.time()
     runtime = config.runtime(runtime_name)
     if runtime_name == "codex":
-        usage_view.refresh_codex(config)  # reads local files only
+        usage_view.refresh_codex(config, live=False)  # admission may hold the global lock: local files only
     counts = count_active(now)
     queue = runtime.when_full == "queue" and not override
     name = NAMES.get(runtime_name, runtime_name)

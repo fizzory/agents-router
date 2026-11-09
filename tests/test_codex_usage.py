@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 import time
 import unittest
@@ -35,7 +36,8 @@ class RolloutTests(TempHome):
         path = self.rollout(limits(10.0, 5.0), limits(92.0, 27.0))
         self.assertEqual(find_rollout(self.primary, THREAD), path)
         self.assertIsNone(find_rollout(self.primary, "other"))
-        found = last_rate_limits(path)
+        found, observed = last_rate_limits(path)
+        self.assertEqual(observed, path.stat().st_mtime)
         windows = usage_windows(found)
         self.assertEqual(windows["five_hour"], {"utilization": 0.92, "resets_at": 1792106822.0})
         self.assertAlmostEqual(windows["seven_day"]["utilization"], 0.27)
@@ -49,6 +51,15 @@ class RolloutTests(TempHome):
         record = accounts.load_usage("codex")["c1"]
         self.assertEqual(record["windows"]["five_hour"]["utilization"], 0.92)
         self.assertEqual(accounts.max_utilization(record), 0.92)
+
+    def test_snapshot_uses_its_event_timestamp(self):
+        path = self.rollout(limits(95, 0))
+        event = {"timestamp": "2026-11-09T04:02:32.342Z", "payload": {"rate_limits": limits(10, 0)}}
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event) + "\n")
+        found, observed = last_rate_limits(path)
+        self.assertEqual(found, limits(10, 0))
+        self.assertEqual(observed, datetime(2026, 11, 9, 4, 2, 32, 342000, timezone.utc).timestamp())
 
     def test_limit_uses_snapshot_reset_time(self):
         reset = time.time() + 3600
