@@ -786,7 +786,21 @@ pub async fn refresh_plugins(paths: &InstallPaths) -> Result<()> {
         Duration::from_secs(120),
     )
     .await?;
-    atomic_bytes(&marker, b"updated\n", 0o600)
+    atomic_bytes(&marker, b"updated\n", 0o600)?;
+    crate::app::log(&format!("plugins refreshed version={version}"));
+    #[cfg(debug_assertions)]
+    if let Some(root) = std::env::var_os("AGT_UPDATE_TEST_ROOT").map(PathBuf::from) {
+        if paths.support == root.join("support") && root.join("test-only").is_file() {
+            use std::io::Write;
+            let mut audit = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(root.join("refresh-calls"))
+                .map_err(err)?;
+            writeln!(audit, "{version}").map_err(err)?;
+        }
+    }
+    Ok(())
 }
 pub fn finish_first_launch(paths: &InstallPaths) -> Result<()> {
     let mut r = record(paths);
@@ -807,6 +821,66 @@ pub fn saved_foreign(paths: &InstallPaths) -> Option<ForeignCli> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn refresh_record_is_once_per_version_and_failure_can_retry() {
+        let root = std::env::temp_dir().join(format!("agt-refresh-{}", nonce()));
+        fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let paths = InstallPaths {
+            support: root.join("support"),
+            bin: root.join("bin"),
+            agt_home: root.join("agt"),
+            home: root.clone(),
+            applications: vec![root.join("Applications")],
+        };
+        fs::create_dir_all(paths.launcher().parent().unwrap()).unwrap();
+        atomic_bytes(&paths.launcher(), b"#!/bin/sh\n[ \"$1 $2\" = 'update --no-package' ] || exit 99\nprintf 'run\\n' >> calls\n[ ! -f fail ]\n", 0o755).unwrap();
+        save(
+            &paths,
+            &Record {
+                previous: Some(root.join("old")),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for version in ["0.17.1", "0.17.2"] {
+            let runtime = paths.support.join("runtimes").join(version);
+            for name in [
+                "bin/python3",
+                "plugin/.claude-plugin/plugin.json",
+                "plugin/.claude-plugin/marketplace.json",
+                "plugin/hooks/hooks.json",
+            ] {
+                let path = runtime.join(name);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, "{}").unwrap();
+            }
+            fs::write(
+                runtime.join("plugin/.claude-plugin/plugin.json"),
+                format!("{{\"version\":\"{version}\"}}"),
+            )
+            .unwrap();
+            fs::write(runtime.join("agt-bundle.json"), serde_json::to_vec(&serde_json::json!({"schema_version":1,"source":"app","app_version":version,"runtime_version":version,"python_version":"3.13.18","plugin_path":"plugin"})).unwrap()).unwrap();
+            atomic_link(&runtime, &paths.support.join("current")).unwrap();
+            if version == "0.17.1" {
+                fs::write(root.join("fail"), "").unwrap();
+                assert!(refresh_plugins(&paths).await.is_err());
+                assert!(!paths.support.join("updated").join(version).exists());
+                fs::remove_file(root.join("fail")).unwrap();
+            }
+            refresh_plugins(&paths).await.unwrap();
+            refresh_plugins(&paths).await.unwrap(); // retained webview/relaunch cannot repeat it
+            assert!(paths.support.join("updated").join(version).is_file());
+        }
+        assert_eq!(
+            fs::read_to_string(root.join("calls"))
+                .unwrap()
+                .lines()
+                .count(),
+            3
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn versions_and_disk_error() {
         assert_eq!(version_cmp("0.17", "0.16.99"), Ordering::Greater);

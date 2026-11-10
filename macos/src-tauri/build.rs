@@ -38,6 +38,8 @@ fn main() {
             "login_account",
             "check_account",
             "check_for_updates",
+            "get_update_status",
+            "update_action",
             "quit_app",
         ]),
     ))

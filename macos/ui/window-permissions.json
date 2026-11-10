@@ -45,6 +45,9 @@
     "core:event:allow-unlisten",
     "core:window:allow-start-dragging",
     "allow-get-install-status",
-    "allow-install-action"
+    "allow-install-action",
+    "allow-check-for-updates",
+    "allow-get-update-status",
+    "allow-update-action"
   ]
 }

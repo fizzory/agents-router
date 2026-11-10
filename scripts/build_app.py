@@ -20,6 +20,8 @@ import tempfile
 import tomllib
 from urllib.parse import unquote, urlparse
 
+from app_updater import latest, validate_release
+
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build"
 TAURI = ROOT / "macos/src-tauri"
@@ -277,15 +279,13 @@ def main():
         raise ValueError("App releases require an Apple Silicon Mac and Command Line Tools")
     lock = tomllib.loads((ROOT / "scripts/python-runtime.lock").read_text())
     updater = bool(os.environ.get("TAURI_SIGNING_PRIVATE_KEY"))
-    # The production public key belongs in tauri.conf.json (step 10). An
-    # explicit override lets a throwaway key exercise packaging before release.
-    public_key = os.environ.get("TAURI_SIGNING_PUBLIC_KEY")
-    if public_key and Path(public_key).is_file():
-        public_key = Path(public_key).read_text().strip()
-    configured_key = json.loads((TAURI / "tauri.conf.json").read_text()).get("plugins", {}).get("updater", {}).get("pubkey")
-    if updater and not (public_key or configured_key):
-        raise ValueError("Updater signing needs plugins.updater.pubkey; for a throwaway build, "
-                         "set TAURI_SIGNING_PUBLIC_KEY to its public key or .pub path")
+    # A signing key means release artifacts. Scratch keys/configs belong only in
+    # check_app_update.py, which never writes dist/ or a release overlay.
+    base_config = json.loads((TAURI / "tauri.conf.json").read_text())
+    if os.environ.get("TAURI_SIGNING_PUBLIC_KEY"):
+        raise ValueError("Public-key overrides cannot publish. Use scripts/check_app_update.py for throwaway keys")
+    if updater:
+        validate_release(base_config)  # Before staging; the placeholder can never publish.
     BUILD.mkdir(exist_ok=True)
     (BUILD / "tmp").mkdir(exist_ok=True)
     os.environ.update(CARGO_HOME=str(BUILD / "cargo-home"), CARGO_TARGET_DIR=str(BUILD / "app-target"),
@@ -295,8 +295,6 @@ def main():
     runtime = stage(version, lock)
     overlay = BUILD / "release.conf.json"
     config = {"bundle": {"resources": {str(runtime): "runtime/"}, "createUpdaterArtifacts": updater}}
-    if updater and public_key:
-        config["plugins"] = {"updater": {"pubkey": public_key}}
     overlay.write_text(json.dumps(config, indent=2) + "\n")
     env = {**os.environ, "PATH": str(BUILD / "tools/bin") + os.pathsep + os.environ["PATH"]}
     run("cargo", "tauri", "build", "--target", "aarch64-apple-darwin", "--bundles", "app,dmg",
@@ -306,6 +304,9 @@ def main():
     entries = verify_app(app, version, lock)
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
+    if not updater:
+        for name in ("Agents Router.app.tar.gz", "Agents Router.app.tar.gz.sig", "latest.json"):
+            (dist / name).unlink(missing_ok=True)  # Never leave older signed artifacts beside a keyless build.
     dmg = dist / f"Agents-Router-{version}-arm64.dmg"
     shutil.copy2(bundles / f"dmg/Agents Router_{version}_aarch64.dmg", dmg)
     # Isolate the mount, detach even when content verification fails.
@@ -325,6 +326,10 @@ def main():
             with tarfile.open(archive) as file:
                 file.extractall(scratch, filter="data")
             verify_app(Path(scratch) / "Agents Router.app", version, lock)
+        metadata = latest(version, archive.name,
+                          archive.with_suffix(archive.suffix + ".sig").read_text(),
+                          os.environ.get("AGT_RELEASE_NOTES", ""))
+        (dist / "latest.json").write_text(json.dumps(metadata, indent=2) + "\n")
     sizes = {"app": tree_size(app), "runtime": tree_size(app / "Contents/Resources/runtime"),
              "dmg": dmg.stat().st_size}
     sizes["shell"] = sizes["app"] - sizes["runtime"]

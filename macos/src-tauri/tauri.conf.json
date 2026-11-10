@@ -63,5 +63,14 @@
       "minimumSystemVersion": "14.0",
       "signingIdentity": "-"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRBNzBGOTNBNTBEMzkyRDYKUldUV2t0TlFPdmx3U3ZOOWE4ZURKWlZvb2hwckViQkpkK3J0SWVnUEVNbEQyYXpGTU9qQUN2MWYK",
+      "endpoints": [
+        "https://github.com/Watcharagorn/agents-router/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true
+    }
   }
 }

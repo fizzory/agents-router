@@ -12,7 +12,6 @@ export const checkForUpdates = () => invoke("check_for_updates");
 export const quitApp = () => invoke("quit_app");
 export const onUsageUpdated = (handler) => listen("usage-updated", ({ payload }) => handler(payload));
 export const onPopoverStatus = (handler) => listen("popover-status", ({ payload }) => handler(payload));
-export const onUpdateRequested = (handler) => listen("update-requested", handler);
 
 // Settings capability only. Scope is {workspace: absolute folder or null}; writes
 // additionally require {key, level, revision, userSaid?}, and set takes {value}.
@@ -58,3 +57,7 @@ export const setupRoles = () => invoke("setup_roles");
 export const getInstallStatus = () => invoke("get_install_status");
 export const onInstallStatus = handler => listen("install-status", ({ payload }) => handler(payload));
 export const installAction = action => invoke("install_action", { action });
+
+export const getUpdateStatus = () => invoke("get_update_status");
+export const onUpdateStatus = handler => listen("update-status", ({ payload }) => handler(payload));
+export const updateAction = action => invoke("update_action", { action });

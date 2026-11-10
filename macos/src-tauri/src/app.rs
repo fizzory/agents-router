@@ -7,6 +7,7 @@ use crate::{
     panes::RoleEdit,
     settings::{self, SettingsCore},
     terminal::{TerminalAction, TerminalLauncher},
+    update_app,
     watcher::{SettingsWatcher, WatchPaths},
 };
 use objc2::MainThreadMarker;
@@ -729,8 +730,7 @@ fn check_for_updates(app: tauri::AppHandle) {
     update_requested(&app);
 }
 fn update_requested(app: &tauri::AppHandle) {
-    log("manual update check requested (updater is step 10)");
-    let _ = app.emit_to("popover", "update-requested", ());
+    update_app::request(app, true);
 }
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
@@ -830,7 +830,7 @@ pub(crate) fn settings_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri:
         ],
     )
 }
-/// Step 10's updater calls this after its automatic check; never opens an alert.
+/// Publish the waiting update in both slots without taking focus.
 pub fn set_pending_update(app: &tauri::AppHandle, version: Option<String>) {
     let snapshot = {
         let state = app.state::<AppState>();
@@ -875,6 +875,9 @@ pub fn run() {
         .plugin(tauri_nspanel::init())
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .manage(update_app::UpdateController::default())
         .plugin(settings::autostart_plugin())
         .manage(state)
         .manage(settings)
@@ -917,6 +920,8 @@ pub fn run() {
             login_account,
             check_account,
             check_for_updates,
+            update_app::get_update_status,
+            update_app::update_action,
             quit_app
         ])
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -1038,6 +1043,7 @@ pub fn run() {
             *app.state::<AppState>().watcher.lock().expect("watcher") = Some(watcher);
             request_usage(app.handle(), true, "startup");
             install_app::start(app.handle());
+            update_app::start(app.handle());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let mut timer = tokio::time::interval_at(
@@ -1070,7 +1076,10 @@ pub fn run() {
             api.prevent_exit();
             log("prevent_exit applied: tray app remains running");
         }
-        tauri::RunEvent::Resumed => request_usage(app, true, "reactivation"),
+        tauri::RunEvent::Resumed => {
+            request_usage(app, true, "reactivation");
+            update_app::request(app, false);
+        }
         tauri::RunEvent::Exit => {
             if let Some(mtm) = MainThreadMarker::new() {
                 native::stop_observing(mtm);

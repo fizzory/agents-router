@@ -26,7 +26,7 @@ export class InstallUI {
     this.key = key;
     const hadSheet = !!this.sheet;
     this.sheet?.remove(); this.sheet = null;
-    if (!model) { document.querySelector('.sidebar').inert = false; document.querySelector('.main').inert = false; this.previous?.focus(); this.previous = null; return; }
+    if (!model) { const blocked = !!document.querySelector('.sheet-backdrop'); document.querySelector('.sidebar').inert = blocked; document.querySelector('.main').inert = blocked; this.previous?.focus(); this.previous = null; return; }
     if (!hadSheet) this.previous = document.activeElement;
     const backdrop = el('div', 'sheet-backdrop'), sheet = el('form', 'account-sheet install-sheet');
     if (model.busy) sheet.setAttribute('aria-busy', 'true');

@@ -1,11 +1,12 @@
 import { configShow, configSet, configUnset, rolesConfig, getSettingsTarget, onSettingsTarget, onSettingsEdit,
-  getOpenAtLogin, setOpenAtLogin, getSnapshot, onUsageUpdated, onSettingsStatus, chooseWorkspace, openSettingsFile, showSettingMenu, onSettingsHistory } from './tauri.js';
+  checkForUpdates, getOpenAtLogin, setOpenAtLogin, getSnapshot, onUsageUpdated, onSettingsStatus, chooseWorkspace, openSettingsFile, showSettingMenu, onSettingsHistory } from './tauri.js';
 import { LEVELS, PROVIDERS, rowState, labelFor, matches, paneFor, fileTarget, brokenFile, errorMessage, installState, isTextField, dispatchEdit } from './logic/settings.js';
 import { SettingsHistory } from './logic/settings-history.js';
 import { element, icon, makeControl, popup, highlightMatches } from './settings-controls.js';
 import { attachTooltips } from './tooltip.js';
 import { SettingsPanes } from './panes.js';
 import { InstallUI } from './install-ui.js';
+import { UpdateUI } from './update-ui.js';
 
 const $ = selector => document.querySelector(selector);
 const status = $('#status'), rows = $('#settings'), login = $('#open-at-login'), search = $('#search');
@@ -221,6 +222,8 @@ $('#install-banner button').addEventListener('click', () => run(() => {
 $('#uninstall').addEventListener('click', () => run(() => installer.action('uninstall')));
 $('#restore-cli').addEventListener('click', () => run(() => installer.action('restore')));
 await installer.start();
+await new UpdateUI().start();
+$('#check-updates').addEventListener('click', () => checkForUpdates().catch(announceFailure));
 await onSettingsEdit(({ action }) => run(() => edit(action)));
 await onSettingsTarget(target => run(() => navigate(target)));
 await onSettingsHistory(({ key }) => { setPane('activity'); document.body.dataset.historyKey = key; search.value = key; render(); run(() => panes.load('activity', true)); });

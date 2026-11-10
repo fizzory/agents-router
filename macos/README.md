@@ -91,11 +91,11 @@ The script writes `dist/Agents-Router-<version>-arm64.dmg`. When
 `TAURI_SIGNING_PRIVATE_KEY` is set (a key path or the key value accepted by
 Tauri), it also copies `Agents Router.app.tar.gz` and its `.sig` to `dist/`.
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` supplies the key's password. Real release
-keys are created and stored by the maintainer; the step 9 smoke check uses only
-a throwaway key under `build/`. For that check, `TAURI_SIGNING_PUBLIC_KEY`
-accepts the throwaway public key value or `.pub` path and overrides only the
-generated overlay. Production builds use `plugins.updater.pubkey` in the base
-config (step 10); the build refuses a signing key without a public key.
+keys are created and stored by the maintainer. A signing key means a release
+build: it requires the real `plugins.updater.pubkey` in the base config and
+rejects `TAURI_SIGNING_PUBLIC_KEY` overrides. It writes `dist/latest.json` with
+the version, `AGT_RELEASE_NOTES` (optional), UTC publish date and the signed
+darwin-aarch64 archive URL under the matching GitHub release tag.
 
 The build verifies the app and every nested Mach-O with strict codesign,
 requires arm64 and minimum OS <= 14.0, compares the shipped plugin bytes, and
@@ -143,9 +143,9 @@ only on this event. `popover-status` carries loading/error/update state, with
 the last snapshot; it does not indicate a new usage measurement. Subscribe
 before fetching the initial snapshot, and reject older generations.
 
-`update-requested` is the hook for step 10's manual check/install alert;
-automatic checks call Rust's `set_pending_update` to update both slots without
-an alert. `open_settings` sends a `settings-target` event to Settings with
+Automatic checks call Rust's `set_pending_update` to update both slots without
+an alert. Manual checks open a Settings sheet immediately. `open_settings`
+sends a `settings-target` event to Settings with
 `{ pane, runtime, account }`; the page and account navigation are step 5/6.
 Settings activation is Regular while visible and Accessory after hiding.
 
@@ -237,6 +237,66 @@ Roles, Accounts, Sharing and Activity panes are completed in step 6. The
 Install/Repair and uninstall transaction actions await step 7; this step
 renders their decided state and the uninstall blockers, without inventing
 installation ownership when the snapshot does not report it.
+
+## In-app updates (step 10)
+
+The Rust updater checks at launch and after 24 hours; a suspended Mac's missed
+checks coalesce, as do overlapping automatic/manual requests. Automatic results
+wait in the popover's last row and tray menu. An install problem keeps priority
+in the popover. `Check for Updates…` is in the popover's ⋯ menu, the native tray
+menu and General. A manual check opens a sheet; only choosing the update starts
+the download. Download/install failures offer Retry. Key/signature failures
+default to `Open Releases Page`. The download has a progress sheet, and the app
+restarts after installation. The new runtime is installed on first launch and
+the bundled `agt update --no-package` succeeds once per version, recorded under
+`$AGT_APP_SUPPORT/updated/<version>` under the install lock. Failed refreshes
+remain eligible for retry.
+
+`scripts/check_app_update.py` builds a copied 0.17.0 and 0.17.1-test app with a
+throwaway key, serves a localhost feed, and exercises the actual updater and
+LaunchServices restart in a scratch Applications folder. It checks the running
+version, quarantine, strict code signature and once-per-version runtime/plugin
+refresh, then quits both instances and stops the server. All keys, changed
+versions and insecure transport config are temporary files under `build/`.
+Diagnostics stay in `build/app-update-check.log`. The test needs native desktop
+and FSEvents access. It never executes a provider CLI. Published builds contain
+none of the debug-only rehearsal entry points.
+
+The real updater public key is in the base config. The maintainer has stored
+the private key and password as GitHub secrets. Ordinary keyless builds work
+and skip updater signing. `check_sources(root, release=True)` in
+`tests/test_app_sources.py` rejects the placeholder/missing/malformed key and
+public-key release overlays;
+`build_app.sh` applies the same release key/endpoint validation before staging
+whenever a signing key is supplied. Run the source gate explicitly with
+`PYTHONPATH=src:tests python3 tests/test_app_sources.py --release`. Test configs
+cannot override a release key.
+
+For future key replacement, the maintainer must perform key generation and
+secret storage themselves. Set `AGT_RELEASE_KEY_DIR` to a private directory
+outside the checkout, then run:
+
+```sh
+export CARGO_HOME="$PWD/build/cargo-home"
+export PATH="$PWD/build/tools/bin:$PATH"
+cargo tauri signer generate -w "$AGT_RELEASE_KEY_DIR/agents-router.key"
+# Choose a nonempty password when prompted; keep both in the password manager
+# and an encrypted offline backup. Never commit the private key.
+python3 - "$AGT_RELEASE_KEY_DIR/agents-router.key.pub" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path('macos/src-tauri/tauri.conf.json')
+config = json.loads(path.read_text())
+config['plugins']['updater']['pubkey'] = pathlib.Path(sys.argv[1]).read_text().strip()
+path.write_text(json.dumps(config, indent=2) + '\n')
+PY
+gh secret set --env release TAURI_SIGNING_PRIVATE_KEY < "$AGT_RELEASE_KEY_DIR/agents-router.key"
+gh secret set --env release TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+```
+
+Use a GitHub `release` environment restricted to release tags; step 11's release
+job alone receives those secrets. The public key is the only key committed.
+Tauri's signing and static-feed format follow the
+[updater documentation](https://v2.tauri.app/plugin/updater/).
 
 Both windows use `tooltip.js`; timing lives only in `motion.css`. Run
 `node --test macos/ui/logic` for controls, scope, errors, field commits,

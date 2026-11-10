@@ -6,7 +6,10 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import sys
+import base64
 import unittest
+from unittest import mock
 
 import helpers  # noqa: F401 (isolates all real homes and provider CLIs)
 
@@ -14,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def build_module():
+    sys.path.insert(0, str(ROOT / "scripts"))
     spec = importlib.util.spec_from_file_location("build_app", ROOT / "scripts/build_app.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -21,6 +25,44 @@ def build_module():
 
 
 class BuildAppTests(unittest.TestCase):
+    def test_placeholder_and_override_cannot_publish_and_metadata_is_complete(self):
+        module = build_module()
+        config = json.loads((ROOT / "macos/src-tauri/tauri.conf.json").read_text())
+        config["plugins"]["updater"]["pubkey"] = "AGT_UPDATER_PUBLIC_KEY_REQUIRED_BEFORE_RELEASE"
+        with self.assertRaisesRegex(ValueError, "real public key"):
+            module.validate_release(config)
+        # Structurally valid public-key fixture, never an actual signing key.
+        config["plugins"]["updater"]["pubkey"] = base64.b64encode(
+            b"untrusted comment: minisign public key\n" + base64.b64encode(b"Ed" + bytes(40)) + b"\n").decode()
+        module.validate_release(config)
+        metadata = module.latest("0.17.1", "Agents Router.app.tar.gz", "signature\n", "Release notes")
+        self.assertEqual(set(metadata), {"version", "notes", "pub_date", "platforms"})
+        self.assertEqual(metadata["version"], "0.17.1")
+        self.assertEqual(metadata["notes"], "Release notes")
+        self.assertTrue(metadata["pub_date"].endswith("Z"))
+        self.assertEqual(metadata["platforms"]["darwin-aarch64"], {
+            "url": "https://github.com/Watcharagorn/agents-router/releases/download/v0.17.1/Agents%20Router.app.tar.gz",
+            "signature": "signature"})
+
+    def test_publish_guard_stops_before_staging_with_a_placeholder_or_override(self):
+        module = build_module()
+        with tempfile.TemporaryDirectory(prefix="agt-key-gate-") as folder:
+            root = Path(folder)
+            (root / "tauri.conf.json").write_text(json.dumps({"plugins": {"updater": {
+                "pubkey": "AGT_UPDATER_PUBLIC_KEY_REQUIRED_BEFORE_RELEASE"}}}))
+            for extra in ({}, {"TAURI_SIGNING_PUBLIC_KEY": "throwaway"}):
+                with self.subTest(extra=extra), mock.patch.dict(os.environ, {
+                    "TAURI_SIGNING_PRIVATE_KEY": "never-read-placeholder", **extra,
+                }, clear=True), mock.patch.object(module.sys, "argv", ["build_app"]), \
+                        mock.patch.object(module.platform, "system", return_value="Darwin"), \
+                        mock.patch.object(module.platform, "machine", return_value="arm64"), \
+                        mock.patch.object(module, "versions", return_value="0.17.0"), \
+                        mock.patch.object(module, "TAURI", root), \
+                        mock.patch.object(module, "stage") as stage:
+                    with self.assertRaisesRegex(ValueError, "real public key|overrides cannot publish"):
+                        module.main()
+                    stage.assert_not_called()
+
     def test_minimum_os_ignores_sdk_and_linker_versions(self):
         module = build_module()
         self.assertEqual(module.minimum_versions("""binary:

@@ -19,6 +19,8 @@ Rust's cargo tests do the actual serde decoding; this guard needs no Rust on PAT
 """
 
 import json
+import importlib.util
+import sys
 from pathlib import Path
 import re
 import shutil
@@ -82,7 +84,7 @@ def nested_css(text):
     return False
 
 
-def check_sources(root):
+def check_sources(root, *, release=False):
     errors = []
 
     def fail(rule, detail):
@@ -119,16 +121,28 @@ def check_sources(root):
         fail("shell", "tauri-plugin-shell in Cargo.lock")
 
     config = load_json(cargo / "tauri.conf.json")
+    updater_spec = importlib.util.spec_from_file_location("app_updater", ROOT / "scripts/app_updater.py")
+    updater_rules = importlib.util.module_from_spec(updater_spec)
+    updater_spec.loader.exec_module(updater_rules)
+    key = config.get("plugins", {}).get("updater", {}).get("pubkey")
+    if release or key != updater_rules.PLACEHOLDER:
+        try:
+            updater_rules.validate_release(config)
+        except ValueError as error:
+            fail("updater-key", str(error))
     # Include checked-in platform/release overlays and the generated release
     # overlay when present, but never traverse build/tools or Cargo caches.
     configs = set(cargo.glob("tauri*.conf.json")) | set(cargo.glob("tauri*.conf.toml"))
     configs |= set((root / "build").glob("*release*.json"))
     for path in sorted(configs):
-        if path.name == "tauri.test.conf.json":
-            continue  # Local updater-feed testing is the sole exception.
         data = tomllib.loads(path.read_text()) if path.suffix == ".toml" else load_json(path)
         if "dangerousInsecureTransportProtocol" in json.dumps(data):
             fail("transport", f"{path.relative_to(root)} enables insecure updater transport")
+        if path.name != "tauri.conf.json" and "pubkey" in data.get("plugins", {}).get("updater", {}):
+            fail("updater-key", f"{path.relative_to(root)} overrides the release public key")
+        endpoints = data.get("plugins", {}).get("updater", {}).get("endpoints", [])
+        if any(not endpoint.startswith("https://") for endpoint in endpoints):
+            fail("transport", f"{path.relative_to(root)} has a non-HTTPS updater endpoint")
         security = data.get("app", {}).get("security", {})
         for key in ("csp", "devCsp"):
             if key not in security and path.name != "tauri.conf.json":
@@ -339,6 +353,17 @@ class AppSourceTests(unittest.TestCase):
                     self.write(root, path, json.dumps(config))
                 self.reject("csp", mutate)
 
+    def test_release_rejects_placeholder_missing_and_throwaway_public_key(self):
+        for key in ("AGT_UPDATER_PUBLIC_KEY_REQUIRED_BEFORE_RELEASE", "", None, "throwaway-public-key"):
+            root = self.temp_tree()
+            path = root / TAURI / "tauri.conf.json"
+            config = json.loads(path.read_text())
+            config["plugins"]["updater"]["pubkey"] = key
+            path.write_text(json.dumps(config))
+            self.assertTrue(any(error.startswith("[updater-key]") for error in check_sources(root, release=True)))
+        self.reject("updater-key", lambda root: self.write(root, Path("build/release.conf.json"),
+            '{"plugins":{"updater":{"pubkey":"throwaway"}}}'))
+
     def test_rejects_insecure_release_overlay(self):
         self.reject("transport", lambda root: self.write(root, Path("build/release.conf.json"),
             '{"plugins":{"updater":{"dangerousInsecureTransportProtocol":true}}}'))
@@ -402,4 +427,9 @@ class AppSourceTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--release"]:
+        errors = check_sources(ROOT, release=True)
+        for error in errors:
+            print(error)
+        raise SystemExit(bool(errors))
     unittest.main()

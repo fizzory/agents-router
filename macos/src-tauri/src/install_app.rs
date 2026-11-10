@@ -27,6 +27,10 @@ pub struct InstallController {
     first: Mutex<bool>,
 }
 impl InstallController {
+    #[cfg(debug_assertions)]
+    pub async fn settled(&self) {
+        let _guard = self.operation.lock().await;
+    }
     pub fn new() -> Result<Self, String> {
         let paths = InstallPaths::discover()?;
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
