@@ -137,11 +137,14 @@ all pane layouts and all probes. It reports macOS 14.0 as unverified: a newer
 host proves only its own WebKit. Replay this script on a 14.0 machine when one
 is available. Failure diagnostics survive at the printed scratch path.
 
-`.github/workflows/release.yml` runs `app-build` and `self-test` on macos-15
-arm64 with CLT selected, Rust 1.95.0 and cached repo-local tools/Cargo. PR builds
-need no signing secret. `app-build` tests contracts and isolated CLI operations,
-builds/mounts the DMG and uploads it; `self-test` uploads the report or failure
-diagnostics. A strict matching `vX.Y.Z` tag in `fizzory/agents-router` runs `draft-release`, using only the
+`.github/workflows/release.yml` runs `app-build` on macos-15 arm64 with CLT
+selected, Rust 1.95.0 and cached repo-local tools/Cargo. PR builds need no signing
+secret. `app-build` tests contracts and isolated CLI operations, builds/mounts
+the DMG and uploads it, then runs the self-test and uploads its report or failure
+diagnostics. The job has a 60-minute timeout; the self-test step has 25 minutes.
+The self-test replaces the build-directory app, so all release packaging and
+artifact uploads finish before it runs. A strict matching `vX.Y.Z` tag in
+`fizzory/agents-router` runs a separate signed build in `draft-release`, using only the
 `release` environment's signing secrets, and creates a draft with the DMG,
 versioned updater archive, `.sig` and `latest.json`. All external actions are
 pinned by commit SHA. Tagging and publishing remain maintainer actions.

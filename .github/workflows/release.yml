@@ -19,7 +19,7 @@ jobs:
   app-build:
     name: app-build
     runs-on: macos-15 # Standard arm64 runner; macos-14 retired 2026-11-02.
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -56,17 +56,10 @@ jobs:
           path: build/app-build-report.json
           if-no-files-found: ignore
 
-  self-test:
-    name: self-test
-    runs-on: macos-15
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/app-tools
+      # This build replaces the release .app. Package and upload release artifacts above.
       - name: Production WebKit pages and all Settings panes
         id: selftest
+        timeout-minutes: 25
         run: python3 scripts/run_app_selftest.py
       - name: Upload passing Rust report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -86,7 +79,7 @@ jobs:
   draft-release:
     name: draft-release
     if: github.repository == 'fizzory/agents-router' && startsWith(github.ref, 'refs/tags/v')
-    needs: [app-build, self-test]
+    needs: [app-build]
     runs-on: macos-15
     environment: release
     permissions:

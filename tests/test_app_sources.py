@@ -306,6 +306,78 @@ class AppSourceTests(unittest.TestCase):
     def test_current_tree(self):
         self.assertEqual(check_sources(ROOT), [])
 
+    def test_release_workflow_runs_selftest_after_dmg_upload_on_every_pr(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertRegex(workflow, r"(?m)^  pull_request:[ \t]*$")
+        # The workflows use fixed indentation. Check their structure without
+        # adding a YAML dependency to the portable unit-test suite.
+        jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)",
+                               workflow.split("\njobs:\n", 1)[1], re.M | re.S))
+        self.assertEqual(set(jobs), {"app-build", "draft-release"})
+        app = jobs["app-build"]
+        self.assertRegex(app, r"(?m)^    runs-on: macos-15(?:[ \t]+#.*)?$")
+        self.assertRegex(app, r"(?m)^    timeout-minutes: 60$")
+        self.assertNotRegex(app, r"(?m)^    (?:if|continue-on-error):")
+        steps = re.split(r"(?m)^      - ", app.split("\n    steps:\n", 1)[1])[1:]
+        selftests = [i for i, step in enumerate(steps) if "id: selftest\n" in step]
+        self.assertEqual(len(selftests), 1)
+        selftest_index = selftests[0]
+        selftest = steps[selftest_index]
+        self.assertRegex(selftest, r"(?m)^        run: python3 scripts/run_app_selftest.py$")
+        self.assertRegex(selftest, r"(?m)^        timeout-minutes: 25$")
+        self.assertNotRegex(selftest, r"(?m)^        (?:if|continue-on-error):")
+
+        builds = [i for i, step in enumerate(steps) if "run: scripts/build_app.sh\n" in step]
+        uploads = [i for i, step in enumerate(steps) if "name: Agents-Router-arm64-DMG\n" in step]
+        self.assertEqual(len(builds), 1)
+        self.assertEqual(len(uploads), 1)
+        self.assertLess(builds[0], uploads[0])
+        self.assertLess(uploads[0], selftest_index)
+        dmg = steps[uploads[0]]
+        self.assertIn("uses: actions/upload-artifact@", dmg)
+        self.assertIn("path: dist/Agents-Router-*-arm64.dmg\n", dmg)
+        self.assertIn("if-no-files-found: error\n", dmg)
+        self.assertNotRegex(dmg, r"(?m)^        (?:if|continue-on-error):")
+
+        # Only these diagnostics may follow: the self-test replaces the shared
+        # release .app, so later packaging or release uploads would be unsafe.
+        remaining = steps[selftest_index + 1:]
+        self.assertEqual(len(remaining), 2)
+        report, diagnostics = remaining
+        for step in remaining:
+            self.assertIn("uses: actions/upload-artifact@", step)
+            self.assertIn("if-no-files-found: error\n", step)
+            self.assertNotRegex(step, r"(?m)^        (?:run|continue-on-error):")
+        self.assertIn("name: app-selftest-report\n", report)
+        self.assertIn("path: ${{ steps.selftest.outputs.diagnostics }}/report.json\n", report)
+        self.assertNotRegex(report, r"(?m)^        if:")
+        self.assertIn("name: app-selftest-diagnostics\n", diagnostics)
+        self.assertIn("if: failure() && steps.selftest.outputs.diagnostics != ''\n", diagnostics)
+        self.assertIn("path: ${{ steps.selftest.outputs.diagnostics }}\n", diagnostics)
+        self.assertIn("include-hidden-files: true\n", diagnostics)
+
+        draft = jobs["draft-release"]
+        self.assertIn("if: github.repository == 'fizzory/agents-router' && startsWith(github.ref, 'refs/tags/v')\n", draft)
+        self.assertIn("needs: [app-build]\n", draft)
+        self.assertIn("environment: release\n", draft)
+        self.assertIn("name: Build and sign updater artifacts\n", draft)
+        self.assertIn("TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}\n", draft)
+        self.assertIn("scripts/build_app.sh\n", draft)
+        self.assertIn('"dist/Agents-Router-$version-arm64.app.tar.gz"', draft)
+
+    def test_core_workflow_keeps_both_python_versions_on_ubuntu_and_intel_macos(self):
+        workflow = (ROOT / ".github/workflows/tests.yml").read_text()
+        self.assertIn("os: [ubuntu-latest, macos-15-intel]", workflow)
+        self.assertIn('python: ["3.11", "3.13"]', workflow)
+        self.assertNotIn("macos-latest", workflow)
+
+    def test_github_actions_are_pinned_to_full_commit_shas(self):
+        for path in sorted((ROOT / ".github").rglob("*.yml")):
+            for action in re.findall(r"(?m)^\s*(?:-\s+)?uses:\s*(\S+)", path.read_text()):
+                with self.subTest(path=path.relative_to(ROOT), action=action):
+                    if not action.startswith("./"):
+                        self.assertRegex(action, r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
+
     def temp_tree(self):
         temporary = tempfile.TemporaryDirectory(prefix="agt-app-sources-")
         self.addCleanup(temporary.cleanup)
