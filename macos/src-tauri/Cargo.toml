@@ -1,6 +1,6 @@
 [package]
 name = "agents-router-app"
-version = "0.16.2"
+version = "0.16.3"
 edition = "2021"
 rust-version = "1.90"
 default-run = "agents-router"

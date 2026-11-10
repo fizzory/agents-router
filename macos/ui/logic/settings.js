@@ -61,7 +61,7 @@ export function installState(snapshot = {}) {
   const blockers = snapshot.usage?.uninstall_blockers;
   const count = blockers?.length ?? null;
   return { problem, version: snapshot.usage?.agt_version || error.match(/\bagt\s+(\d+\.\d+(?:\.\d+)?)/)?.[1] || null,
-    owned: snapshot.install?.source === 'app', uninstallDisabled: count !== 0,
+    owned: snapshot.usage?.install?.source === 'app', uninstallDisabled: count !== 0,
     uninstallTooltip: count == null ? 'Checking running jobs…' : count ? `${count} job${count === 1 ? '' : 's'} running` : 'Uninstall command line tool…' };
 }
 export const isTextField = (element) => !!element?.matches?.('input:not([type=checkbox]):not([type=button]), textarea, [contenteditable=true]');

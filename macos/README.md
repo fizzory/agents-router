@@ -4,6 +4,64 @@ The production executable is the stable launcher at
 `~/Library/Application Support/Agents Router/bin/agt`. The app never searches
 PATH. Runtime installation is implemented in a later plan step.
 
+## Runtime manifest and CLI ownership (step 7)
+
+The installer in step 8 must write `agt-bundle.json` at the root of each staged
+runtime before validation and publication. The published location is
+`$AGT_APP_SUPPORT/runtimes/<version>/agt-bundle.json`:
+
+```json
+{
+  "schema_version": 1,
+  "source": "app",
+  "app_version": "0.16.3",
+  "runtime_version": "0.16.3",
+  "python_version": "3.13.0",
+  "plugin_path": "plugin"
+}
+```
+
+Versions are nonempty version strings (digits, letters, dots, plus and dash,
+starting with a digit). `plugin_path` is relative to the manifest, stays inside
+the runtime, and contains the version-matched shipped plugin tree, including
+`.claude-plugin/marketplace.json`. Python is `bin/python3`; the installed agt
+package and Python must both resolve inside that same runtime. A folder named
+like an app runtime, or an app installed beside a uv/pipx CLI, never claims that
+other CLI. Malformed manifests do not establish ownership.
+
+`AGT_APP_SUPPORT` overrides `~/Library/Application Support/Agents Router`;
+`AGT_BIN_DIR` overrides `~/.local/bin`. Both apply to scratch installs and checks.
+The stable launcher is always `$AGT_APP_SUPPORT/bin/agt`; it must resolve
+`current` to its physical runtime once, then execute that runtime's
+`bin/python3 -I -m agents_router` and preserve arguments. Resolving before exec
+keeps the running interpreter and imported modules on one version if `current`
+switches mid-command. The public
+`$AGT_BIN_DIR/agt` symlink points at it. The Rust app uses the same support override.
+The launcher preserves the selected support and bin overrides in its environment
+so hooks and MCP servers started by a host CLI use the same install paths.
+
+App-owned setup/update derives `$AGT_APP_SUPPORT/plugins/<runtime_version>` from
+the immutable runtime's plugin tree. Only that derived copy rewrites hook shell
+commands and MCP executable fields to the absolute stable launcher. Host plugin
+commands replace the old marketplace with this local source before installing;
+there is no package reinstall or Git fetch. A damaged payload fails locally.
+The settings-only Claude route replaces its marketplace source too. Dry runs
+validate the payload and print the local steps without creating the copy.
+
+`agt-run`, shared hooks and plugin hooks follow the stable launcher. Runners,
+private worker hooks and the parent MCP server resolve physical runtime paths
+and use isolated Python. Both `spec.json` and `status.json` record
+`install_runtime`, the absolute runtime directory; step 8's cleanup must retain
+any directory referenced by a running job, including a surviving worker.
+
+`agt doctor` includes install ownership, app/agt/Python versions and PATH conflict
+warnings. `--verbose` adds physical paths, manifest Python/runtime versions and
+every executable PATH entry. `--json` includes these in `install`. No other agt
+or shell is executed to diagnose it. `agt usage --json` includes the compact
+`install: {source: "app"|"uv"|"pipx"|"source", version: "…"}` contract;
+Settings reads that field for the uninstall row. Pip, editable and source
+checkouts report `source`; only an app manifest grants app uninstall ownership.
+
 All Cargo invocations use `export CARGO_HOME=$PWD/build/cargo-home` from the
 repository root and `--locked`. Tools are checked by
 `scripts/check_app_tools.sh`; this task installs no tools.

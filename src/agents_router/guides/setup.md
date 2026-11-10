@@ -19,6 +19,7 @@ uv tool install --managed-python git+https://github.com/Watcharagorn/agents-rout
 - **Older than 0.15.0:** run `agt update`, then `agt guide setup` again, because the steps may have changed.
 - **`agt` not on PATH after the install:** call it by its full path for the rest of setup (`~/.local/bin/agt`, or `%USERPROFILE%\.local\bin\agt.exe` on Windows). Then run `uv tool update-shell` (or `pipx ensurepath`) so new terminals find it. The plugin's hooks call `agt` by name, so the person's next sessions need it on PATH.
 - **Windows:** `agt update` prints the package command instead of running it; run that command yourself.
+- **Installed by Agents Router.app:** use Check for Updates… in the app for the app, Python and agt. `agt update` refreshes the shipped plugin and stable launchers locally, with no package download. `agt doctor --verbose` shows ownership, versions and competing copies on PATH. Add `~/.local/bin` to PATH if needed.
 - **Not on PyPI:** never `pip install agt`; that's a different project.
 
 ## 2. Propose, ask once, apply
@@ -127,6 +128,7 @@ Give them a numbered list built from `still_needed`:
 Run `agt doctor`.
 - Exit 0 means all good.
 - It checks logins without model calls and flags a profile whose plugin is older than `agt` (fix: `agt update`).
+- It reports the install source, agt and Python versions, and competing copies on PATH. `--verbose` adds the app/runtime versions and all executable paths; `--json` includes the same information in `install`.
 - Never run `agt doctor --live` or a real job without the person's OK; both use quota.
 
 ## 8. Repair

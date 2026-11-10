@@ -138,7 +138,7 @@ HOST_ENV_EXACT = {
     "MCP_CONNECTION_NONBLOCKING",
     "MCP_SERVER_CONNECTION_BATCH_SIZE",
 }
-KEEP_ENV = {"CLAUDE_CODE_GIT_BASH_PATH", "AGT_HOME"}
+KEEP_ENV = {"CLAUDE_CODE_GIT_BASH_PATH", "AGT_HOME", "AGT_APP_SUPPORT", "AGT_BIN_DIR"}
 
 
 PARENT_SERVER = "agt-parent"
@@ -151,8 +151,14 @@ def parent_server(job_id: str) -> dict[str, Any]:
     from pathlib import Path
 
     from agents_router.config import home
+    from agents_router import bundle
 
     package_root = str(Path(__file__).resolve().parents[2])
+    if install := bundle.detect():
+        return {"command": str(install.python),
+                "args": ["-I", "-m", "agents_router", "mcp", "--worker", job_id],
+                "env": {"AGT_HOME": str(home()), "AGT_APP_SUPPORT": str(bundle.app_support()),
+                        "AGT_BIN_DIR": str(bundle.bin_dir())}}
     return {
         "command": sys.executable,
         "args": ["-m", "agents_router", "mcp", "--worker", job_id],
@@ -204,6 +210,7 @@ class JobSpec:
     created: float = 0.0
     override: str | None = None  # user's words authorizing this start to exceed agt's caps
     rules: str | None = None  # the Role rules block the role call put before the task; a fresh-session follow-up repeats it
+    install_runtime: str | None = None  # physical app runtime retained until this job and its helpers exit
     _doctor_live: bool = False  # explicit live checks skip circuit rest, while still owning every required trial
 
     def to_dict(self) -> dict[str, Any]:

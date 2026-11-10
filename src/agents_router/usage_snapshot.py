@@ -7,7 +7,7 @@ import math
 import time
 from typing import Any
 
-from agents_router import __version__, accounts, health, profiles, usage_view
+from agents_router import __version__, accounts, bundle, health, profiles, usage_view
 from agents_router.config import Account, Config, RUNTIMES, RuntimeConfig, jobs_dir, state_dir
 from agents_router.fsutil import lock_busy, read_json, same_process
 from agents_router.limits import ACTIVE_STATES, NAMES, STALE_RUNNER_SECONDS
@@ -331,7 +331,8 @@ def snapshot(config: Config, *, now: float | None = None) -> dict:
               "removed_accounts": sum(removed(job) for job in active.values()),
               "surviving_workers": sum(b["kind"] == "surviving_worker" for b in blockers.values())}
     return {"schema_version": 1, "agt_version": __version__, "generated_at": float(now),
-            "providers": providers, "jobs": totals, "uninstall_blockers": list(blockers.values())}
+            "install": bundle.installation(), "providers": providers, "jobs": totals,
+            "uninstall_blockers": list(blockers.values())}
 
 
 def lines(report: dict) -> list[str]:

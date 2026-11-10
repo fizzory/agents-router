@@ -66,6 +66,7 @@ Your agent installs `agt` and puts the plugin in every CLI and Claude Code profi
 | 1. Install `agt` | `uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router` (or `pipx install git+https://github.com/Watcharagorn/agents-router`) |
 | 2. Set up every installed CLI and Claude profile | `agt setup` (Enter applies it; `--dry-run` only shows it) |
 | Later: update everything | `agt update` |
+| Inspect the install and competing copies | `agt doctor --verbose` |
 
 - **`agt` not found:** run `uv tool update-shell` (or `pipx ensurepath`) and open a new terminal.
 - **What `agt setup` does:**

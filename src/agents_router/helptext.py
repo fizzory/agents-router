@@ -28,8 +28,8 @@ ROOT = {
     "sections": [
         ("Get started", [
             ("setup", "Install the plugin in Claude Code, Codex and Antigravity; register account folders"),
-            ("doctor", "Check binaries, logins and shared setup"),
-            ("update", "Reinstall agt and update the plugin in every host that has it"),
+            ("doctor", "Check the install, PATH, binaries, logins and shared setup"),
+            ("update", "Refresh agt and installed plugins; app installs use the app's updater"),
             ("guide", "The steps an agent follows to install, set up, repair or remove agt"),
         ]),
         ("Run tasks in another CLI", [
@@ -68,6 +68,7 @@ ROOT = {
         ('agt start --runtime codex "review the diff"', "Start it in Codex and keep working"),
         ("agt share status", "What's in sync, and what waits for you"),
         ("agt doctor --runtime codex", "Check Codex's binary and logins"),
+        ("agt doctor --verbose", "Show install versions and every agt on PATH"),
     ],
     "footer": [
         [ui.bold("Exit codes"), "  0 done   1 waits for you, or failed   2 wrong command or value   3 needs your choice"],

@@ -32,7 +32,7 @@ import sysconfig
 import time
 from typing import Any
 
-from agents_router import ui
+from agents_router import bundle, ui
 from agents_router.config import NAME_RE, Account, Config, homes_dir, save_accounts, shared_claude_folders
 from agents_router.fsutil import copy_exclusive, is_link, no_window_kwargs, same_path, write_json, write_private
 from agents_router.runtimes import get_runtime
@@ -83,12 +83,15 @@ class Report:
 
 
 def plugin_source() -> str:
-    """Where the plugin comes from: this repository on GitHub, or `AGT_PLUGIN_SOURCE`.
+    """Where the plugin comes from: the app payload, GitHub, or `AGT_PLUGIN_SOURCE`.
 
     `AGT_PLUGIN_SOURCE` is a local clone (live checks in a sandbox install the branch you're on
-    without pushing it) or another GitHub `owner/repo`.
+    without pushing it) or another GitHub `owner/repo`. App installs always use
+    the local copy derived from their manifest's plugin tree.
     """
 
+    if install := bundle.detect():
+        return str(bundle.plugin_source(install))
     value = os.environ.get("AGT_PLUGIN_SOURCE", "").strip()
     if not value:
         return REPO
@@ -98,7 +101,17 @@ def plugin_source() -> str:
 
 def _local_source() -> Path | None:
     source = Path(plugin_source())
-    return source if source.is_absolute() and source.is_dir() else None
+    return source if bundle.detect() or (source.is_absolute() and source.is_dir()) else None
+
+
+def _prepare_bundled_plugin(report: Report) -> bool:
+    if install := bundle.detect():
+        try:
+            bundle.validate_plugin(install) if report.dry_run else bundle.prepare_plugin(install)
+        except (OSError, ValueError) as exc:
+            report.failed.append(f"agt: {exc}")
+            return False
+    return True
 
 
 def _agy_source() -> str:
@@ -212,7 +225,7 @@ def _plugin_state(host: str, command: list[str], env: dict[str, str]) -> dict[st
         state["installed"] = bool(item and item.get("installed", True))
         state["enabled"] = bool(item and item.get("enabled", True))
         state["name"] = item.get("name") if item else None
-    if host in ("claude", "codex") and not state["installed"]:
+    if host in ("claude", "codex") and (not state["installed"] or bundle.detect()):
         code, stdout, _ = run_command([*command, "plugin", "marketplace", "list", "--json"], env, timeout=120)
         data = _json(stdout) if code == 0 else None
         state["marketplace"] = _has_marketplace(data) if data is not None else None
@@ -220,6 +233,8 @@ def _plugin_state(host: str, command: list[str], env: dict[str, str]) -> dict[st
 
 
 def _plugin_steps(host: str, state: dict[str, Any]) -> list[list[str]]:
+    if bundle.detect():
+        return _bundled_plugin_steps(host, state)
     if state["installed"] and state["enabled"]:
         return []
     if host == "claude":
@@ -234,6 +249,15 @@ def _plugin_steps(host: str, state: dict[str, Any]) -> list[list[str]]:
     if state["installed"]:
         return [["plugin", "enable", str(state["name"] or PLUGIN)]]
     return [["plugin", "install", _agy_source()]]
+
+
+def _bundled_plugin_steps(host: str, state: dict[str, Any]) -> list[list[str]]:
+    """Replace a possibly Git-backed marketplace before any install/update can fetch it."""
+    if host == "antigravity":
+        return [["plugin", "install", plugin_source()]]
+    remove = [["plugin", "marketplace", "remove", MARKETPLACE]] if state.get("marketplace") else []
+    return remove + [["plugin", "marketplace", "add", plugin_source()],
+                     ["plugin", "install" if host == "claude" else "add", PLUGIN_ID]]
 
 
 def _install_codex_agents(primary: Path, report: Report) -> None:
@@ -564,7 +588,11 @@ def _declare_in_settings(primary: Path, report: Report, why: str | None, label: 
     has_market = isinstance(markets, dict) and MARKETPLACE in markets
     enabled = isinstance(plugins, dict) and plugins.get(PLUGIN_ID) is True
     reason = f" ({why})" if why else ""
-    if has_market and enabled:
+    local = _local_source()
+    source = {"source": "directory", "path": str(local)} if local else {"source": "github", "repo": plugin_source()}
+    market = (markets or {}).get(MARKETPLACE)
+    matches = not bundle.detect() or (isinstance(market, dict) and market.get("source") == source)
+    if has_market and enabled and matches:
         report.unchanged.append(f"{label}: {path} already declares the marketplace and enables {PLUGIN_ID}.")
         if why:
             report.add_todo(f"Restart Claude Code{where} if it is running, so it installs the {PLUGIN} plugin declared in its settings.")
@@ -573,11 +601,12 @@ def _declare_in_settings(primary: Path, report: Report, why: str | None, label: 
         report.done.append(f"{label}: would add the {MARKETPLACE} marketplace and enable {PLUGIN_ID} in {path}{reason}")
         report.add_todo(f"Restart Claude Code{where} so it installs the agents-router plugin from its settings.")
         return
-    local = _local_source()
-    source = {"source": "directory", "path": str(local)} if local else {"source": "github", "repo": plugin_source()}
     merged = dict(data)
     merged["extraKnownMarketplaces"] = dict(markets or {})
-    merged["extraKnownMarketplaces"].setdefault(MARKETPLACE, {"source": source})
+    if bundle.detect():
+        merged["extraKnownMarketplaces"][MARKETPLACE] = {**(market if isinstance(market, dict) else {}), "source": source}
+    else:
+        merged["extraKnownMarketplaces"].setdefault(MARKETPLACE, {"source": source})
     merged["enabledPlugins"] = dict(plugins or {})
     merged["enabledPlugins"][PLUGIN_ID] = True
     backup = None
@@ -762,6 +791,10 @@ def _check_kiro_login(config: Config, report: Report) -> None:
 def _check_agt_on_path(report: Report) -> None:
     if shutil.which("agt"):
         return
+    if bundle.detect():
+        report.add_todo(f"Add {bundle.bin_dir()} to PATH, then restart your terminal and agent. "
+                        f"The app's command line tool is {bundle.stable_launcher()}.")
+        return
     scripts = sysconfig.get_path("scripts")
     report.add_todo(
         "The plugin starts `agt`, but it isn't on PATH. Run `uv tool update-shell` (or `pipx ensurepath`), or add "
@@ -799,6 +832,8 @@ def run_setup(config: Config, hosts: list[str], accounts: list[str], dry_run: bo
     """The plugin in each host, accounts registered, and (`role_agents`) this CLI's role agents kept in line."""
 
     report = Report(dry_run=dry_run)
+    if not _prepare_bundled_plugin(report):
+        return 1, report
     named = named_hosts(hosts)
     if not hosts or "auto" in hosts:
         detected = detect_hosts(config)
@@ -1239,6 +1274,8 @@ def _install_info() -> tuple[str, list[str] | None]:
     import site
     import sys
 
+    if bundle.detect():
+        return "app", None
     running = Path(__file__).resolve().parent
     if (running.parent.parent / "pyproject.toml").is_file() and (running.parent.parent / ".claude-plugin").is_dir():
         return "checkout", None  # src/agents_router in a clone of the repository
@@ -1271,6 +1308,10 @@ def update_package(report: Report) -> bool:
     """Reinstall agt; True when it did, which leaves this process running the old code over the new files."""
 
     method, argv = _install_info()
+    if method == "app":
+        report.unchanged.append("agt: managed by Agents Router.app; use Check for Updates… in the app. "
+                                "Refreshing the bundled plugin and launchers locally.")
+        return False
     if method in ("editable", "checkout"):
         report.unchanged.append("agt: runs from a checkout of the repository; update it with `git pull` there.")
         return False
@@ -1326,6 +1367,8 @@ def finish_in_new_agt(hosts: list[str], report: Report) -> int | None:
 
 
 def _update_steps(host: str, state: dict[str, Any]) -> list[list[str]]:
+    if bundle.detect():
+        return _bundled_plugin_steps(host, state)
     if host == "claude":
         return [["plugin", "marketplace", "update", MARKETPLACE], ["plugin", "update", PLUGIN_ID]]
     if host == "codex":
@@ -1389,6 +1432,9 @@ def _update_claude(config: Config, report: Report) -> bool:
         is_this = same_folder(account.home, this.home)
         label = f"{LABELS['claude']} ({profile_name(account)})" if several else LABELS["claude"]
         where = "" if is_this else f" in {account.home}"
+        if how in ("settings", "declared") and bundle.detect():
+            _declare_in_settings(account.home, report, why=None, label=label, reload=None if is_this else account.home)
+            continue
         if how == "settings":
             report.unchanged.append(f"{label}: the plugin is declared in {account.home / 'settings.json'}; a restart refreshes it.")
             report.add_todo(f"Restart Claude Code{where} so it refreshes the agents-router plugin.")
@@ -1397,7 +1443,8 @@ def _update_claude(config: Config, report: Report) -> bool:
             report.unchanged.append(f"{label}: the plugin is declared in settings.json but not installed yet; a restart installs it.")
             report.add_todo(f"Restart Claude Code{where} so it installs the agents-router plugin.")
             continue
-        for args in _update_steps("claude", {}):
+        state = _plugin_state("claude", command, env) if bundle.detect() else {}
+        for args in _update_steps("claude", state):
             shown = " ".join(["claude", *args])
             if report.dry_run:
                 report.done.append(f"{label}: would run `{shown}`")
@@ -1462,6 +1509,8 @@ def run_update(config: Config, hosts: list[str], dry_run: bool = False, package:
     """Update agt and the plugin; no report when the new agt finished the update and printed its own."""
 
     report = Report(dry_run=dry_run)
+    if not _prepare_bundled_plugin(report):
+        return 1, report
     if package and update_package(report):
         code = finish_in_new_agt(hosts, report)
         if code is not None:

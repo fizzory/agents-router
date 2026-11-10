@@ -78,7 +78,13 @@ impl Paths {
                     home.join(".agt/settings.toml")
                 }
             });
-        let launcher = home.join("Library/Application Support/Agents Router/bin/agt");
+        let support = std::env::var_os("AGT_APP_SUPPORT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join("Library/Application Support/Agents Router"));
+        if !support.is_absolute() {
+            return Err("AGT_APP_SUPPORT must be absolute".into());
+        }
+        let launcher = support.join("bin/agt");
         #[cfg(debug_assertions)]
         let launcher = if let Some(fake) = std::env::var_os("AGT_APP_TEST_LAUNCHER") {
             let fake = PathBuf::from(fake);

@@ -114,6 +114,14 @@ def main():
         save()
         print(f"Added marketplace {name}")
         return 0
+    if sub[:2] == ["marketplace", "remove"]:
+        name = sub[2]
+        if name not in state["marketplaces"]:
+            return 1
+        state["marketplaces"].remove(name)
+        state["local"] = [item for item in state.get("local", []) if item != name]
+        save()
+        return 0
     if sub[:2] in (["marketplace", "update"], ["marketplace", "upgrade"]):
         if kind == "codex" and sub[2] in state.get("local", []):
             print(f"Error: marketplace `{sub[2]}` is not configured as a Git marketplace", file=sys.stderr)

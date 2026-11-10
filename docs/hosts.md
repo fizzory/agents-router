@@ -136,3 +136,11 @@ That's chosen per job with `runtime` (`claude`, `codex`, `antigravity` or `kiro`
 | Antigravity | `agy plugin install https://github.com/Watcharagorn/agents-router` again | `{"mcpServers": {"agents-router": {"command": "agt", "args": ["mcp"]}}}` in `~/.gemini/config/mcp_config.json` |
 
 For a Claude Code profile other than `~/.claude`, run the `claude` commands with `CLAUDE_CONFIG_DIR=<its folder>`; `~/.claude` runs without it.
+
+An app-owned CLI uses **Check for Updates…** in Agents Router.app for new versions.
+Its `agt update` skips uv/pipx/pip and refreshes the plugin from the runtime's
+shipped tree, offline. It replaces agt's marketplace with the local copy before
+installing, so an older Git marketplace cannot fetch from the network. Settings-only
+Claude profiles get that local source too. Plugin hooks and MCP commands use the
+app's absolute stable launcher. `agt doctor --verbose` lists ownership, app, agt,
+runtime and Python versions, and every agt on PATH; it warns about conflicting copies.

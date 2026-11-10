@@ -10,6 +10,10 @@ Python is gone it says so instead of failing silently: the session entry
 prints one line with the reinstall command, the watcher posts a notification
 at most once a day, and the save entry stays quiet.
 
+For app-owned installs the reusable launcher delegates to the app's stable
+bin/agt instead. Plugin and shared hooks follow current; per-job helpers keep
+the physical runtime, so an app update cannot move them to another Python.
+
 The LaunchAgent (`io.github.watcharagorn.agents-router.share`, macOS only)
 runs `agt-run share watch --once --quiet` every 60 s and when a top-level
 agents or skills folder changes. launchctl is called through `AGT_LAUNCHCTL`
@@ -40,7 +44,7 @@ import tempfile
 import time
 from typing import Any
 
-from agents_router import fsutil
+from agents_router import bundle, fsutil
 from agents_router.config import home as agt_home, state_dir
 from agents_router.share import providers, settings as share_settings
 from agents_router.share.providers import BINARY
@@ -112,9 +116,12 @@ def install_record() -> dict[str, str]:
     from agents_router.config import user_settings_path
     from agents_router.setup import install_source
 
-    return {"python": fsutil.python_executable(), "package": str(Path(agents_router.__file__).resolve().parent.parent),
+    record = {"python": fsutil.python_executable(), "package": str(Path(agents_router.__file__).resolve().parent.parent),
             "home": str(agt_home().expanduser().absolute()), "source": install_source(),
             "config_dir": str(user_settings_path().parent.expanduser().absolute())}
+    if bundle.detect():
+        record.update(launcher=str(bundle.stable_launcher()), app_support=str(bundle.app_support()), bin_dir=str(bundle.bin_dir()))
+    return record
 
 
 def _notifier() -> list[str] | None:
@@ -127,6 +134,8 @@ def _notifier() -> list[str] | None:
 
 
 def launcher_text(record: dict[str, str]) -> str:
+    if record.get("launcher"):
+        return _app_launcher_text(record)
     q = shlex.quote
     message = (f"agt share is stopped: its Python at {record['python']} is gone. "
                f"Reinstall with `uv tool install --reinstall --managed-python {record['source']}`.")
@@ -175,6 +184,37 @@ PYTHONPATH="$PKG" exec "$PY" -s -m agents_router "$@"
 """
 
 
+def _app_launcher_text(record: dict[str, str]) -> str:
+    q = shlex.quote
+    message = "agt share is stopped: the app's command line tool is missing. Repair it in Agents Router Settings."
+    session = json.dumps({"systemMessage": message,
+                          "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": message}})
+    return f"""#!/bin/sh
+# Written by agt; reusable hooks follow the app's stable launcher through current.
+AGT={q(record['launcher'])}
+AGT_HOME={q(record['home'])}; export AGT_HOME
+AGT_CONFIG_DIR={q(record['config_dir'])}; export AGT_CONFIG_DIR
+AGT_APP_SUPPORT={q(record['app_support'])}; export AGT_APP_SUPPORT
+AGT_BIN_DIR={q(record['bin_dir'])}; export AGT_BIN_DIR
+LOG="$AGT_HOME/state/share/launcher.log"
+if [ ! -x "$AGT" ]; then
+  case "$1 $2" in
+    "share session") printf '%s\\n' {q(session)} ;;
+    "share hook-run")
+      case " $* " in *" --to antigravity "*) printf '%s\\n' '{{"decision":"allow"}}' ;; esac ;;
+  esac
+  exit 0
+fi
+case "$1 $2" in
+  "share session"|"share saved")
+    mkdir -p "$AGT_HOME/state/share" 2>/dev/null
+    "$AGT" "$@" 2>>"$LOG"
+    exit 0 ;;
+esac
+exec "$AGT" "$@"
+"""
+
+
 def write_launcher() -> tuple[Path, bool]:
     """(Re)write the launcher for the running install. Returns its path and whether it changed."""
 
@@ -199,6 +239,10 @@ def launcher_problem() -> str | None:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return f"{path} is missing"
+    app = re.search(r"^AGT=(.*)$", text, re.M)
+    if app:
+        launcher = shlex.split(app[1])[0]
+        return None if os.access(launcher, os.X_OK) else f"its app launcher ({launcher}) is gone"
     found = {key: shlex.split(value)[0] for key, value in re.findall(r"^(PY|PKG)=(.*)$", text, re.M) if value}
     python, package = found.get("PY"), found.get("PKG")
     if not python or not os.access(python, os.X_OK):

@@ -45,10 +45,13 @@ test('broken settings file locks all rows and preserves agt message and line', a
   assert.ok(broken.settings.every(row => !rowState(row, 'user', broken).editable));
 });
 test('uninstall is hidden for external agt; app-owned uninstall disables for blockers and enables at zero', async () => {
-  const busy = { usage: await fixture('usage'), install: { source: 'app' } };
+  const busy = { usage: await fixture('usage') };
+  assert.equal(installState(busy).owned, true);
   assert.equal(installState(busy).uninstallDisabled, true); assert.equal(installState(busy).uninstallTooltip, '2 jobs running');
   busy.usage = await fixture('usage-idle'); assert.equal(installState(busy).uninstallDisabled, false);
-  assert.equal(installState({ usage: busy.usage }).owned, false);
+  const external = structuredClone(busy.usage); external.install.source = 'uv';
+  assert.equal(installState({ usage: external }).owned, false);
+  assert.equal(installState({ usage: { ...busy.usage, install: undefined } }).owned, false);
   assert.deepEqual(installState({error:'agt not found'}).problem, {message:'agt not found',action:'Install'});
   assert.deepEqual(installState({error:'agt 0.16 is too old'}).problem, {message:'agt 0.16 is too old',action:'Repair'});
 });

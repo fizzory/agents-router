@@ -39,10 +39,24 @@ pub enum Availability {
 pub struct Usage {
     pub schema_version: SchemaVersion,
     pub agt_version: String,
+    pub install: Install,
     pub generated_at: f64,
     pub providers: Vec<ProviderUsage>,
     pub jobs: JobTotals,
     pub uninstall_blockers: Vec<UninstallBlocker>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Install {
+    pub source: InstallSource,
+    pub version: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallSource {
+    App,
+    Uv,
+    Pipx,
+    Source,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderUsage {
@@ -689,6 +703,22 @@ mod tests {
     fn every_golden_fixture_decodes() {
         let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/app");
         assert_eq!(check_fixtures(&folder).unwrap(), FIXTURES.len());
+    }
+    #[test]
+    fn install_ownership_survives_the_usage_snapshot() {
+        let bytes = include_bytes!("../../../tests/fixtures/app/usage.json");
+        let Snapshot::Usage(usage) = decode(CommandKind::Usage, bytes).unwrap() else {
+            panic!("expected usage");
+        };
+        assert_eq!(usage.install.source, InstallSource::App);
+        assert_eq!(usage.install.version, usage.agt_version);
+        let mut value: Value = serde_json::from_slice(bytes).unwrap();
+        for source in ["uv", "pipx", "source"] {
+            value["install"]["source"] = source.into();
+            assert!(decode(CommandKind::Usage, &serde_json::to_vec(&value).unwrap()).is_ok());
+        }
+        value["install"]["source"] = "unknown-owner".into();
+        assert!(decode(CommandKind::Usage, &serde_json::to_vec(&value).unwrap()).is_err());
     }
     #[test]
     fn schema_range_is_enforced_by_models_and_decoder() {

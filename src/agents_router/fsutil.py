@@ -651,6 +651,10 @@ def spawn_detached(argv: list[str], log_path: Path, env: dict[str, str] | None =
 def python_executable() -> str:
     """The interpreter to use for background runners (pythonw-safe)."""
 
+    from agents_router import bundle
+
+    if install := bundle.detect():
+        return str(install.python)  # never pin current: an update may switch it mid-job
     executable = Path(sys.executable)
     if executable.name.lower() == "pythonw.exe":
         candidate = executable.with_name("python.exe")

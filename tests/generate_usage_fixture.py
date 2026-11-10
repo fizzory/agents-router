@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import helpers  # isolate every real CLI, home and background service before agt imports
 
-from agents_router import account_check, accounts, usage_snapshot
+from agents_router import __version__, account_check, accounts, bundle, usage_snapshot
 from agents_router.config import Account, Config, RUNTIMES, RuntimeConfig
 from agents_router.fsutil import write_json
 
@@ -28,7 +28,9 @@ def build_fixture(scenario="base") -> dict:
     now = NOW if scenario == "base" else POPOVER_NOW
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
+        app_install = bundle.AppInstall(root / "runtime", __version__, __version__, "3.13.0", root / "runtime/plugin")
         with patch.dict(os.environ, {"AGT_HOME": str(root / "agt")}), patch("time.time", return_value=now), \
+                patch.object(bundle, "detect", return_value=app_install), \
                 patch("agents_router.usage_snapshot.same_process", side_effect=lambda pid, started: pid == 111):
             runtimes = {name: RuntimeConfig(name, root / name, _found=[]) for name in RUNTIMES}
             runtime = runtimes["claude"]

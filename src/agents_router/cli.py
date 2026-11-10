@@ -399,6 +399,9 @@ def _kiro_engine(config: Any, report: dict[str, Any], command: list[str]) -> tup
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
+    from agents_router import bundle
+
+    install = bundle.diagnostics()
     config = load_config()
     named = getattr(args, "runtime", None)
     names = [named] if named else _runtimes_set_up(config)
@@ -429,7 +432,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             problems.append(engine_problem)
     if getattr(args, "json", False):
         found = [{"problem": what, "fix": ui.plain(fix)} for what, fix in problems]
-        _print({**reports[names[0]], "problems": found} if named else {"runtimes": list(reports.values()), "problems": found})
+        _print({**reports[names[0]], "problems": found, "install": install} if named else
+               {"runtimes": list(reports.values()), "problems": found, "install": install})
         return 1 if problems else 0
     notes = list(config.notes)
     notes += [f"{found}. Two installs both register an MCP server and hooks; remove the old one."
@@ -459,6 +463,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     count = len(problems)
     lines: list[ui.Line] = [[ui.bold("agt doctor"), f"  {_and(names)}, ",
                              ui.error(f"{count} problem{'s' if count != 1 else ''}") if count else ui.ok("✓ all good")], ""]
+    lines += bundle.doctor_lines(install, verbose=getattr(args, "verbose", False)) + [""]
     width = max(len(HOST_LABELS.get(name, name)) for name in names + ["Sharing"]) + 3
     accounts_lines = ui.columns([_account_rows(entry) for name in names for entry in reports[name].get("accounts", [])],
                                 indent=4, gap=3)
@@ -891,10 +896,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     update_parser = sub.add_parser(
-        "update", help="Reinstall agt from the source you installed it from, and update the plugin in every host that has it.",
+        "update", help="Refresh agt and installed plugins; app installs use the app's updater.",
         description="Reinstalls the agt package with the tool that installed it (pipx, uv or pip), from the same "
         "source (GitHub, or the folder or archive you installed from), and updates "
-        "the agents-router plugin through each host's own terminal commands.",
+        "the agents-router plugin through each host's own terminal commands. "
+        "App installs refresh bundled plugins and launchers offline; use Check for Updates… in the app for new versions.",
     )
     update_parser.add_argument("--host", action="append", choices=("claude", "codex", "antigravity", "auto"),
                                help="Host to update; repeat for several (default auto: every host that has the plugin).")
@@ -906,9 +912,10 @@ def build_parser() -> argparse.ArgumentParser:
                            "`agt guide setup` is the one to follow after installing agt.")
     guide.add_argument("name", nargs="?", choices=sorted(GUIDES), help="The guide (no name: the list).")
 
-    doctor = sub.add_parser("doctor", help="Check binaries, logins and shared setup.")
+    doctor = sub.add_parser("doctor", help="Check the install, PATH, binaries, logins and shared setup.")
     doctor.add_argument("--runtime", choices=RUNTIMES, help="Check only this runtime (default: every one installed).")
     doctor.add_argument("--json", action="store_true", help="The report as JSON.")
+    doctor.add_argument("--verbose", action="store_true", help="Include all install versions, paths and agt entries on PATH.")
     doctor.add_argument("--live", action="store_true", help="Run one tiny job per account (uses a little quota).")
     doctor.add_argument("--model", help="Model for --live jobs (default: haiku for claude, the CLI's default otherwise).")
     doctor.add_argument("--cwd", default=os.getcwd())
