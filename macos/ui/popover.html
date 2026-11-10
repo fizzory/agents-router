@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agents Router</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="popover.css">
+  <link rel="stylesheet" href="motion.css">
+  <script type="module" src="popover.js"></script>
+</head>
+<body data-active="false">
+  <header class="popover-head">
+    <strong id="heading">Agents Router</strong>
+    <button class="icon-button" id="refresh" aria-label="Refresh usage" data-tooltip="Refresh usage"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+    <button class="icon-button" id="settings" aria-label="Settings" data-tooltip="Settings"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 1.72l-.12.87a2 2 0 0 1-1.18 1.52l-.2.09a2 2 0 0 1-1.9-.18l-.7-.53a2 2 0 0 0-2.58.53l-.22.38a2 2 0 0 0 .34 2.62l.7.53a2 2 0 0 1 .72 1.86v.22a2 2 0 0 1-.72 1.86l-.7.53a2 2 0 0 0-.34 2.62l.22.38a2 2 0 0 0 2.58.53l.7-.53a2 2 0 0 1 1.9-.18l.2.09a2 2 0 0 1 1.18 1.52l.12.87a2 2 0 0 0 2 1.72h.44a2 2 0 0 0 2-1.72l.12-.87a2 2 0 0 1 1.18-1.52l.2-.09a2 2 0 0 1 1.9.18l.7.53a2 2 0 0 0 2.58-.53l.22-.38a2 2 0 0 0-.34-2.62l-.7-.53a2 2 0 0 1-.72-1.86v-.22a2 2 0 0 1 .72-1.86l.7-.53a2 2 0 0 0 .34-2.62l-.22-.38a2 2 0 0 0-2.58-.53l-.7.53a2 2 0 0 1-1.9.18l-.2-.09a2 2 0 0 1-1.18-1.52l-.12-.87a2 2 0 0 0-2-1.72Z"/><circle cx="12" cy="12" r="3"/></svg></button>
+    <button class="icon-button" id="more" aria-label="More" aria-haspopup="menu" aria-expanded="false" aria-controls="app-menu" data-tooltip="More"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+  </header>
+  <div class="account-scroll"><ul class="account-list" id="accounts" aria-label="Accounts" hidden></ul></div>
+  <div class="empty-row" id="empty" hidden><span>No accounts</span><button class="inline-action" id="add">Add account</button></div>
+  <div class="empty-row" id="reading">Reading agt…</div>
+  <footer class="last-row" id="last-row" hidden></footer>
+  <div class="app-menu" id="app-menu" role="menu" aria-label="Agents Router" hidden>
+    <button role="menuitem" tabindex="-1" id="check-updates">Check for Updates…</button>
+    <hr role="separator">
+    <button role="menuitem" tabindex="-1" id="quit">Quit</button>
+  </div>
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+  <div class="visually-hidden" id="status" role="status" aria-live="polite"></div>
+</body>
+</html>

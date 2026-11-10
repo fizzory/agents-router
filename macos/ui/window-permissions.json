@@ -1,4 +1,4 @@
 {
-  "popover": [],
+  "popover": ["allow-get-snapshot", "allow-refresh-usage", "allow-hide-popover", "allow-set-popover-height", "allow-open-settings", "allow-login-account", "allow-check-account", "allow-check-for-updates", "allow-quit-app", "core:event:allow-listen", "core:event:allow-unlisten"],
   "settings": []
 }

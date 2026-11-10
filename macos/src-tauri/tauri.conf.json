@@ -8,7 +8,7 @@
     "withGlobalTauri": true,
     "macOSPrivateApi": true,
     "windows": [
-      { "label": "popover", "title": "Agents Router", "url": "index.html", "visible": false, "width": 360, "height": 400 },
+      { "label": "popover", "title": "Agents Router", "url": "popover.html", "visible": false, "width": 360, "height": 80, "decorations": false, "transparent": true, "resizable": false, "skipTaskbar": true, "windowEffects": {"effects": ["popover"], "state": "active"} },
       { "label": "settings", "title": "Agents Router Settings", "url": "index.html", "visible": false, "width": 760, "height": 560 }
     ],
     "security": {

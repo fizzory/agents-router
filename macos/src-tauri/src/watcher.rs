@@ -102,13 +102,25 @@ fn identity(path: &Path, recursive: bool) -> Option<Identity> {
 }
 enum Message {
     Events(DebounceEventResult),
+    Wake,
     Stop,
+}
+/// Wake notifications enter the same queue/deadline as filesystem notifications.
+#[derive(Clone)]
+pub struct WakeTrigger(mpsc::Sender<Message>);
+impl WakeTrigger {
+    pub fn notify(&self) {
+        let _ = self.0.send(Message::Wake);
+    }
 }
 pub struct SettingsWatcher {
     sender: mpsc::Sender<Message>,
     worker: Option<thread::JoinHandle<()>>,
 }
 impl SettingsWatcher {
+    pub fn wake_trigger(&self) -> WakeTrigger {
+        WakeTrigger(self.sender.clone())
+    }
     pub fn start(paths: WatchPaths, on_change: impl Fn() + Send + 'static) -> Result<Self, String> {
         if [&paths.state, &paths.jobs]
             .into_iter()
@@ -212,6 +224,9 @@ fn watch_loop(
     loop {
         match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(Message::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Ok(Message::Wake) => {
+                dirty = Some(Instant::now());
+            }
             Ok(Message::Events(Ok(events))) => {
                 if events
                     .iter()
@@ -248,6 +263,29 @@ fn watch_loop(
 mod tests {
     use super::*;
     use crate::terminal::tests::Scratch;
+    #[test]
+    fn wake_burst_is_one_debounced_read() {
+        let temp = Scratch::new("wake");
+        let (tx, rx) = mpsc::channel();
+        let watcher = SettingsWatcher::start(
+            WatchPaths {
+                state: temp.0.join("state"),
+                jobs: temp.0.join("jobs"),
+                settings: vec![],
+            },
+            move || {
+                let _ = tx.send(());
+            },
+        )
+        .unwrap();
+        let wake = watcher.wake_trigger();
+        for _ in 0..3 {
+            wake.notify();
+        }
+        assert!(rx.recv_timeout(Duration::from_millis(750)).is_err());
+        rx.recv_timeout(Duration::from_secs(3)).expect("wake read");
+        assert!(rx.recv_timeout(Duration::from_millis(1300)).is_err());
+    }
     #[test]
     fn atomic_save_and_replaced_folder_are_seen() {
         let temp = Scratch::new("watch");

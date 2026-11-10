@@ -1,0 +1,30 @@
+{
+  "reading": {
+    "fixture": "usage-popover.json",
+    "reading": true
+  },
+  "first": {
+    "reading": true
+  },
+  "empty": {
+    "empty": true
+  },
+  "unreadable": {
+    "error": "Can't read agt: timed out"
+  },
+  "missing": {
+    "error": "agt not found",
+    "update_version": "0.17.1"
+  },
+  "old": {
+    "error": "agt 0.16 is too old",
+    "update_version": "0.17.1"
+  },
+  "update": {
+    "fixture": "usage-popover.json",
+    "update_version": "0.17.1"
+  },
+  "nothing": {
+    "fixture": "usage-nothing.json"
+  }
+}

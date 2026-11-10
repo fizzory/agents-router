@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from helpers import TempHome
-from generate_usage_fixture import FIXTURE, NOW, fixture_text
+from generate_usage_fixture import FIXTURE, NOW, POPOVER_FOLDER, fixture_text, fixture_texts, popover_states_text
 
 from agents_router import accounts, cli, health, profiles, usage_snapshot
 from agents_router.config import Account, Config, RUNTIMES, RuntimeConfig, load_config
@@ -28,6 +28,14 @@ def listing(root):
         content = os.readlink(path) if path.is_symlink() else path.read_bytes() if path.is_file() else None
         result[str(path.relative_to(root))] = (info.st_mode, info.st_mtime_ns, content)
     return result
+
+
+class PopoverFixtureTests(unittest.TestCase):
+    def test_golden_popover_inputs_match_the_producer(self):
+        for name, text in fixture_texts().items():
+            with self.subTest(fixture=name):
+                self.assertEqual((FIXTURE.parent / name).read_text(), text)
+        self.assertEqual((POPOVER_FOLDER / "states.json").read_text(), popover_states_text())
 
 
 class UsageTests(TempHome):

@@ -1,0 +1,41 @@
+/* Sole owner of motion durations, visual delays and curves. */
+:root {
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --travel-curve: cubic-bezier(.65, 0, .35, 1);
+  --hover-time: 100ms;
+  --cross-fade-time: 200ms;
+  --travel-time: 240ms;
+  --flash-time: 400ms;
+  --panel-time: 120ms;
+  --panel-resize-time: 160ms;
+  --terminal-delay: 300ms;
+  --tooltip-delay: 400ms;
+  --tooltip-time: 100ms;
+  --turn-time: 720ms;
+}
+.account-row, .icon-button { transition: background-color var(--hover-time) var(--ease-out); }
+.dot, .meter-track, .status-slot { transition: opacity var(--cross-fade-time) var(--ease-out), color var(--cross-fade-time) var(--ease-out), background-color var(--cross-fade-time) var(--ease-out); }
+.is-fresh .meter-fill { transition: transform var(--travel-time) var(--travel-curve); }
+.digit-strip { animation: digit-roll var(--travel-time) var(--travel-curve) both; }
+.number-before { animation: number-out var(--cross-fade-time) var(--ease-out) both; }
+.number-after, .row-enter { animation: number-in var(--cross-fade-time) var(--ease-out) both; }
+.turning { animation: refresh-turn var(--turn-time) linear; }
+.row-leave { animation: number-out var(--panel-time) var(--ease-out) both; pointer-events: none; }
+.row-moving { transition: transform var(--travel-time) var(--travel-curve); }
+.panel-show { animation: panel-in var(--panel-time) var(--ease-out) both; }
+.tooltip { transition: opacity var(--tooltip-time) var(--ease-out); }
+.app-menu:not([hidden]) { animation: number-in var(--hover-time) var(--ease-out) both; }
+@keyframes digit-roll { from { transform: translateY(0); } to { transform: translateY(-14px); } }
+@keyframes number-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes number-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes refresh-turn { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes panel-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+body[data-active="false"] *, body[data-active="false"] { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .content-change .account-scroll, .content-change > .empty-row, .content-change .last-row { animation: number-in var(--cross-fade-time) var(--ease-out) both; }
+  .is-fresh .meter-fill, .row-moving { transition: none; }
+  .digit-strip, .turning { animation: none; }
+  .digit-strip { transform: translateY(-14px); }
+  .panel-show { animation-name: number-in; }
+  .refresh-busy, .inline-action[aria-busy="true"] .icon { opacity: .55; }
+}

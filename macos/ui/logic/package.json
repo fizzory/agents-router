@@ -1,4 +1,1 @@
-{
-  "type": "module",
-  "main": "usage.test.js"
-}
+{"type":"module","main":"tests.js"}

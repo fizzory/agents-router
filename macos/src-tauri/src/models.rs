@@ -541,6 +541,8 @@ pub fn decode(kind: CommandKind, bytes: &[u8]) -> Result<Snapshot, String> {
 /// Explicit inventory: unknown files fail the checker, so a new producer needs a model.
 pub const FIXTURES: &[(&str, CommandKind)] = &[
     ("usage.json", CommandKind::Usage),
+    ("usage-popover.json", CommandKind::Usage),
+    ("usage-nothing.json", CommandKind::Usage),
     ("config-show.json", CommandKind::ConfigShow),
     ("config-set.json", CommandKind::ConfigSet),
     ("config-set-error.json", CommandKind::ConfigSet),

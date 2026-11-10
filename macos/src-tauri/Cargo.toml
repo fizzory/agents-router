@@ -31,6 +31,7 @@ tauri-plugin-autostart = "=2.7.0"
 objc2 = "=0.6.5"
 objc2-app-kit = { version = "=0.3.2", features = ["NSWorkspace"] }
 objc2-foundation = { version = "=0.3.2", features = ["NSNotification", "NSOperation", "NSString", "block2"] }
+objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["CAMediaTimingFunction"] }
 block2 = "=0.6.2"
 notify-debouncer-mini = { version = "=0.7.0", features = ["macos_fsevent"] }
 tokio = { version = "=1.54.1", features = ["process", "rt-multi-thread", "macros", "sync", "time"] }

@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "agt_version": "0.16.1",
+  "generated_at": 1794337200.0,
+  "providers": [
+    {
+      "runtime": "claude",
+      "label": "Claude Code",
+      "accounts": [
+        {
+          "name": "claude-cooling",
+          "enabled": true,
+          "availability": "cooling",
+          "reason": "usage limit",
+          "until": 1794341700.0,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": 2,
+          "unhealthy_models": [],
+          "windows": []
+        },
+        {
+          "name": "claude-logged-out",
+          "enabled": true,
+          "availability": "logged_out",
+          "reason": "cached login check says logged out",
+          "until": null,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": 2,
+          "unhealthy_models": [],
+          "windows": []
+        }
+      ]
+    },
+    {
+      "runtime": "codex",
+      "label": "Codex",
+      "accounts": [
+        {
+          "name": "primary",
+          "enabled": true,
+          "availability": "unknown",
+          "reason": "no cached login check",
+          "until": null,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": null,
+          "unhealthy_models": [],
+          "windows": []
+        }
+      ]
+    },
+    {
+      "runtime": "antigravity",
+      "label": "Antigravity",
+      "accounts": [
+        {
+          "name": "primary",
+          "enabled": true,
+          "availability": "logged_out",
+          "reason": "cached login check says logged out",
+          "until": null,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": null,
+          "unhealthy_models": [],
+          "windows": []
+        }
+      ]
+    },
+    {
+      "runtime": "kiro",
+      "label": "Kiro",
+      "accounts": [
+        {
+          "name": "primary",
+          "enabled": true,
+          "availability": "logged_out",
+          "reason": "cached login check says logged out",
+          "until": null,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": null,
+          "unhealthy_models": [],
+          "windows": []
+        }
+      ]
+    }
+  ],
+  "jobs": {
+    "active": 2,
+    "queued": 0,
+    "starting": 0,
+    "running": 2,
+    "unassigned": 0,
+    "removed_accounts": 2,
+    "surviving_workers": 0
+  },
+  "uninstall_blockers": [
+    {
+      "kind": "active_job",
+      "job_id": "fixture-busy-0",
+      "runtime": "claude",
+      "account": "claude-busy"
+    },
+    {
+      "kind": "active_job",
+      "job_id": "fixture-busy-1",
+      "runtime": "claude",
+      "account": "claude-busy"
+    }
+  ]
+}

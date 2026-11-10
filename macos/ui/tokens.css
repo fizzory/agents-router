@@ -1,0 +1,27 @@
+:root {
+  color-scheme: light dark;
+  font: 13px/1.3 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  color: CanvasText;
+  --text: CanvasText;
+  --muted: #595961;
+  --panel: #f5f5f7;
+  --surface: #fff;
+  --line: #a1a1aa;
+  --track: #a1a1aa;
+  --accent: AccentColor;
+  --available: #18843c;
+  --attention: #835000;
+  --unavailable: #b52d23;
+  --radius: 6px;
+  --row-height: 22px;
+  --provider-width: 66px;
+  --slot-width: 86px;
+  --meter-width: 56px;
+  --icon-size: 14px;
+  --icon-hit: 22px;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --muted: #b3b3bc; --panel: #252529; --surface: #303034; --line: #5c5c65; --track: #5c5c65;
+    --available: #3bc865; --attention: #ffb12b; --unavailable: #ff453a; }
+}
