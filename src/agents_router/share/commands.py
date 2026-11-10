@@ -2914,7 +2914,10 @@ def _kinds_command(args: argparse.Namespace) -> int:
     word = {mcp.KIND: "MCP servers"}.get(kind, kind)
 
     def already(how: str = "") -> int:
-        ui.out([ui.bold(title), "  ", ui.muted(("already on" if args.kinds_command == "add" else "already off") + how)])
+        if args.json:
+            _print({"kind": kind, "enabled": args.kinds_command == "add", "unchanged": True})
+        else:
+            ui.out([ui.bold(title), "  ", ui.muted(("already on" if args.kinds_command == "add" else "already off") + how)])
         return 0
 
     def turned_on(sentence: str = "", body: Callable[[], list[ui.Line]] | None = None):

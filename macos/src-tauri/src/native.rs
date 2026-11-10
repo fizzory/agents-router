@@ -469,3 +469,16 @@ pub fn open_settings_file(
         Some(&completion),
     );
 }
+
+/// A native menu callback has no browser user-activation token.
+pub fn copy_text(_mtm: MainThreadMarker, text: &str) -> Result<(), String> {
+    let board = objc2_app_kit::NSPasteboard::generalPasteboard();
+    board.clearContents();
+    if board.setString_forType(&NSString::from_str(text), unsafe {
+        objc2_app_kit::NSPasteboardTypeString
+    }) {
+        Ok(())
+    } else {
+        Err("Could not copy. Try Copy again.".into())
+    }
+}

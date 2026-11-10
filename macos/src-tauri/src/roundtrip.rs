@@ -2,6 +2,7 @@
 use crate::{
     client::{AgtClient, CommandOutcome},
     models::{Level, Snapshot},
+    panes::RoleEdit,
     settings::SettingsCore,
 };
 use std::{
@@ -85,7 +86,11 @@ pub fn run() -> Result<(), String> {
             ),
         )?;
     }
-    fs::write(agt.join("settings.toml"), "max_jobs = 6\n").map_err(|e| e.to_string())?;
+    fs::write(
+        agt.join("settings.toml"),
+        "max_jobs = 6\n[roles.builder]\nproviders = [\"claude\", \"codex\"]\n",
+    )
+    .map_err(|e| e.to_string())?;
     let mut command =
         std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
     command
@@ -273,6 +278,76 @@ pub async fn isolated(root: &Path) -> Result<(), String> {
         }
         println!("OK: {level_name} max_jobs set, read back, undo from previous; bad value refused without writing");
     }
-    println!("OK: isolated real-agt roundtrip (user + workspace)");
+    let before = core.roles_show(None).await.map_err(|e| e.to_string())?;
+    let CommandOutcome::Data(before) = before else {
+        return Err("roles read refused".into());
+    };
+    let Snapshot::Roles(before) = *before else {
+        return Err("wrong roles model".into());
+    };
+    let original: Vec<_> = before
+        .roles
+        .iter()
+        .find(|r| r.name == "builder")
+        .ok_or("missing builder")?
+        .providers
+        .iter()
+        .map(|p| p.provider.clone())
+        .collect();
+    let reordered: Vec<_> = original.iter().rev().cloned().collect();
+    let changed = core
+        .roles_config(
+            RoleEdit::Reorder {
+                role: "builder".into(),
+                providers: reordered.clone(),
+            },
+            Level::User,
+            None,
+            None,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let CommandOutcome::Data(changed) = changed else {
+        return Err("roles reorder refused".into());
+    };
+    let Snapshot::RolesConfig(changed) = *changed else {
+        return Err("wrong roles write model".into());
+    };
+    let readback = core.roles_show(None).await.map_err(|e| e.to_string())?;
+    let CommandOutcome::Data(readback) = readback else {
+        return Err("roles readback refused".into());
+    };
+    let Snapshot::Roles(readback) = *readback else {
+        return Err("wrong roles readback model".into());
+    };
+    let actual: Vec<_> = readback
+        .roles
+        .iter()
+        .find(|r| r.name == "builder")
+        .ok_or("missing reordered builder")?
+        .providers
+        .iter()
+        .map(|p| p.provider.clone())
+        .collect();
+    if actual != reordered || actual == original {
+        return Err("roles order readback differs".into());
+    }
+    let restored = core
+        .roles_config(
+            RoleEdit::Restore {
+                undo_from: changed.undo_from.ok_or("missing roles undo_from")?,
+                if_unchanged: changed.if_unchanged.ok_or("missing roles if_unchanged")?,
+            },
+            Level::User,
+            None,
+            None,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    if !matches!(restored, CommandOutcome::Data(_)) {
+        return Err("roles structured undo refused".into());
+    }
+    println!("OK: builder providers reordered and read back through SettingsCore; structured undo applied");
+    println!("OK: isolated real-agt roundtrip (user + workspace + roles)");
     Ok(())
 }

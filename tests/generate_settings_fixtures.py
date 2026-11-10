@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import sys
 import tempfile
+import time
 from unittest.mock import patch
 
 from helpers import FAKE_HOST
@@ -47,6 +48,12 @@ def share_inputs(home: Path) -> None:
 
 
 def fixture_texts() -> dict[str, str]:
+    strftime = time.strftime
+
+    def utc_clock(format, when=None):
+        # macOS strftime can use the process timezone for %z even with gmtime.
+        return strftime(format.replace("%z", "+0000"), time.gmtime(NOW) if when is None else when)
+
     with tempfile.TemporaryDirectory(prefix="agt-settings-fixtures-") as temporary:
         root = Path(temporary).resolve()
         home, agt, project = root / "home", root / "agt", root / "project"
@@ -86,13 +93,18 @@ def fixture_texts() -> dict[str, str]:
                 return re.sub(r"<ROOT>/agt/state/backups/settings/[^\n ]+-roles-undo\.json",
                               "<ROOT>/agt/state/backups/settings/<UNDO>.json", text)
 
-            data = normalize(json.loads(out.getvalue()))
+            try:
+                data = normalize(json.loads(out.getvalue()))
+            except json.JSONDecodeError as error:
+                raise AssertionError(f"{argv}: not JSON: {out.getvalue()!r}") from error
             text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
             result[name + ".json"] = text
 
         try:
             os.chdir(project)
-            with patch.dict(os.environ, env), patch("time.time", return_value=NOW), \
+            with patch.dict(os.environ, env), patch("time.time", return_value=NOW), patch("time.monotonic", return_value=12345.0), \
+                    patch("time.localtime", side_effect=lambda seconds=None: time.gmtime(NOW if seconds is None else seconds)), \
+                    patch("time.strftime", side_effect=utc_clock), \
                     patch("agents_router.hosts.detect_host", return_value="unknown"), patch("sys.stdin.isatty", return_value=False):
                 capture("config-show", ["config", "show"])
                 # General edge states, with distinct User/Workspace file-only
@@ -117,6 +129,13 @@ def fixture_texts() -> dict[str, str]:
                 capture("accounts-list", ["accounts", "list"])
                 capture("accounts-check", ["accounts", "check", "primary"])
                 capture("accounts-add-check", ["accounts", "add", "spare", "--check"])
+                capture("accounts-add-check-error", ["accounts", "add", "work", "--check"], 1)
+                discovered = home / ".claude-lab"
+                discovered.mkdir()
+                (discovered / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": "fixture-lab"}}), encoding="utf-8")
+                capture("accounts-list-locked", ["accounts", "list"])
+                (discovered / ".claude.json").unlink()
+                discovered.rmdir()
                 capture("accounts-enable-refusal", ["accounts", "enable", "primary"], 2)
                 capture("config-revert", ["config", "revert", entry])
                 capture("accounts-disable", ["accounts", "disable", "work"])
@@ -126,6 +145,15 @@ def fixture_texts() -> dict[str, str]:
                                 '[[claude.accounts]]\nname = "work"\nhome = "~/accounts/work"\n'
                                 '[roles.reviewer]\nproviders = ["claude:work/sonnet:high"]\n', encoding="utf-8")
                 capture("roles-show", ["roles", "show"])
+                local = project / ".agt" / "settings.local.toml"
+                local_text = local.read_text()
+                original_roles = user.read_text()
+                local.write_text(local_text + '[roles.reviewer]\nenabled = false\n', encoding="utf-8")
+                user.write_text(original_roles + '[roles.builder]\nproviders = ["codex", "claude:work"]\n', encoding="utf-8")
+                user.write_text(user.read_text() + '[roles.executor]\naccess = "full"\nproviders = ["codex", "claude:work"]\n', encoding="utf-8")
+                capture("roles-show-panes", ["roles", "show"])
+                local.write_text(local_text, encoding="utf-8")
+                user.write_text(original_roles, encoding="utf-8")
                 original_settings = user.read_text()
                 user.write_text(original_settings.replace('name = "work"',
                     'name = "work"\nmodels = ["sonnet"]\nmax_effort = "medium"'), encoding="utf-8")
@@ -143,6 +171,7 @@ def fixture_texts() -> dict[str, str]:
                     '---\nname: example\ndescription: Example agent\n---\nHelp with examples.\n', encoding="utf-8")
                 os.utime(home / ".claude" / "agents" / "example.md", (NOW - 60, NOW - 60))
                 from agents_router.share import settings
+                capture("share-status-off", ["share", "status"])
                 saved = settings.Settings(enabled=True, watcher=False, push_on_save=False,
                                           folders=[settings.Folder("claude", home / ".claude", "claude"),
                                                    settings.Folder("codex", home / ".codex", "codex")])
@@ -159,6 +188,40 @@ def fixture_texts() -> dict[str, str]:
                 saved.mcp, saved.hooks, saved.plugins, saved.instructions = True, True, True, "block"
                 settings.save(saved)
                 capture("share-list-kinds", ["share", "list"])
+                # A fixed run id sequence keeps share backups and run references byte-stable.
+                with patch("agents_router.share.apply.new_run_id", side_effect=[f"fixture-run-{i}" for i in range(20)]):
+                    capture("share-pick-not-in", ["share", "pick", "agents/example", "--not-in", "codex"])
+                    capture("share-pick-in", ["share", "pick", "agents/example", "--in", "codex"])
+                    capture("share-kinds-remove", ["share", "kinds", "remove", "mcp"])
+                    capture("share-kinds-add", ["share", "kinds", "add", "mcp"])
+                    capture("share-kinds-unchanged", ["share", "kinds", "add", "mcp"])
+                # A real producer-backed single-item sync with a backup, then undo.
+                with patch("agents_router.share.apply.new_run_id", side_effect=["fixture-backed-sync", "fixture-backed-undo"]):
+                    source = home / ".claude/agents/example.md"
+                    source.write_text(source.read_text() + "Updated example.\n", encoding="utf-8")
+                    os.utime(source, (NOW - 60, NOW - 60))
+                    capture("share-sync-backed", ["share", "sync"])
+                    capture("activity-log-backed", ["log", "--all", "--limit", "200"])
+                    capture("share-undo", ["share", "undo", "agents/example"])
+                saved = settings.load()
+                saved.auto_copy = ()
+                settings.save(saved)
+                waiting = home / ".claude/agents/waiting.md"
+                waiting.write_text('---\nname: waiting\ndescription: Waiting agent\n---\nWait for a pick.\n', encoding="utf-8")
+                os.utime(waiting, (NOW - 60, NOW - 60))
+                capture("share-status-waiting", ["share", "status"])
+                # Relative home paths keep config's content revision deterministic.
+                user.write_text(user.read_text().replace(str(home), "~"), encoding="utf-8")
+                capture("config-show-sharing", ["config", "show", "--all"])
+                # Log producers supply the event shapes. Synthetic failure input never runs a tool.
+                from types import SimpleNamespace
+                from agents_router.share import apply
+                apply._log(SimpleNamespace(items=[]), apply.Result(run="fixture-failure", outcomes=[
+                    apply.Outcome("agents", "example", ["codex"], "copy", home / ".codex/agents/example.toml",
+                                  False, "Example write failure")]), "agt share sync", 12345.0, None)
+                from agents_router import levels
+                synclog.refused(levels.SettingsError("Example invalid setting", file=project / ".agt/settings.local.toml", line=2), None)
+                capture("activity-log", ["log", "--all", "--limit", "200"])
         finally:
             os.chdir(previous_cwd)
         return result

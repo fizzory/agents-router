@@ -17,7 +17,7 @@
       <button type="button" data-pane="general" aria-current="page">General<span id="general-dot" class="attention-dot" hidden></span></button>
       <button type="button" data-pane="roles">Roles</button>
       <button type="button" data-pane="accounts">Accounts</button>
-      <button type="button" data-pane="sharing">Sharing</button>
+      <button type="button" data-pane="sharing">Sharing<span id="sharing-dot" class="attention-dot" hidden></span></button>
       <button type="button" data-pane="activity">Activity</button>
     </nav>
   </aside>
@@ -34,7 +34,7 @@
         <div class="login-row"><label for="open-at-login">Open at login</label><input id="open-at-login" class="switch-input" type="checkbox" role="switch"><span class="row-slot"></span></div>
         <div id="install-group"><div class="version-row"><span>Installed version</span><output id="version">—</output><span class="row-slot"></span></div><span id="uninstall-wrapper" hidden tabindex="0"><button id="uninstall" type="button">Uninstall command line tool…</button></span></div>
       </div>
-      <p id="pending-pane" hidden></p>
+      <div id="pane-content" hidden></div>
     </main>
   </div>
   <div id="tooltip" class="tooltip" role="tooltip" hidden></div>

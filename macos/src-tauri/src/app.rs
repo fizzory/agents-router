@@ -3,6 +3,7 @@ use crate::{
     client::{AgtClient, ClientError, CommandOutcome, ReadReply, Request},
     models::{CommandKind, ConfigShow, Level, Snapshot, Usage},
     native,
+    panes::RoleEdit,
     settings::{self, SettingsCore},
     terminal::{TerminalAction, TerminalLauncher},
     watcher::{SettingsWatcher, WatchPaths},
@@ -313,6 +314,74 @@ fn show_setting_menu(window: tauri::WebviewWindow, key: String) -> Result<(), St
         .map_err(|error| error.to_string())
 }
 #[tauri::command]
+async fn copy_text(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    if text.len() > 1_048_576 {
+        return Err("Text is too large to copy".into());
+    }
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    main_thread(&app, move |_app, mtm| {
+        let _ = tx.send(native::copy_text(mtm, &text));
+    });
+    rx.await.map_err(|e| e.to_string())?
+}
+fn pane_action_label(action: &str) -> Option<&'static str> {
+    Some(match action {
+        "move-front" => "Move to front",
+        "move-up" => "Move up",
+        "move-down" => "Move down",
+        "login" => "Log in",
+        "enable" => "Enable",
+        "disable" => "Disable",
+        "revert" => "Revert to old value",
+        "copy-key" => "Copy key",
+        "undo-sync" => "Undo",
+        "open-file" => "Open settings.toml",
+        _ => return None,
+    })
+}
+#[tauri::command]
+fn show_pane_menu(
+    window: tauri::WebviewWindow,
+    token: String,
+    actions: Vec<String>,
+) -> Result<(), String> {
+    if window.label() != "settings"
+        || token.is_empty()
+        || token.len() > 20
+        || !token.bytes().all(|c| c.is_ascii_digit())
+        || actions.is_empty()
+        || actions.len() > 10
+    {
+        return Err("Choose a pane row".into());
+    }
+    let menu = Menu::new(&window).map_err(|e| e.to_string())?;
+    for action in actions {
+        let label = pane_action_label(&action).ok_or("Unknown pane action")?;
+        let item = MenuItem::with_id(
+            &window,
+            format!("pane-action:{token}:{action}"),
+            label,
+            true,
+            None::<&str>,
+        )
+        .map_err(|e| e.to_string())?;
+        menu.append(&item).map_err(|e| e.to_string())?;
+    }
+    window.popup_menu(&menu).map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn activity_undo_sync(
+    state: State<'_, SettingsCore>,
+    entry: String,
+) -> Result<serde_json::Value, String> {
+    settings::outcome_json(
+        state
+            .activity_undo_sync(entry)
+            .await
+            .map_err(|e| e.to_string())?,
+    )
+}
+#[tauri::command]
 async fn config_show(
     state: State<'_, SettingsCore>,
     workspace: Option<PathBuf>,
@@ -365,6 +434,161 @@ async fn config_revert(
             .await
             .map_err(|e| e.to_string())?,
     )
+}
+#[tauri::command]
+async fn roles_show(
+    state: State<'_, SettingsCore>,
+    workspace: Option<PathBuf>,
+) -> Result<serde_json::Value, String> {
+    settings::outcome_json(
+        state
+            .roles_show(workspace)
+            .await
+            .map_err(|e| e.to_string())?,
+    )
+}
+#[tauri::command]
+async fn roles_config(
+    state: State<'_, SettingsCore>,
+    edit: RoleEdit,
+    level: Level,
+    workspace: Option<PathBuf>,
+    user_said: Option<String>,
+) -> Result<serde_json::Value, String> {
+    settings::outcome_json(
+        state
+            .roles_config(edit, level, workspace, user_said)
+            .await
+            .map_err(|e| e.to_string())?,
+    )
+}
+#[tauri::command]
+async fn accounts_list(state: State<'_, SettingsCore>) -> Result<serde_json::Value, String> {
+    settings::outcome_json(state.accounts_list().await.map_err(|e| e.to_string())?)
+}
+#[tauri::command]
+async fn accounts_check(
+    app: tauri::AppHandle,
+    state: State<'_, SettingsCore>,
+    runtime: String,
+    account: String,
+) -> Result<serde_json::Value, String> {
+    let result = state
+        .accounts_check(runtime, account)
+        .await
+        .map_err(|e| e.to_string());
+    request_usage(&app, false, "settings-account-check");
+    settings::outcome_json(result?)
+}
+#[tauri::command]
+async fn accounts_add_check(
+    state: State<'_, SettingsCore>,
+    runtime: String,
+    account: String,
+) -> Result<serde_json::Value, String> {
+    settings::outcome_json(
+        state
+            .accounts_add_check(runtime, account)
+            .await
+            .map_err(|e| e.to_string())?,
+    )
+}
+#[tauri::command]
+async fn accounts_toggle(
+    app: tauri::AppHandle,
+    state: State<'_, SettingsCore>,
+    runtime: String,
+    account: String,
+    enabled: bool,
+) -> Result<serde_json::Value, String> {
+    let result = state
+        .accounts_toggle(runtime, account, enabled)
+        .await
+        .map_err(|e| e.to_string());
+    request_usage(&app, false, "settings-account-toggle");
+    settings::outcome_json(result?)
+}
+async fn terminal_handoff(state: &AppState, action: TerminalAction) -> Result<(), String> {
+    let handoff = state.terminal.prepare(&action).map_err(|e| e.to_string())?;
+    state
+        .terminal
+        .open(&handoff)
+        .await
+        .map_err(|e| format!("{e}. Copy: {}", handoff.copy_command))
+}
+#[tauri::command]
+async fn accounts_login(
+    state: State<'_, AppState>,
+    settings: State<'_, SettingsCore>,
+    runtime: String,
+    account: String,
+) -> Result<(), String> {
+    terminal_handoff(
+        &state,
+        settings
+            .account_action(&runtime, &account, false)
+            .map_err(|e| e.to_string())?,
+    )
+    .await
+}
+#[tauri::command]
+async fn setup_roles(state: State<'_, AppState>) -> Result<(), String> {
+    terminal_handoff(&state, TerminalAction::Setup).await
+}
+#[tauri::command]
+async fn accounts_add(
+    state: State<'_, AppState>,
+    settings: State<'_, SettingsCore>,
+    runtime: String,
+    account: String,
+) -> Result<(), String> {
+    terminal_handoff(
+        &state,
+        settings
+            .add_account_action(runtime, account)
+            .await
+            .map_err(|e| e.to_string())?,
+    )
+    .await
+}
+#[tauri::command]
+async fn share_list(state: State<'_, SettingsCore>) -> Result<serde_json::Value, String> {
+    settings::outcome_json(state.share_list().await.map_err(|e| e.to_string())?)
+}
+#[tauri::command]
+async fn share_status(state: State<'_, SettingsCore>) -> Result<serde_json::Value, String> {
+    settings::outcome_json(state.share_status().await.map_err(|e| e.to_string())?)
+}
+#[tauri::command]
+async fn share_kind(
+    state: State<'_, SettingsCore>,
+    kind: String,
+    enabled: bool,
+) -> Result<serde_json::Value, String> {
+    settings::outcome_json(
+        state
+            .share_kind(kind, enabled)
+            .await
+            .map_err(|e| e.to_string())?,
+    )
+}
+#[tauri::command]
+async fn share_pick(
+    state: State<'_, SettingsCore>,
+    item: String,
+    label: String,
+    included: bool,
+) -> Result<serde_json::Value, String> {
+    settings::outcome_json(
+        state
+            .share_pick(item, label, included)
+            .await
+            .map_err(|e| e.to_string())?,
+    )
+}
+#[tauri::command]
+async fn activity_log(state: State<'_, SettingsCore>) -> Result<serde_json::Value, String> {
+    settings::outcome_json(state.activity_log().await.map_err(|e| e.to_string())?)
 }
 #[tauri::command]
 async fn open_settings_file(
@@ -644,10 +868,27 @@ pub fn run() {
             open_settings,
             get_settings_target,
             show_setting_menu,
+            show_pane_menu,
+            copy_text,
+            setup_roles,
+            activity_undo_sync,
             config_show,
             config_set,
             config_unset,
             config_revert,
+            roles_show,
+            roles_config,
+            accounts_list,
+            accounts_check,
+            accounts_add_check,
+            accounts_toggle,
+            accounts_login,
+            accounts_add,
+            share_list,
+            share_status,
+            share_kind,
+            share_pick,
+            activity_log,
             open_settings_file,
             choose_workspace,
             get_open_at_login,
@@ -658,6 +899,17 @@ pub fn run() {
             quit_app
         ])
         .on_menu_event(|app, event| match event.id.as_ref() {
+            id if id.starts_with("pane-action:") => {
+                if let Some((token, action)) = id["pane-action:".len()..].split_once(':') {
+                    if pane_action_label(action).is_some() {
+                        let _ = app.emit_to(
+                            "settings",
+                            "pane-menu",
+                            serde_json::json!({"token":token,"action":action}),
+                        );
+                    }
+                }
+            }
             id if id.starts_with("setting-history:") => {
                 let key = &id["setting-history:".len()..];
                 let _ = app.emit_to(

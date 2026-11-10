@@ -68,7 +68,7 @@ def main():
                   "self-test complete; quitting" in text]
         requests = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
         checks += [bool(requests), requests.count(["usage", "--json"]) == 1,
-                   all(argv in (["usage", "--json"], ["usage", "--json", "--refresh"], ["config", "show", "--all", "--json"]) for argv in requests)]
+                   all(argv in (["usage", "--json"], ["usage", "--json", "--refresh"], ["config", "show", "--all", "--json"], ["accounts", "list", "--json"], ["share", "status", "--json"]) for argv in requests)]
         for line in text.splitlines():
             if any(key in line for key in ("class=AgtPopoverPanel", "posted NSWorkspace", "reason=debounced", "hidden reason=blur", "hidden reason=Esc", "popover resized-to-content", "self-test complete")):
                 print(line)

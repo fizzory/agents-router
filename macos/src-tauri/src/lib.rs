@@ -3,6 +3,7 @@ pub mod client;
 pub mod glyph;
 pub mod models;
 mod native;
+pub mod panes;
 pub mod placement;
 pub mod roundtrip;
 pub mod settings;

@@ -16,9 +16,10 @@ pub fn autostart_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 }
 
 pub struct SettingsCore {
-    client: AgtClient,
-    home: PathBuf,
-    files: Mutex<HashSet<PathBuf>>,
+    pub(crate) client: AgtClient,
+    pub(crate) home: PathBuf,
+    pub(crate) files: Mutex<HashSet<PathBuf>>,
+    pub(crate) panes: Mutex<crate::panes::PaneState>,
 }
 impl SettingsCore {
     pub fn new(client: AgtClient, home: PathBuf) -> Self {
@@ -26,9 +27,10 @@ impl SettingsCore {
             client,
             home,
             files: Mutex::new(HashSet::new()),
+            panes: Mutex::new(crate::panes::PaneState::default()),
         }
     }
-    fn cwd(&self, workspace: Option<PathBuf>) -> Result<PathBuf, ClientError> {
+    pub(crate) fn cwd(&self, workspace: Option<PathBuf>) -> Result<PathBuf, ClientError> {
         let path = workspace.unwrap_or_else(|| self.home.clone());
         if !path.is_absolute() || !path.is_dir() {
             return Err(ClientError::InvalidRequest(
@@ -134,7 +136,7 @@ impl SettingsCore {
         workspace: Option<PathBuf>,
         user_said: Option<String>,
     ) -> Result<CommandOutcome, ClientError> {
-        if entry.starts_with('-') || entry.is_empty() {
+        if !crate::panes::valid_log_id(&entry) {
             return Err(ClientError::InvalidRequest("Invalid log entry".into()));
         }
         let mut request = Request::new(CommandKind::ConfigRevert, Some(self.cwd(workspace)?));
@@ -162,7 +164,9 @@ impl SettingsCore {
 pub fn outcome_json(outcome: CommandOutcome) -> Result<Value, String> {
     match outcome {
         CommandOutcome::Data(data) => serde_json::to_value(data).map_err(|e| e.to_string()),
-        CommandOutcome::Refused(error) => Ok(json!({"ok":false, "exit_code":2, "error":error})),
+        CommandOutcome::Refused(error) => {
+            Ok(json!({"ok":false, "exit_code":error.exit_code.unwrap_or(2), "error":error}))
+        }
         CommandOutcome::NeedsUserWords(error) => {
             Ok(json!({"ok":false, "exit_code":3, "error":error}))
         }

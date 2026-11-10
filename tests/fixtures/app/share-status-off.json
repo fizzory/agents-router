@@ -1,0 +1,4 @@
+{
+  "enabled": false,
+  "message": "agt share isn't enabled yet. `agt share enable --dry-run` shows what it would do."
+}

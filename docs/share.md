@@ -301,6 +301,10 @@ hooks, plugins and instructions use their own planner decisions; no commands or 
 `--repo PATH` lists a listed repo's items; inside a listed repo, that scope is the default. `share status --json`
 keeps its attention exit code, and `share pick --json` still exits 3 when it returns `needs_choice`.
 
+`share kinds add|remove --json` returns JSON when the kind is already on or off
+too: `{kind, enabled, unchanged: true}`. A sync report retains its `written` and
+`failed` arrays; exit 1 can mean a partially applied run, so inspect both arrays.
+
 Sharing writers take the settings lock before reading settings, then `apply.lock` before changing CLI copies.
 Background syncs use the same order without waiting. Backup, settings write and audit entries stay under the
 settings lock, including renamed picks. No path may acquire the settings lock while holding `apply.lock`.

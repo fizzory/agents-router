@@ -75,7 +75,7 @@ impl Request {
         }
         Ok(self)
     }
-    fn argv(&self) -> Vec<String> {
+    pub(crate) fn argv(&self) -> Vec<String> {
         let mut argv: Vec<String> = self.command.prefix().iter().map(|s| (*s).into()).collect();
         argv.extend(self.arguments.clone());
         if self.command == CommandKind::AccountsAddCheck {
@@ -285,7 +285,21 @@ pub fn interpret_exit(
         stderr: String::from_utf8_lossy(stderr).trim().into(),
     };
     // Signal termination and unexpected exit codes always stay execution errors, even with JSON.
-    if !matches!(code, Some(0 | 2 | 3)) && !(kind == CommandKind::ShareStatus && code == Some(1)) {
+    if !matches!(code, Some(0 | 2 | 3))
+        && !(code == Some(1)
+            && matches!(
+                kind,
+                CommandKind::ShareStatus
+                    | CommandKind::SharePick
+                    | CommandKind::ShareUndo
+                    | CommandKind::ShareKindsAdd
+                    | CommandKind::ShareKindsRemove
+                    | CommandKind::AccountsAddCheck
+                    | CommandKind::AccountsEnable
+                    | CommandKind::AccountsDisable
+                    | CommandKind::AccountsCheck
+            ))
+    {
         return Err(failure());
     }
     let decoded = models::decode(kind, stdout).map_err(|e| {
@@ -306,6 +320,30 @@ pub fn interpret_exit(
             Ok(CommandOutcome::NeedsUserWords(error.error))
         }
         (Some(2), Snapshot::Error(error)) => Ok(CommandOutcome::Refused(error.error)),
+        (Some(1), Snapshot::Error(error))
+            if matches!(
+                kind,
+                CommandKind::AccountsAddCheck
+                    | CommandKind::AccountsEnable
+                    | CommandKind::AccountsDisable
+                    | CommandKind::AccountsCheck
+            ) =>
+        {
+            Ok(CommandOutcome::Refused(error.error))
+        }
+        (Some(1), Snapshot::ShareMutation(data))
+            if matches!(
+                kind,
+                CommandKind::SharePick
+                    | CommandKind::ShareUndo
+                    | CommandKind::ShareKindsAdd
+                    | CommandKind::ShareKindsRemove
+            ) =>
+        {
+            Ok(CommandOutcome::Data(Box::new(Snapshot::ShareMutation(
+                data,
+            ))))
+        }
         // A broken TOML file still returns the schema and rows with its diagnostic.
         (Some(2), Snapshot::Config(config))
             if kind == CommandKind::ConfigShow && config.error.is_some() =>
@@ -375,6 +413,17 @@ mod tests {
             Ok(CommandOutcome::Data(data)) if matches!(*data, Snapshot::Config(_)))
         );
         assert!(interpret_exit(CommandKind::RolesConfig, Some(9), words, b"failed").is_err());
+        assert!(matches!(
+            interpret_exit(CommandKind::AccountsAddCheck, Some(1),
+                include_bytes!("../../../tests/fixtures/app/accounts-add-check-error.json"), b""),
+            Ok(CommandOutcome::Refused(error)) if error.exit_code == Some(1)
+        ));
+        // A sharing run can apply some items and fail others; its report must stay visible.
+        assert!(matches!(
+            interpret_exit(CommandKind::ShareKindsAdd, Some(1),
+                include_bytes!("../../../tests/fixtures/app/share-kinds-add.json"), b""),
+            Ok(CommandOutcome::Data(data)) if matches!(*data, Snapshot::ShareMutation(_))
+        ));
     }
 
     #[tokio::test]

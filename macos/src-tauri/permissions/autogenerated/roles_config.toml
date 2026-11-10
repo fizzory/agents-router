@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-roles-config"
+description = "Enables the roles_config command without any pre-configured scope."
+commands.allow = ["roles_config"]
+
+[[permission]]
+identifier = "deny-roles-config"
+description = "Denies the roles_config command without any pre-configured scope."
+commands.deny = ["roles_config"]

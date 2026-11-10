@@ -78,6 +78,9 @@ agt doctor --live
 
 `accounts check [name] --json` explicitly refreshes cached login state without quota, with ten seconds for its probes. `agt usage --json` only reads that result. `accounts enable|disable max-2 --json` switch registered extra accounts under the settings lock, with a backup and log entry. The primary account and discovered profiles are refused; use `ignore` to leave a discovered profile out. See [account contracts](configuration.md#account-checks-and-switches).
 
+`accounts list --json` marks those locked rows with `can_toggle: false` and
+`toggle_reason`; discovered profiles also carry `found: true`.
+
 ## 5. Use it
 
 In Claude Code, ask for delegation in plain words ("have a subagent review the auth module on another account"), use `/agents-router:delegate <task>`, or let the skill decide.

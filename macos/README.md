@@ -145,3 +145,82 @@ serialized undo/redo, revision refusal and blocker/zero-job states. The
 producer-generated `config-show-levels.json`, `config-show-broken.json` and
 `usage-idle.json` extend the golden inputs. Light/dark evidence is under
 `.mentor/plans/agt-macos-app/evidence/step5-general-*.png`.
+
+## Settings pane IPC (step 6, PART A)
+
+The pane UIs remain stubs for PART B. `ui/tauri.js` exports these Settings-only
+operations; no new command is granted to the popover:
+
+| Adapter | Arguments and result |
+| --- | --- |
+| `rolesShow(workspace = null)` | Schema-1 roles, allowed model/effort choices and per-key `sources`; no provider discovery |
+| `rolesConfig({edit,level,workspace?,userSaid?})` | Tagged edit below; returns agt's role report or structured refusal |
+| `accountsList()` | All runtimes, canonical names, `can_toggle`, `toggle_reason`, `found` and auth |
+| `accountsCheck(runtime,account)` | A bounded check of a listed account; also refreshes usage |
+| `accountsAddCheck(runtime,account)` | Side-effect-free `accounts add --check`; `ok:false` includes the name error |
+| `accountsToggle(runtime,account,enabled)` | Enable/disable a listed, togglable account at User |
+| `accountsLogin(runtime,account)` | Login for a listed account through the private `TerminalLauncher` handoff |
+| `accountsAdd(runtime,account)` | Rechecks the name immediately, then hands Add account to Terminal |
+| `shareList()` / `shareStatus()` | Read-only listing and status (exit 1 with attention remains data) |
+| `shareKind(kind,enabled)` | `kinds add/remove` for `mcp` or `hooks`; preserves the result report, including partial failures |
+| `sharePick(item,label,included)` | `--in` or `--not-in` for an editable cell from the last listing |
+| `activityLog()` | `log --all --limit 200 --json`; newest first across workspaces, with event fields intact |
+
+`edit` is one of `{kind:"enable",role,enabled}`,
+`{kind:"reorder",role,providers:["codex","claude:work"]}`,
+`{kind:"model",entry:"claude:work",value:"opus"}`,
+`{kind:"effort",entry:"claude:work",value:"high"}`, or
+`{kind:"restore",undo_from,if_unchanged}`. A null model/effort clears the override.
+Model and effort apply to **All roles**, matching agt's entry-wide flags.
+Restore uses only `undo_from`, `if_unchanged`, `level` and the original workspace
+from a successful report in this app session. Rust rejects invented undo paths
+or a different scope; agt refuses a changed file. The human `undo` string is
+never executed. Successful restore returns another structured undo for redo.
+
+Share value switches use existing guarded `configSet` at `level:"user"` with
+no workspace; MCP servers and Hooks use `shareKind` so they apply immediately.
+The top Sharing state comes from `enabled`; the `attention` entries carry
+waiting actions, including new items whose names need not appear in `waiting`.
+Non-editable cells remain Copy command actions. Picks have no undo queue.
+
+Activity retains `type`, `id`, `time`, key/old/new/level/file, attribution and
+sync `changes[].ok`; failed counts come from those changes. Use `configRevert`
+with the entry's `id` and owning workspace (null for User). agt checks that the
+file and current value still match that log entry. Files reported by roles or
+Activity are also eligible for `openSettingsFile`. Search stays in the UI.
+
+Opening Terminal is not success. On reactivation, refresh Accounts and usage
+via the existing Settings status events. The debug fake serves the new pane
+fixtures; its responses are static. The real-agt isolated `--roundtrip` now
+also reorders builder providers, reads them back and applies structured undo.
+
+## Settings panes (step 6, PART B)
+
+`ui/panes.js` renders Roles, Accounts, Sharing and Activity inside the retained
+Settings window. Pure models and name-check sequencing live in
+`ui/logic/panes.js`; `SettingsHistory` serializes General, Sharing values and
+structured Roles restore operations on the same session undo stack. Picks and
+account switches stay reversible by toggling again. Activity Search searches
+only log events; setting-row Show history opens it at the key.
+
+Provider chips are ordered only for edit/full roles. Left/right arrows rove
+focus, Option-arrows move providers, and native context menus offer Move to
+front/up/down. Model and Effort sections show only agt's allowed choices and
+label their entry-wide scope All roles. The account sheet invalidates its
+successful name check immediately on input and ignores superseded replies.
+
+Additional Settings-only operations complete pane actions:
+`showPaneMenu(token, actions)` opens a native menu of fixed action names;
+`copyText(text)` writes the native pasteboard without a browser gesture;
+`setupRoles()` hands `agt setup` to Terminal; `activityUndoSync(entry)` re-reads
+Activity, accepts only a successful single agent/skill item with a backup and
+no later event for that item, then calls `agt share undo` for that item. A
+repository-scoped event stays in Terminal. No frontend command string runs.
+
+`node --test macos/ui/logic` includes the pane contract tests. The golden
+producers also emit a full-access role, enabled Sharing configuration and a
+backed-up sync/undo with its Activity event. WebKit renders of production HTML
+at 640 × 420, using fake-agt responses, are saved under
+`.mentor/plans/agt-macos-app/evidence/step6-{roles,accounts,sharing,activity}-{light,dark}.png`.
+They verify this Mac's WebKit; the macOS 14.0 baseline and native captures stay
+in the plan's later release checks.

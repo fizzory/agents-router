@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-share-kind"
+description = "Enables the share_kind command without any pre-configured scope."
+commands.allow = ["share_kind"]
+
+[[permission]]
+identifier = "deny-share-kind"
+description = "Denies the share_kind command without any pre-configured scope."
+commands.deny = ["share_kind"]

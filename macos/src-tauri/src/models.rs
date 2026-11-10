@@ -194,7 +194,7 @@ pub struct AccountsList {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountRuntime {
     pub runtime: String,
-    pub binary: String,
+    pub binary: Option<String>,
     pub version: Option<String>,
     pub primary_setup: String,
     pub failover: String,
@@ -212,8 +212,12 @@ pub struct Account {
     pub name: String,
     pub home: String,
     pub enabled: bool,
+    pub can_toggle: bool,
+    pub toggle_reason: Option<String>,
+    #[serde(default)]
+    pub found: bool,
     pub takes_unpinned_jobs: Option<bool>,
-    pub auth: Auth,
+    pub auth: Option<Auth>,
     pub busy_slots: u64,
     pub running_jobs: u64,
     pub limits: AccountLimits,
@@ -335,8 +339,8 @@ pub struct RolesConfig {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoleChange {
-    pub old: BTreeMap<String, Value>,
-    pub new: BTreeMap<String, Value>,
+    pub old: Option<BTreeMap<String, Value>>,
+    pub new: Option<BTreeMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -365,6 +369,29 @@ pub struct ShareCell {
     pub note: String,
     pub editable: bool,
     pub reason: Option<String>,
+}
+/// Share commands have run reports, off/no-op reports and kind-specific removals.
+/// Keep their producer fields intact, including per-item failures and waiting counts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShareMutation {
+    #[serde(flatten)]
+    pub fields: BTreeMap<String, Value>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityLog {
+    pub workspace: Option<String>,
+    pub entries: Vec<ActivityEntry>,
+    pub more: u64,
+    pub other_workspaces: u64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityEntry {
+    pub id: String,
+    pub time: String,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    #[serde(flatten)]
+    pub fields: BTreeMap<String, Value>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShareStatus {
@@ -442,6 +469,10 @@ pub enum CommandKind {
     ShareList,
     ShareStatus,
     SharePick,
+    ShareUndo,
+    ShareKindsAdd,
+    ShareKindsRemove,
+    ActivityLog,
 }
 impl CommandKind {
     pub fn prefix(self) -> &'static [&'static str] {
@@ -461,6 +492,10 @@ impl CommandKind {
             Self::ShareList => &["share", "list"],
             Self::ShareStatus => &["share", "status"],
             Self::SharePick => &["share", "pick"],
+            Self::ShareUndo => &["share", "undo"],
+            Self::ShareKindsAdd => &["share", "kinds", "add"],
+            Self::ShareKindsRemove => &["share", "kinds", "remove"],
+            Self::ActivityLog => &["log"],
         }
     }
     pub fn is_read(self) -> bool {
@@ -474,6 +509,7 @@ impl CommandKind {
                 | Self::RolesShow
                 | Self::ShareList
                 | Self::ShareStatus
+                | Self::ActivityLog
         )
     }
 }
@@ -492,6 +528,8 @@ pub enum Snapshot {
     RolesConfig(RolesConfig),
     Sharing(ShareList),
     ShareStatus(ShareStatus),
+    ShareMutation(ShareMutation),
+    Activity(ActivityLog),
     Error(ErrorEnvelope),
     Choice(NeedsChoice),
 }
@@ -523,6 +561,22 @@ pub fn decode(kind: CommandKind, bytes: &[u8]) -> Result<Snapshot, String> {
     if value.get("ok") == Some(&Value::Bool(false)) {
         return parse!(ErrorEnvelope, Error);
     }
+    if matches!(
+        kind,
+        CommandKind::SharePick
+            | CommandKind::ShareUndo
+            | CommandKind::ShareKindsAdd
+            | CommandKind::ShareKindsRemove
+    ) {
+        if !value.is_object()
+            || !(value.get("run").is_some()
+                || value.get("enabled").is_some()
+                || value.get("settings").is_some()
+                || value.get("unchanged").is_some())
+        {
+            return Err("invalid sharing mutation report".into());
+        }
+    }
     match kind {
         CommandKind::Usage => parse!(Usage, Usage),
         CommandKind::ConfigShow => parse!(ConfigShow, Config),
@@ -539,9 +593,13 @@ pub fn decode(kind: CommandKind, bytes: &[u8]) -> Result<Snapshot, String> {
         CommandKind::RolesConfig => parse!(RolesConfig, RolesConfig),
         CommandKind::ShareList => parse!(ShareList, Sharing),
         CommandKind::ShareStatus => parse!(ShareStatus, ShareStatus),
-        CommandKind::SharePick => {
-            Err("share pick did not return a supported choice or refusal".into())
+        CommandKind::SharePick
+        | CommandKind::ShareUndo
+        | CommandKind::ShareKindsAdd
+        | CommandKind::ShareKindsRemove => {
+            parse!(ShareMutation, ShareMutation)
         }
+        CommandKind::ActivityLog => parse!(ActivityLog, Activity),
     }
 }
 
@@ -552,6 +610,7 @@ pub const FIXTURES: &[(&str, CommandKind)] = &[
     ("usage-nothing.json", CommandKind::Usage),
     ("usage-idle.json", CommandKind::Usage),
     ("config-show.json", CommandKind::ConfigShow),
+    ("config-show-sharing.json", CommandKind::ConfigShow),
     ("config-show-levels.json", CommandKind::ConfigShow),
     ("config-show-broken.json", CommandKind::ConfigShow),
     ("config-set.json", CommandKind::ConfigSet),
@@ -577,6 +636,23 @@ pub const FIXTURES: &[(&str, CommandKind)] = &[
     ("share-list-kinds.json", CommandKind::ShareList),
     ("share-status.json", CommandKind::ShareStatus),
     ("share-pick-needs-choice.json", CommandKind::SharePick),
+    ("share-pick-in.json", CommandKind::SharePick),
+    ("share-pick-not-in.json", CommandKind::SharePick),
+    ("share-sync-backed.json", CommandKind::ShareUndo),
+    ("activity-log-backed.json", CommandKind::ActivityLog),
+    ("share-undo.json", CommandKind::ShareUndo),
+    ("share-kinds-add.json", CommandKind::ShareKindsAdd),
+    ("share-kinds-remove.json", CommandKind::ShareKindsRemove),
+    ("share-kinds-unchanged.json", CommandKind::ShareKindsAdd),
+    ("share-status-off.json", CommandKind::ShareStatus),
+    ("share-status-waiting.json", CommandKind::ShareStatus),
+    ("accounts-list-locked.json", CommandKind::AccountsList),
+    (
+        "accounts-add-check-error.json",
+        CommandKind::AccountsAddCheck,
+    ),
+    ("roles-show-panes.json", CommandKind::RolesShow),
+    ("activity-log.json", CommandKind::ActivityLog),
 ];
 
 pub fn check_fixtures(folder: &Path) -> Result<usize, String> {

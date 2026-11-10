@@ -466,6 +466,27 @@ class GoldenFixtureTests(unittest.TestCase):
                 self.assertEqual((FOLDER / name).read_text(encoding="utf-8"), text,
                                  "Regenerate with PYTHONPATH=src:tests python3 tests/generate_settings_fixtures.py")
 
+    def test_pane_states_come_from_producers_and_keep_structured_fields(self):
+        fixtures = {name: json.loads(text) for name, text in fixture_texts().items()}
+        accounts = fixtures["accounts-list-locked.json"]["runtimes"][0]["accounts"]
+        by_name = {row["name"]: row for row in accounts}
+        self.assertTrue(by_name["work"]["can_toggle"])
+        for name in ("primary", "claude-lab"):
+            self.assertFalse(by_name[name]["can_toggle"])
+            self.assertTrue(by_name[name]["toggle_reason"])
+        self.assertTrue(by_name["claude-lab"]["found"])
+        roles = {row["name"]: row for row in fixtures["roles-show-panes.json"]["roles"]}
+        self.assertEqual(roles["builder"]["access"], "edit")
+        self.assertEqual(roles["reviewer"]["sources"]["enabled"]["level"], "local")
+        self.assertEqual(fixtures["share-kinds-unchanged.json"], {"kind": "mcp", "enabled": True, "unchanged": True})
+        self.assertIn("written", fixtures["share-kinds-add.json"])
+        self.assertFalse(fixtures["share-status-off.json"]["enabled"])
+        self.assertTrue(fixtures["share-status-waiting.json"]["attention"])
+        entries = fixtures["activity-log.json"]["entries"]
+        self.assertTrue(any(row["type"] == "setting" and "old" in row and "new" in row for row in entries))
+        self.assertTrue(any(row["type"] == "refused" and row["line"] == 2 for row in entries))
+        self.assertTrue(any(row["type"] == "sync" and any(not change["ok"] for change in row["changes"]) for row in entries))
+
 
 if __name__ == "__main__":
     unittest.main()

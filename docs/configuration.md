@@ -110,6 +110,10 @@ Regenerate the app fixture with `PYTHONPATH=src:tests python3 tests/generate_usa
 
 ## Account checks and switches
 
+`accounts list --json` supplies `can_toggle` and nullable `toggle_reason` on each
+account. Primary logins and discovered Claude profiles cannot be toggled; a
+discovered profile also has `found: true`. Use these fields for locked controls.
+
 ```bash
 agt accounts check primary --json                 # this runtime's primary login; Claude by default
 agt accounts check --runtime codex --json         # every account on one runtime

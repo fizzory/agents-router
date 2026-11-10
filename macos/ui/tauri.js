@@ -22,6 +22,20 @@ export const configSet = ({ key, value, level, workspace = null, revision, userS
 export const configUnset = ({ key, level, workspace = null, revision, userSaid = null }) =>
   invoke("config_unset", { key, level, workspace, revision, userSaid });
 export const configRevert = ({ entry, workspace = null, userSaid = null }) => invoke("config_revert", { entry, workspace, userSaid });
+export const rolesShow = (workspace = null) => invoke("roles_show", { workspace });
+export const rolesConfig = ({ edit, level, workspace = null, userSaid = null }) =>
+  invoke("roles_config", { edit, level, workspace, userSaid });
+export const accountsList = () => invoke("accounts_list");
+export const accountsCheck = (runtime, account) => invoke("accounts_check", { runtime, account });
+export const accountsAddCheck = (runtime, account) => invoke("accounts_add_check", { runtime, account });
+export const accountsToggle = (runtime, account, enabled) => invoke("accounts_toggle", { runtime, account, enabled });
+export const accountsLogin = (runtime, account) => invoke("accounts_login", { runtime, account });
+export const accountsAdd = (runtime, account) => invoke("accounts_add", { runtime, account });
+export const shareList = () => invoke("share_list");
+export const shareStatus = () => invoke("share_status");
+export const shareKind = (kind, enabled) => invoke("share_kind", { kind, enabled });
+export const sharePick = (item, label, included) => invoke("share_pick", { item, label, included });
+export const activityLog = () => invoke("activity_log");
 export const openSettingsFile = (file, line = 1) => invoke("open_settings_file", { file, line });
 export const chooseWorkspace = () => invoke("choose_workspace");
 export const getOpenAtLogin = () => invoke("get_open_at_login");
@@ -32,3 +46,11 @@ export const onSettingsHistory = (handler) => listen("settings-history", ({ payl
 export const onSettingsTarget = (handler) => listen("settings-target", ({ payload }) => handler(payload));
 export const onSettingsEdit = (handler) => listen("settings-edit", ({ payload }) => handler(payload));
 export const onSettingsStatus = (handler) => listen("settings-status", ({ payload }) => handler(payload));
+
+export const showPaneMenu = (token, actions) => invoke("show_pane_menu", { token, actions });
+export const onPaneMenu = handler => listen("pane-menu", ({ payload }) => handler(payload));
+export const activityUndoSync = entry => invoke("activity_undo_sync", { entry });
+// Native context-menu callbacks do not carry WebKit user activation.
+export const copyText = text => invoke("copy_text", { text });
+
+export const setupRoles = () => invoke("setup_roles");

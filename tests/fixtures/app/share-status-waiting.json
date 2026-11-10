@@ -1,0 +1,62 @@
+{
+  "enabled": true,
+  "folders": [
+    {
+      "label": "claude",
+      "cli": "claude",
+      "path": "<ROOT>/home/.claude"
+    },
+    {
+      "label": "codex",
+      "cli": "codex",
+      "path": "<ROOT>/home/.codex"
+    }
+  ],
+  "in_sync": 1,
+  "to_write": 0,
+  "conflicts": [],
+  "waiting": [],
+  "pending_delete": [],
+  "frozen": [],
+  "not_shared": 0,
+  "notes": [],
+  "attention": [
+    {
+      "id": "new:agents/waiting",
+      "kind": "new",
+      "item": "agents/waiting",
+      "who": "choice",
+      "message": "waiting is new and waits for you to pick where it goes",
+      "fix": [
+        "agt share pick waiting --in <label>"
+      ],
+      "folders": [
+        "claude"
+      ]
+    },
+    {
+      "id": "adopt:instructions/instructions:claude",
+      "kind": "adopt",
+      "item": "instructions/instructions",
+      "who": "choice",
+      "message": "claude's CLAUDE.md has no agt share block, so it doesn't share instructions",
+      "fix": [
+        "agt share adopt claude"
+      ],
+      "label": "claude"
+    }
+  ],
+  "watcher": {
+    "installed": false,
+    "last_run_seconds": null,
+    "last_result": null,
+    "stopped": false,
+    "launcher_problem": null
+  },
+  "instructions": "Instructions: no instruction file takes part yet; `agt share adopt <label>` adds agt's block to one.",
+  "mcp": "MCP servers: 1 the same everywhere they go.\n  Staying where they are: private (a literal secret: API_KEY holds a literal value).",
+  "hooks": "Hooks: 1 found, 0 copies running in other CLIs.\n  Waiting for your approval (`agt share pick hooks/<name> --in <label>`): pretooluse-echo.",
+  "plugins": "Plugins: 1 where they go.",
+  "repos": [],
+  "diffs": null
+}

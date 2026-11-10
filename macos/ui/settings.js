@@ -1,9 +1,10 @@
-import { configShow, configSet, configUnset, getSettingsTarget, onSettingsTarget, onSettingsEdit,
+import { configShow, configSet, configUnset, rolesConfig, getSettingsTarget, onSettingsTarget, onSettingsEdit,
   getOpenAtLogin, setOpenAtLogin, getSnapshot, onUsageUpdated, onSettingsStatus, chooseWorkspace, openSettingsFile, showSettingMenu, onSettingsHistory } from './tauri.js';
 import { LEVELS, PROVIDERS, rowState, labelFor, matches, paneFor, fileTarget, brokenFile, errorMessage, installState, isTextField, dispatchEdit } from './logic/settings.js';
 import { SettingsHistory } from './logic/settings-history.js';
-import { element, icon, makeControl, popup } from './settings-controls.js';
+import { element, icon, makeControl, popup, highlightMatches } from './settings-controls.js';
 import { attachTooltips } from './tooltip.js';
+import { SettingsPanes } from './panes.js';
 
 const $ = selector => document.querySelector(selector);
 const status = $('#status'), rows = $('#settings'), login = $('#open-at-login'), search = $('#search');
@@ -11,11 +12,14 @@ const scopes = [], cache = new Map(), errors = new Map();
 let scope = { level: 'user', workspace: null }, config = null, generation = 0, busy = false, snapshot = {}, flashKey = null, pendingRead = false;
 $('#search-icon').append(icon('search'));
 const hideTooltip = attachTooltips($('#tooltip'));
-const history = new SettingsHistory({ set: configSet, unset: configUnset,
-  navigate: target => navigate(target), reload: () => load(true), report: showError });
+const history = new SettingsHistory({ set: configSet, unset: configUnset, roles: rolesConfig,
+  navigate: target => navigate(target), reload: async () => { await load(true); await panes.refresh(); }, report: showError });
+const panes = new SettingsPanes({ scope: () => scope, config: () => config, snapshot: () => snapshot,
+  busy: () => busy, history, navigate, render, report: announceFailure });
 
 function showError(key, message) {
-  errors.set(key, message); render();
+  if (document.body.dataset.pane !== 'general') panes.errors.set(key, message);
+  else errors.set(key, message); render();
   $('#announcement').textContent = message;
   const row = [...document.querySelectorAll('.setting-row')].find(item => item.dataset.key === key);
   row?.scrollIntoView({ block: 'nearest' });
@@ -36,11 +40,12 @@ async function navigate(target) {
   scope = { level: target.level || 'user', workspace: target.workspace || null };
   if (scope.workspace && !scopes.includes(scope.workspace)) scopes.push(scope.workspace);
   if (!target.preserveSearch) search.value = '';
-  flashKey = target.key || null;
+  flashKey = target.key || null; panes.flashKey = target.key || (target.runtime && target.account ? `${target.runtime}:${target.account}` : null);
   // Cached scope changes render synchronously; a fresh read follows.
   const cached = cache.get(scope.workspace);
   config = cached || null; render();
   await load();
+  await panes.load();
 }
 async function load(force = false) {
   if (!force && document.activeElement?.dataset.settingField) { pendingRead = true; return; }
@@ -57,7 +62,7 @@ async function load(force = false) {
   }
 }
 async function save(row, value, remove = false) {
-  if (busy) return;
+  if (busy || panes.busy) return;
   const state = rowState(row, scope.level, config);
   if (!state.editable) return;
   busy = true; errors.delete(row.key);
@@ -71,7 +76,7 @@ async function save(row, value, remove = false) {
 }
 function createRow(row, providerFirst) {
   const state = rowState(row, scope.level, config);
-  state.editable = state.editable && !busy;
+  state.editable = state.editable && !busy && !panes.busy;
   const node = element('div', 'setting-row'); node.dataset.key = row.key; node.dataset.tooltip = state.tooltip;
   node.tabIndex = -1;
   node.setAttribute('aria-label', `${state.label}, ${state.value ?? 'Not set'}, ${row.source}`);
@@ -133,13 +138,12 @@ function render() {
   $('#scope').textContent = scope.level !== 'user' && scope.workspace ? `${scope.workspace.split('/').pop()} › ${LEVELS[scope.level]} ▾` : 'User ▾';
   $('#scope').dataset.tooltip = scope.workspace || 'User settings';
   $('#general-footer').hidden = !general || searching;
-  $('#pending-pane').hidden = general || searching;
-  $('#pending-pane').textContent = `${$('#pane-title').textContent} is not available yet.`;
+
   rows.replaceChildren(); $('#file-rows').replaceChildren();
   let total = 0, fileCount = 0, lastProvider = null;
   if (config) for (const row of config.settings) {
     const provider = row.key.split('.')[0];
-    const visible = searching ? pane !== 'activity' && matches(row, query) : general && paneFor(row) === 'general';
+    const visible = searching ? general && matches(row, query) : general && paneFor(row) === 'general';
     const node = createRow(row, visible && provider !== lastProvider);
     node.hidden = !visible;
     if (visible) { lastProvider = provider; total++; }
@@ -148,14 +152,16 @@ function render() {
   $('#file-only').hidden = fileCount === 0;
   $('#file-only summary').textContent = `File only (${fileCount})`;
   if (searching && fileCount) $('#file-only').open = true;
-  $('#no-match').hidden = !searching || total > 0;
+  $('#no-match').hidden = !general || !searching || total > 0;
   const broken = config && brokenFile(config), banner = $('#broken-banner');
-  banner.hidden = !broken;
+  banner.hidden = !broken || !['general', 'roles'].includes(pane);
   if (broken) {
     banner.querySelector('span').textContent = broken.message;
     banner.querySelector('button').onclick = () => run(() => openSettingsFile(broken.file, broken.line));
   }
   renderInstall();
+  panes.render();
+  highlightMatches(rows, query); highlightMatches($('#file-rows'), query); highlightMatches($('#pane-content'), query);
   if (flashKey) {
     const row = [...document.querySelectorAll('.setting-row')].find(item => item.dataset.key === flashKey);
     if (row && !row.hidden) {
@@ -174,7 +180,7 @@ $('#scope').addEventListener('click', () => {
     await navigate({ pane: document.body.dataset.pane, ...value, preserveSearch: true });
   }));
 });
-document.querySelectorAll('nav button').forEach(button => button.addEventListener('click', () => { setPane(button.dataset.pane); render(); }));
+document.querySelectorAll('nav button').forEach(button => button.addEventListener('click', () => { setPane(button.dataset.pane); render(); run(() => panes.load()); }));
 search.addEventListener('input', render);
 search.addEventListener('keydown', event => { if (event.key === 'Escape') { search.value = ''; render(); search.blur(); } });
 document.addEventListener('focusout', event => {
@@ -186,7 +192,7 @@ document.addEventListener('focusout', event => {
 async function edit(action) {
   const field = isTextField(document.activeElement);
   if (field) { dispatchEdit(action, { activeElement: document.activeElement, editField: action => document.execCommand(action), history }); return; }
-  if (busy) return;
+  if (busy || panes.busy) return;
   busy = true;
   try { await dispatchEdit(action, { activeElement: document.activeElement, editField: action => document.execCommand(action), history }); } catch (error) { announceFailure(error); }
   finally { busy = false; render(); }
@@ -207,9 +213,10 @@ $('#install-banner button').addEventListener('click', () => { status.textContent
 $('#uninstall').addEventListener('click', () => { status.textContent = 'Uninstall is not available in this build.'; });
 await onSettingsEdit(({ action }) => run(() => edit(action)));
 await onSettingsTarget(target => run(() => navigate(target)));
-await onSettingsHistory(({ key }) => { setPane('activity'); document.body.dataset.historyKey = key; search.value = key; render(); });
-await onUsageUpdated(value => { snapshot = value; renderInstall(); });
-await onSettingsStatus(value => { snapshot = value; renderInstall(); if (!busy) run(() => load()); });
+await onSettingsHistory(({ key }) => { setPane('activity'); document.body.dataset.historyKey = key; search.value = key; render(); run(() => panes.load('activity', true)); });
+await onUsageUpdated(value => { snapshot = value; renderInstall(); if (document.body.dataset.pane === 'accounts' && !panes.busy) panes.render(); });
+await onSettingsStatus(value => { snapshot = value; renderInstall(); if (!busy && !panes.busy) run(async () => { await load(); await panes.refresh(); if (document.body.dataset.pane !== 'sharing') await panes.badge(); }); });
 try { snapshot = await getSnapshot(); } catch (error) { announceFailure(error); }
 try { login.checked = await getOpenAtLogin(); } catch (error) { announceFailure(error); login.disabled = true; }
 await navigate(await getSettingsTarget());
+if (document.body.dataset.pane !== 'sharing') run(() => panes.badge());
