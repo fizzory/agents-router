@@ -133,6 +133,12 @@ def fixture_texts() -> dict[str, str]:
                                                    settings.Folder("codex", home / ".codex", "codex")])
                 settings.save(saved)
                 capture("share-list", ["share", "list"])
+                conflict = home / ".codex" / "agents" / "example.toml"
+                conflict.write_text('name = "example"\ndescription = "Example agent"\n'
+                                    'developer_instructions = "A different example agent."\n', encoding="utf-8")
+                os.utime(conflict, (NOW - 60, NOW - 60))
+                capture("share-status", ["share", "status"], 1)
+                conflict.unlink()
                 capture("share-pick-needs-choice", ["share", "pick"], 3)
                 share_inputs(home)
                 saved.mcp, saved.hooks, saved.plugins, saved.instructions = True, True, True, "block"
