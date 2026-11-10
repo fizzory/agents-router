@@ -77,7 +77,7 @@ fn publish(app: &tauri::AppHandle, dialog: Option<Dialog>, foreground: bool) {
     }
 }
 pub fn request(app: &tauri::AppHandle, manual: bool) {
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "ci-selftest"))]
     if std::env::var_os("AGT_APP_TEST_LAUNCHER").is_some() {
         return;
     }

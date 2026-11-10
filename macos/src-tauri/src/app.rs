@@ -87,7 +87,7 @@ impl Paths {
             return Err("AGT_APP_SUPPORT must be absolute".into());
         }
         let launcher = support.join("bin/agt");
-        #[cfg(debug_assertions)]
+        #[cfg(any(debug_assertions, feature = "ci-selftest"))]
         let launcher = if let Some(fake) = std::env::var_os("AGT_APP_TEST_LAUNCHER") {
             let fake = PathBuf::from(fake);
             if !fake.is_absolute() || explicit_home.is_none() {
@@ -737,10 +737,13 @@ fn quit_app(app: tauri::AppHandle) {
     quit(&app);
 }
 pub(crate) fn quit(app: &tauri::AppHandle) {
+    exit(app, 0);
+}
+pub(crate) fn exit(app: &tauri::AppHandle, code: i32) {
     app.state::<AppState>()
         .quitting
         .store(true, Ordering::Relaxed);
-    app.exit(0);
+    app.exit(code);
 }
 
 fn tray_menu(app: &tauri::AppHandle, update: Option<&str>) -> tauri::Result<Menu<tauri::Wry>> {
@@ -865,7 +868,10 @@ pub fn run() {
         quitting: AtomicBool::new(false),
         settings_target: Mutex::new(serde_json::json!({"pane":"general"})),
     };
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(feature = "ci-selftest")]
+    let builder = crate::selftest::instrument(builder);
+    let app = builder
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             main_thread(app, |app, mtm| {
                 log("single-instance callback on main thread");
@@ -1063,6 +1069,8 @@ pub fn run() {
                 }
                 debug_self_test(app.handle());
             }
+            #[cfg(feature = "ci-selftest")]
+            crate::selftest::start(app.handle());
             log("ready activation=Accessory left-click=popover right-click=native-menu");
             Ok(())
         })

@@ -99,6 +99,22 @@ def check_sources(root, *, release=False):
 
     cargo = root / TAURI
     manifest = tomllib.loads((cargo / "Cargo.toml").read_text(encoding="utf-8"))
+    features = manifest.get("features", {})
+    pending = list(features.get("default", []))
+    enabled = set()
+    while pending:
+        feature = pending.pop()
+        if feature not in enabled:
+            enabled.add(feature)
+            pending.extend(features.get(feature, []))
+    if "ci-selftest" not in features or "ci-selftest" in enabled:
+        fail("selftest", "ci-selftest must exist and be default-off, including transitive defaults")
+    for name in ("build_app.sh", "build_app.py"):
+        path = root / "scripts" / name
+        if path.is_file():
+            text = uncomment(path.read_text())
+            if re.search(r'''--features(?:[=\s]+|["']\s*,\s*["'])[^\n]*ci-selftest|CARGO_FEATURE_CI_SELFTEST\s*=''', text):
+                fail("selftest", f"{name} enables ci-selftest in a release build")
 
     def dependencies(table):
         for key, value in table.items():
@@ -136,6 +152,8 @@ def check_sources(root, *, release=False):
     configs |= set((root / "build").glob("*release*.json"))
     for path in sorted(configs):
         data = tomllib.loads(path.read_text()) if path.suffix == ".toml" else load_json(path)
+        if "ci-selftest" in data.get("build", {}).get("features", []):
+            fail("selftest", f"{path.relative_to(root)} enables ci-selftest")
         if "dangerousInsecureTransportProtocol" in json.dumps(data):
             fail("transport", f"{path.relative_to(root)} enables insecure updater transport")
         if path.name != "tauri.conf.json" and "pubkey" in data.get("plugins", {}).get("updater", {}):
@@ -212,6 +230,12 @@ def check_sources(root, *, release=False):
         if path.suffix not in (".css", ".js", ".html"):
             continue
         text = uncomment(path.read_text(encoding="utf-8"))
+        if re.search(r'''import \* as api from ['"]\./tauri.js['"]''', text):
+            adapter = uncomment((root / UI / "tauri.js").read_text())
+            exports = set(re.findall(r"export (?:const|function) (\w+)", adapter))
+            missing = set(re.findall(r"\bapi\.(\w+)\s*\(", text)) - exports
+            if missing:
+                fail("adapter", f"{path.name} calls missing Tauri adapters: {sorted(missing)}")
         # Names such as var(--ease-out) / getPropertyValue('--ease-out') are
         # token references, not literal curves. Keep any var() fallback value.
         motion_text = re.sub(r"--[\w-]+", "", text)
@@ -288,6 +312,10 @@ class AppSourceTests(unittest.TestCase):
         root = Path(temporary.name)
         shutil.copytree(ROOT / "macos", root / "macos", ignore=shutil.ignore_patterns("target", "gen"))
         shutil.copytree(ROOT / "tests/fixtures/app", root / "tests/fixtures/app")
+        for name in ("build_app.sh", "build_app.py"):
+            path = root / "scripts" / name
+            path.parent.mkdir(exist_ok=True)
+            shutil.copy2(ROOT / "scripts" / name, path)
         return root
 
     def reject(self, rule, mutate):
@@ -312,6 +340,19 @@ class AppSourceTests(unittest.TestCase):
 
     def test_rejects_missing_lock(self):
         self.reject("lock", lambda root: (root / TAURI / "Cargo.lock").unlink())
+
+    def test_rejects_removed_adapter_calls(self):
+        self.reject("adapter", lambda root: self.write(root, UI / "bad.js",
+            "import * as api from './tauri.js'; api.onUpdateRequested(() => {});"))
+
+    def test_rejects_selftest_in_defaults_release_config_and_build_entrypoints(self):
+        self.reject("selftest", lambda root: self.write(root, TAURI / "Cargo.toml",
+            (root / TAURI / "Cargo.toml").read_text().replace('default = ["app-check"]', 'default = ["ci-selftest"]')))
+        self.reject("selftest", lambda root: self.write(root, Path("build/release.conf.json"),
+            '{"build":{"features":["ci-selftest"]}}'))
+        for name, text in (("build_app.sh", 'cargo tauri build --features ci-selftest\n'),
+                           ("build_app.py", 'run("cargo", "tauri", "build", "--features", "ci-selftest")\n')):
+            self.reject("selftest", lambda root: self.write(root, Path("scripts") / name, text))
 
     def test_rejects_plugin_shell_even_renamed(self):
         self.reject("shell", lambda root: self.write(root, TAURI / "Cargo.toml",
@@ -427,8 +468,8 @@ class AppSourceTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--release"]:
-        errors = check_sources(ROOT, release=True)
+    if sys.argv[1:] in (["--release"], ["--check"]):
+        errors = check_sources(ROOT, release=sys.argv[1] == "--release")
         for error in errors:
             print(error)
         raise SystemExit(bool(errors))

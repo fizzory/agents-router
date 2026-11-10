@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Debug app fixture server. No imports from agt and no access to the user's setup.
+"""Debug/ci-selftest fixture server. No agt imports or user setup access.
 
-Use an absolute path in AGT_APP_TEST_LAUNCHER (debug builds only), with HOME and
+Use an absolute path in AGT_APP_TEST_LAUNCHER (debug or ci-selftest), with HOME and
 AGT_HOME pointing at a scratch folder. AGT_APP_TEST_CALLS optionally records argv
 outside watched state/jobs/settings paths. No real agent program is ever started.
 """

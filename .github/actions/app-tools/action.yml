@@ -1,0 +1,37 @@
+name: Prepare macOS app tools
+description: Select CLT, provision pinned Rust, and cache repo-local app tools.
+runs:
+  using: composite
+  steps:
+    - name: Select Command Line Tools and arm64
+      shell: bash
+      run: |
+        test "$(uname -m)" = arm64
+        sudo xcode-select --switch /Library/Developer/CommandLineTools
+        xcode-select --print-path
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      with:
+        python-version: '3.13'
+    - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-11-10
+      with:
+        toolchain: '1.95.0'
+        targets: aarch64-apple-darwin
+    - uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: |
+          build/tools
+          build/downloads
+          build/pip-cache
+        key: app-tools-${{ runner.os }}-${{ runner.arch }}-rust-1.95.0-${{ hashFiles('scripts/prepare_app_tools.sh', 'scripts/python-runtime.lock') }}
+    - uses: Swatinem/rust-cache@bc2d2e71bd35c5549942babaa51a89c586b981d1 # v2.8.1
+      with:
+        workspaces: macos/src-tauri -> ../../build/app-target
+        cache-directories: build/cargo-home
+        shared-key: app-rust-1.95.0
+    - name: Prepare repo-local Tauri CLI
+      shell: bash
+      run: |
+        if [ ! -x build/tools/bin/cargo-tauri ]; then
+          scripts/prepare_app_tools.sh --yes
+        fi
+        scripts/check_app_tools.sh

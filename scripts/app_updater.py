@@ -4,6 +4,7 @@ import binascii
 from datetime import datetime, timezone
 import json
 from urllib.parse import quote
+import re
 
 PLACEHOLDER = "AGT_UPDATER_PUBLIC_KEY_REQUIRED_BEFORE_RELEASE"
 ENDPOINT = "https://github.com/Watcharagorn/agents-router/releases/latest/download/latest.json"
@@ -29,14 +30,20 @@ def validate_release(config):
         raise ValueError("Release updater must use the GitHub Releases HTTPS endpoint")
 
 
-def latest(version, archive, signature, notes=""):
+def archive_name(version):
+    if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", version):
+        raise ValueError("Invalid release version")
+    return f"Agents-Router-{version}-arm64.app.tar.gz"
+
+
+def latest(version, signature, notes=""):
     if not signature.strip():
         raise ValueError("Missing updater archive signature")
     return {
         "version": version, "notes": notes,
         "pub_date": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "platforms": {"darwin-aarch64": {
-            "url": f"https://github.com/Watcharagorn/agents-router/releases/download/v{version}/{quote(archive)}",
+            "url": f"https://github.com/Watcharagorn/agents-router/releases/download/v{version}/{quote(archive_name(version))}",
             "signature": signature.strip(),
         }},
     }

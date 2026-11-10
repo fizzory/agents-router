@@ -35,14 +35,37 @@ class BuildAppTests(unittest.TestCase):
         config["plugins"]["updater"]["pubkey"] = base64.b64encode(
             b"untrusted comment: minisign public key\n" + base64.b64encode(b"Ed" + bytes(40)) + b"\n").decode()
         module.validate_release(config)
-        metadata = module.latest("0.17.1", "Agents Router.app.tar.gz", "signature\n", "Release notes")
+        metadata = module.latest("0.17.1", "signature\n", "Release notes")
         self.assertEqual(set(metadata), {"version", "notes", "pub_date", "platforms"})
         self.assertEqual(metadata["version"], "0.17.1")
         self.assertEqual(metadata["notes"], "Release notes")
         self.assertTrue(metadata["pub_date"].endswith("Z"))
         self.assertEqual(metadata["platforms"]["darwin-aarch64"], {
-            "url": "https://github.com/Watcharagorn/agents-router/releases/download/v0.17.1/Agents%20Router.app.tar.gz",
+            "url": "https://github.com/Watcharagorn/agents-router/releases/download/v0.17.1/Agents-Router-0.17.1-arm64.app.tar.gz",
             "signature": "signature"})
+        self.assertEqual(module.archive_name("0.17.1"), "Agents-Router-0.17.1-arm64.app.tar.gz")
+        with self.assertRaises(ValueError):
+            module.archive_name("0.17.1/unsafe")
+
+    def test_selftest_validator_rejects_partial_and_false_positive_reports(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from run_app_selftest import validate_report, PROBES, PANES
+        import copy
+        pane = {"width": 400, "height": 200, "count": 1, "ok": True, "fixture": True, "rows": True}
+        page = {"ready": True, "errors": [], "fixture": {"ok": True}, "probes": dict.fromkeys(PROBES, True), "layout": {"ok": True}}
+        report = {"schema_version": 1, "pass": True, "os_version": "26.6.2", "os_build": "25G83", "architecture": "arm64",
+                  "webkit_cf_bundle_version": "123", "baseline_macos_14_0": "unverified", "error": None, "windows_shown": True,
+                  "loads": {"popover": 1, "settings": 1}, "pages": {"popover": copy.deepcopy(page), "settings": copy.deepcopy(page)}}
+        report["pages"]["settings"]["panes"] = {name: dict(pane) for name in PANES}
+        validate_report(report)
+        for mutate in (lambda r: r.update({"pass": False}), lambda r: r["loads"].update(settings=2),
+                       lambda r: r["pages"]["popover"].update(errors=[{"kind":"csp"}]),
+                       lambda r: r["pages"]["settings"]["panes"]["roles"].update(width=0),
+                       lambda r: r["pages"]["settings"]["probes"].pop("css-has")):
+            broken = copy.deepcopy(report)
+            mutate(broken)
+            with self.assertRaises(ValueError):
+                validate_report(broken)
 
     def test_publish_guard_stops_before_staging_with_a_placeholder_or_override(self):
         module = build_module()

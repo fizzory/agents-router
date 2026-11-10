@@ -9,6 +9,8 @@ mod native;
 pub mod panes;
 pub mod placement;
 pub mod roundtrip;
+#[cfg(feature = "ci-selftest")]
+mod selftest;
 pub mod settings;
 pub mod terminal;
 pub mod update;

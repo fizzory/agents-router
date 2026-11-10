@@ -179,6 +179,5 @@ for (const part of content) contentObserver.observe(part);
 // Subscribe before the initial read. Only the successful fresh-data event animates meters.
 await api.onUsageUpdated((value) => render(value, true));
 await api.onPopoverStatus((value) => render(value, false));
-await api.onUpdateRequested(() => { status.textContent = 'Updates aren’t configured yet.'; });
 try { render(await api.getSnapshot()); } catch (error) { report(error); }
 active(document.hasFocus());

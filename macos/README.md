@@ -89,7 +89,9 @@ Tauri config stays usable for development without a staged runtime.
 
 The script writes `dist/Agents-Router-<version>-arm64.dmg`. When
 `TAURI_SIGNING_PRIVATE_KEY` is set (a key path or the key value accepted by
-Tauri), it also copies `Agents Router.app.tar.gz` and its `.sig` to `dist/`.
+Tauri), it also copies `Agents-Router-<version>-arm64.app.tar.gz` and its `.sig`
+to `dist/`. These release asset names have no spaces; the static feed uses
+exactly those names, including the version.
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` supplies the key's password. Real release
 keys are created and stored by the maintainer. A signing key means a release
 build: it requires the real `plugins.updater.pubkey` in the base config and
@@ -109,7 +111,48 @@ DMG <= 50 MiB. A failed check makes the build fail.
 
 ## Isolated native smoke check
 
-Debug builds alone accept `AGT_APP_TEST_LAUNCHER`, an absolute path to
+Step 11's CI check runs locally with the same entry point:
+
+```sh
+export CARGO_HOME="$PWD/build/cargo-home"
+python3 scripts/run_app_selftest.py
+```
+
+It requires an Apple Silicon desktop session and prepared tools. It builds with
+`--locked --no-default-features` and the explicit `ci-selftest` feature, using
+the production assets, CSP and capabilities. Only that feature compiles the
+early page error observer, readiness/layout/fixture checks and named CSS/JS
+probes. There are no extra IPC permissions. Both native windows show briefly,
+then the app quits. The absolute fake agt, HOME, AGT_HOME and Cocoa home all
+point into a fresh private folder under RUNNER_TEMP (the system temp directory
+locally). The native deadline is 60 seconds; the external deadline is 90.
+
+Rust writes `report.json` once, alongside native logs and fake-agt call records.
+The runner requires both exit 0 and a complete passing report with the OS
+version/build, arm64 architecture, WebKit CFBundleVersion, single page loads,
+all pane layouts and all probes. It reports macOS 14.0 as unverified: a newer
+host proves only its own WebKit. Replay this script on a 14.0 machine when one
+is available. Failure diagnostics survive at the printed scratch path.
+
+`.github/workflows/release.yml` runs `app-build` and `self-test` on macos-15
+arm64 with CLT selected, Rust 1.95.0 and cached repo-local tools/Cargo. PR builds
+need no signing secret. `app-build` tests contracts and isolated CLI operations,
+builds/mounts the DMG and uploads it; `self-test` uploads the report or failure
+diagnostics. A strict matching `vX.Y.Z` tag runs `draft-release`, using only the
+`release` environment's signing secrets, and creates a draft with the DMG,
+versioned updater archive, `.sig` and `latest.json`. All external actions are
+pinned by commit SHA. Tagging and publishing remain maintainer actions.
+
+`scripts/build_app.sh` always disables default Cargo features. The developer
+`agt-app-check` binary requires `app-check` (enabled by default for development),
+so release bundles contain only `agents-router`; ordinary
+`cargo run --locked --bin agt-app-check` still works. The source guard rejects
+`ci-selftest` in release config, build entry points and transitive default
+features. The build also rejects inherited TAURI_CONFIG and checks the actual
+bundle's binaries for self-test markers. Published builds do not read
+AGT_APP_SELFTEST.
+
+Debug builds also accept `AGT_APP_TEST_LAUNCHER`, an absolute path to
 `scripts/fake_app_agt.py`. It serves the golden JSON without importing agt or
 starting an agent CLI. Use a temporary HOME, AGT_HOME and AGT_CONFIG_DIR. Create
 the temporary `state/`, `jobs/` and config directories before launching.

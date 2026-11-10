@@ -20,7 +20,7 @@ import tempfile
 import tomllib
 from urllib.parse import unquote, urlparse
 
-from app_updater import latest, validate_release
+from app_updater import archive_name, latest, validate_release
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build"
@@ -215,6 +215,11 @@ def minimum_versions(build):
 
 
 def verify_app(app, version, lock):
+    binaries = app / "Contents/MacOS"
+    if {path.name for path in binaries.iterdir()} != {"agents-router"}:
+        raise ValueError("Release bundle must contain only the agents-router app binary")
+    if b"AGT_APP_SELFTEST" in (binaries / "agents-router").read_bytes() or b"ci-selftest" in (binaries / "agents-router").read_bytes():
+        raise ValueError("Release binary contains ci-selftest code")
     run("codesign", "--verify", "--strict", "--verbose=2", app, capture=True)
     entries = []
     for path in macho_files(app):
@@ -282,10 +287,15 @@ def main():
     # A signing key means release artifacts. Scratch keys/configs belong only in
     # check_app_update.py, which never writes dist/ or a release overlay.
     base_config = json.loads((TAURI / "tauri.conf.json").read_text())
+    if os.environ.get("TAURI_CONFIG"):
+        raise ValueError("Release builds cannot inherit TAURI_CONFIG")
     if os.environ.get("TAURI_SIGNING_PUBLIC_KEY"):
         raise ValueError("Public-key overrides cannot publish. Use scripts/check_app_update.py for throwaway keys")
     if updater:
         validate_release(base_config)  # Before staging; the placeholder can never publish.
+    # Run in a child: the portable guard isolates test homes in its own process.
+    run(sys.executable, ROOT / "tests/test_app_sources.py", "--release" if updater else "--check",
+        env={**os.environ, "PYTHONPATH": str(ROOT / "src") + os.pathsep + str(ROOT / "tests")})
     BUILD.mkdir(exist_ok=True)
     (BUILD / "tmp").mkdir(exist_ok=True)
     os.environ.update(CARGO_HOME=str(BUILD / "cargo-home"), CARGO_TARGET_DIR=str(BUILD / "app-target"),
@@ -298,14 +308,15 @@ def main():
     overlay.write_text(json.dumps(config, indent=2) + "\n")
     env = {**os.environ, "PATH": str(BUILD / "tools/bin") + os.pathsep + os.environ["PATH"]}
     run("cargo", "tauri", "build", "--target", "aarch64-apple-darwin", "--bundles", "app,dmg",
-        "--config", overlay, "--", "--locked", cwd=TAURI, env=env)
+        "--config", overlay, "--", "--locked", "--no-default-features", cwd=TAURI, env=env)
     bundles = BUILD / "app-target/aarch64-apple-darwin/release/bundle"
     app = bundles / "macos/Agents Router.app"
     entries = verify_app(app, version, lock)
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
     if not updater:
-        for name in ("Agents Router.app.tar.gz", "Agents Router.app.tar.gz.sig", "latest.json"):
+        for name in ("Agents Router.app.tar.gz", "Agents Router.app.tar.gz.sig", "latest.json",
+                     *[p.name for p in dist.glob("Agents-Router-*.app.tar.gz*")]):
             (dist / name).unlink(missing_ok=True)  # Never leave older signed artifacts beside a keyless build.
     dmg = dist / f"Agents-Router-{version}-arm64.dmg"
     shutil.copy2(bundles / f"dmg/Agents Router_{version}_aarch64.dmg", dmg)
@@ -320,14 +331,14 @@ def main():
             run("hdiutil", "detach", mount, capture=True)
     if updater:
         archive = bundles / "macos/Agents Router.app.tar.gz"
-        for path in (archive, archive.with_suffix(archive.suffix + ".sig")):
-            shutil.copy2(path, dist / path.name)
+        signature = archive.with_suffix(archive.suffix + ".sig")
+        shutil.copy2(archive, dist / archive_name(version))
+        shutil.copy2(signature, dist / (archive_name(version) + ".sig"))
         with tempfile.TemporaryDirectory(prefix="updater-check-", dir=BUILD) as scratch:
             with tarfile.open(archive) as file:
                 file.extractall(scratch, filter="data")
             verify_app(Path(scratch) / "Agents Router.app", version, lock)
-        metadata = latest(version, archive.name,
-                          archive.with_suffix(archive.suffix + ".sig").read_text(),
+        metadata = latest(version, signature.read_text(),
                           os.environ.get("AGT_RELEASE_NOTES", ""))
         (dist / "latest.json").write_text(json.dumps(metadata, indent=2) + "\n")
     sizes = {"app": tree_size(app), "runtime": tree_size(app / "Contents/Resources/runtime"),

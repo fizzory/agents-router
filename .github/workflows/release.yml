@@ -1,0 +1,128 @@
+name: macOS app
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  CARGO_HOME: ${{ github.workspace }}/build/cargo-home
+  CARGO_TARGET_DIR: ${{ github.workspace }}/build/app-target
+  MACOSX_DEPLOYMENT_TARGET: '14.0'
+  RUSTUP_AUTO_INSTALL: '0'
+
+jobs:
+  app-build:
+    name: app-build
+    runs-on: macos-15 # Standard arm64 runner; macos-14 retired 2026-11-02.
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/app-tools
+      - name: App source and packaging guards
+        env:
+          PYTHONPATH: src:tests
+        run: python3 -m unittest test_app_sources test_build_app
+      - name: Rust tests
+        working-directory: macos/src-tauri
+        run: cargo test --locked
+      - name: Frontend logic tests
+        run: node --test macos/ui/logic
+      - name: Golden contracts and isolated CLI checks
+        working-directory: macos/src-tauri
+        run: |
+          cargo run --locked --bin agt-app-check -- ../../tests/fixtures/app
+          cargo run --locked --bin agt-app-check -- --roundtrip
+          cargo run --locked --bin agt-app-check -- --install-cli
+      - name: Build and mount keyless release DMG
+        run: scripts/build_app.sh
+      - name: Upload verified DMG
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Agents-Router-arm64-DMG
+          path: dist/Agents-Router-*-arm64.dmg
+          if-no-files-found: error
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: app-build-diagnostics
+          path: build/app-build-report.json
+          if-no-files-found: ignore
+
+  self-test:
+    name: self-test
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/app-tools
+      - name: Production WebKit pages and all Settings panes
+        id: selftest
+        run: python3 scripts/run_app_selftest.py
+      - name: Upload passing Rust report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: app-selftest-report
+          path: ${{ steps.selftest.outputs.diagnostics }}/report.json
+          if-no-files-found: error
+      - name: Upload failure diagnostics
+        if: failure() && steps.selftest.outputs.diagnostics != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: app-selftest-diagnostics
+          path: ${{ steps.selftest.outputs.diagnostics }}
+          include-hidden-files: true
+          if-no-files-found: error
+
+  draft-release:
+    name: draft-release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [app-build, self-test]
+    runs-on: macos-15
+    environment: release
+    permissions:
+      contents: write
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/app-tools
+      - name: Require exact release tag and matching package versions
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          sys.path.insert(0, 'scripts')
+          from build_app import versions
+          tag = os.environ['GITHUB_REF_NAME']
+          assert re.fullmatch(r'v\d+\.\d+\.\d+', tag), 'Expected vX.Y.Z'
+          assert tag == 'v' + versions(), 'Release tag and package versions disagree'
+          PY
+      - name: Build and sign updater artifacts
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+          scripts/build_app.sh
+      - name: Create draft with the four matching assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "Agents Router $version" --generate-notes \
+            "dist/Agents-Router-$version-arm64.dmg" \
+            "dist/Agents-Router-$version-arm64.app.tar.gz" \
+            "dist/Agents-Router-$version-arm64.app.tar.gz.sig" \
+            dist/latest.json

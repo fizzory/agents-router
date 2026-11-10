@@ -171,7 +171,7 @@ pub fn request_install(app: &tauri::AppHandle) {
 }
 pub fn start(app: &tauri::AppHandle) {
     // Native smoke checks have a deliberately payload-free bundle and golden CLI.
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "ci-selftest"))]
     if std::env::var_os("AGT_APP_TEST_LAUNCHER").is_some() {
         return;
     }
