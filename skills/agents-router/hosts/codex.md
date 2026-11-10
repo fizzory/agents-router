@@ -62,7 +62,7 @@ MCP tools below. Do not claim a native thread was started for an MCP-only job.
 
 ## MCP fallback
 
-After `agt setup`, or `codex plugin marketplace add Watcharagorn/agents-router` and `codex plugin add agents-router@agents-router` from a terminal (or a `[mcp_servers.agents-router]` entry with `command = "agt"`, `args = ["mcp"]`), the tools are `subagent_start`, `subagent_wait`, `subagent_message`, `subagent_status`, `subagent_result`, `subagent_cancel`, `subagent_list` and `subagent_accounts` on the `agents-router` server. Use them when a native relay is unavailable.
+After `agt setup`, or `codex plugin marketplace add fizzory/agents-router` and `codex plugin add agents-router@agents-router` from a terminal (or a `[mcp_servers.agents-router]` entry with `command = "agt"`, `args = ["mcp"]`), the tools are `subagent_start`, `subagent_wait`, `subagent_message`, `subagent_status`, `subagent_result`, `subagent_cancel`, `subagent_list` and `subagent_accounts` on the `agents-router` server. Use them when a native relay is unavailable.
 
 ## Waiting
 

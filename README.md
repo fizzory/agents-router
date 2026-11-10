@@ -42,9 +42,9 @@ flowchart LR
 Paste this into Claude Code, Codex or Antigravity:
 
 ```text
-Install and set up Agents Router for me from https://github.com/Watcharagorn/agents-router.
+Install and set up Agents Router for me from https://github.com/fizzory/agents-router.
 If `agt` isn't installed, install it with
-`uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router` (or pipx),
+`uv tool install --managed-python git+https://github.com/fizzory/agents-router` (or pipx),
 asking for any sandbox permission you need. If `agt` is there but has no `agt guide` command
 (older than 0.10), run `agt update` first. Then run `agt guide setup` and follow it: do the
 routine steps yourself, show me the remaining choices together once, apply what I pick, and
@@ -63,7 +63,7 @@ Your agent installs `agt` and puts the plugin in every CLI and Claude Code profi
 
 | Step | Command |
 |---|---|
-| 1. Install `agt` | `uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router` (or `pipx install git+https://github.com/Watcharagorn/agents-router`) |
+| 1. Install `agt` | `uv tool install --managed-python git+https://github.com/fizzory/agents-router` (or `pipx install git+https://github.com/fizzory/agents-router`) |
 | 2. Set up every installed CLI and Claude profile | `agt setup` (Enter applies it; `--dry-run` only shows it) |
 | Later: update everything | `agt update` |
 | Inspect the install and competing copies | `agt doctor --verbose` |
@@ -78,9 +78,9 @@ Your agent installs `agt` and puts the plugin in every CLI and Claude Code profi
 
 | Plugin by hand | Command |
 |---|---|
-| Claude Code | `/plugin install agents-router --marketplace Watcharagorn/agents-router` in a session, or `claude plugin install agents-router --marketplace Watcharagorn/agents-router` |
+| Claude Code | `/plugin install agents-router --marketplace fizzory/agents-router` in a session, or `claude plugin install agents-router --marketplace fizzory/agents-router` |
 | Codex | `agt setup --host codex` (the plugin and native relay agents) |
-| Antigravity | `agy plugin install https://github.com/Watcharagorn/agents-router`; `agt setup --host antigravity` adds the native relay agents |
+| Antigravity | `agy plugin install https://github.com/fizzory/agents-router`; `agt setup --host antigravity` adds the native relay agents |
 | Any MCP client | Server command `agt`, argument `mcp` |
 
 Per host details: [docs/hosts.md](docs/hosts.md).
@@ -107,6 +107,7 @@ Per host details: [docs/hosts.md](docs/hosts.md).
 | Inspect settings for an app | `agt config show --json` | [Configuration](docs/configuration.md#agt-config) |
 | Revert a logged setting | `agt config revert YYYY-MM:LINE --json` | [Configuration](docs/configuration.md#the-log) |
 | Add a Codex account | `agt accounts add plus-2 --runtime codex` | [Codex](docs/codex.md#extra-accounts) |
+| Re-check Codex usage now | `agt accounts reset primary --runtime codex` | [Codex quota](docs/codex.md#quota) |
 | Test every account | `agt doctor --live --runtime <runtime>` (one tiny job each; uses a little quota) | [Claude Code](docs/claude-code.md#4-check) |
 | See usage and availability | `agt usage` (`--json` for apps; `--refresh` rescans local Codex usage) | [Usage snapshot](docs/configuration.md#usage-snapshot) |
 | Preview delegation rules | `agt rules` | [Delegation rules](docs/delegation.md) |
@@ -238,6 +239,8 @@ Your normal config folder (`~/.claude`, `~/.codex`) is the one pool. Each extra 
 | `plan` | Not set | Plan preset caps; `"auto"` reads a Claude account's plan from its login |
 | `max_depth` | `1` | Workers can't start subagents of their own |
 
+Codex starts, roles with a Codex provider and account reports re-check all due held-back accounts together through `codex app-server`, at most once per account every 10 minutes. Each refresh waits up to about 10 seconds in total, with a pinned account first, before admission or role provider selection. `agt accounts reset <name> --runtime codex` checks that account at once without a model call.
+
 - **Change a setting:** `agt config set <key> <value>`; per-CLI keys take the CLI first, e.g. `agt config set claude.max_jobs_per_account 1` ([configuration](docs/configuration.md#agt-config)).
 - **Health settings:** all five `circuit_*` keys are user-only under each CLI, e.g. `agt config set codex.circuit_open_seconds 30 --user`. Workspace and local values are ignored with a notice ([details](docs/configuration.md#unhealthy-accounts)).
 - **More jobs at once:** `override=<the user's own words>` (relay or MCP) or `--override "..."` (`agt run`, `agt start`) lifts agt's caps and queueing for one start; usage-limit cooldowns, unhealthy accounts, model and effort restrictions, login, depth and access still apply ([details](docs/configuration.md#a-user-authorized-override)).
@@ -344,7 +347,7 @@ Run `agt guide setup` and follow it. It prints the steps that match the installe
 If `agt` isn't installed yet:
 
 ```bash
-uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router
+uv tool install --managed-python git+https://github.com/fizzory/agents-router
 agt guide setup
 ```
 

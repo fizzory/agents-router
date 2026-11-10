@@ -17,7 +17,7 @@ For workers in other CLIs, see [Codex](codex.md), [Gemini through Antigravity](g
 The easy way is to paste the prompt from the README's [Install](../README.md#install) section into your agent. It installs `agt`, follows `agt guide setup` and asks you once. By hand:
 
 ```bash
-uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router
+uv tool install --managed-python git+https://github.com/fizzory/agents-router
 agt setup
 ```
 

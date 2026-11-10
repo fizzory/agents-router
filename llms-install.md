@@ -5,10 +5,10 @@ Agents Router (`agt`) keeps agents, skills, MCP servers and instruction files in
 1. Install the `agt` command (it needs git, and uv or pipx):
 
    ```bash
-   uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router
+   uv tool install --managed-python git+https://github.com/fizzory/agents-router
    ```
 
-   Without uv: `pipx install git+https://github.com/Watcharagorn/agents-router`. Agents Router isn't on PyPI; don't `pip install agt`, which is a different project.
+   Without uv: `pipx install git+https://github.com/fizzory/agents-router`. Agents Router isn't on PyPI; don't `pip install agt`, which is a different project.
 
    Already installed but `agt guide` doesn't exist (older than 0.10)? Run `agt update` first.
 

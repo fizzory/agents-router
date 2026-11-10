@@ -117,6 +117,15 @@ def cmd_accounts(args: argparse.Namespace) -> int:
         cooldown_cleared = accounts.clear_cooldown(args.runtime, args.name)
         health_cleared = health.reset(runtime_config, runtime_config.find(args.name))
         cleared = [label for label, changed in (("cooldown", cooldown_cleared), ("health", health_cleared)) if changed]
+        if args.runtime == "codex":
+            from agents_router import usage_view
+
+            result = usage_view.probe_codex(runtime_config, runtime_config.find(args.name), force=True)
+            usage = ("usage now " + ", ".join(f"{window['utilization']:.0%} of {name}"
+                                            for name, window in result.windows.items())) if result else "usage check failed"
+            detail = ([" and ".join(cleared) + " cleared"] if cleared else []) + [usage]
+            print(f"codex account '{args.name}': " + "; ".join(detail))
+            return 0
         print(f"{args.runtime} account '{args.name}': " + (" and ".join(cleared) + " cleared" if cleared else "nothing to clear"))
         return 0
 
@@ -354,6 +363,8 @@ def _account_rows(entry: dict[str, Any], *, method: bool = False) -> list[ui.Lin
         detail.append(ui.warn(text))
     if entry.get("usage"):
         detail.append(ui.muted("used " + ", ".join(f"{share}% of {window}" for window, share in entry["usage"].items())))
+    if entry.get("held_back_reason"):
+        detail.append(ui.warn(entry["held_back_reason"]))
     detail.append(_limits_text(entry).replace("no cap on jobs", "no cap") if method else _limits_text(entry))
     joined: list[ui.Piece] = []
     for index, piece in enumerate(detail):

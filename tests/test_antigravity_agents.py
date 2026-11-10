@@ -98,7 +98,7 @@ class AntigravityAgentInstallTests(SetupBase):
     def test_setup_installs_the_companion_and_keeps_main_plugin_commands(self):
         code, out = self.run_cli("--host", "antigravity")
         self.assertEqual(code, 0, out)
-        self.assertIn("agy plugin install https://github.com/Watcharagorn/agents-router", out)
+        self.assertIn("agy plugin install https://github.com/fizzory/agents-router", out)
         self.assertEqual((self.plugin() / "plugin.json").read_bytes(), TEMPLATES.joinpath("plugin.json").read_bytes())
         for runtime in RUNTIMES:
             name = f"agt-{runtime}.md"

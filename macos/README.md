@@ -90,7 +90,10 @@ Tauri config stays usable for development without a staged runtime.
 The script writes `dist/Agents-Router-<version>-arm64.dmg`. When
 `TAURI_SIGNING_PRIVATE_KEY` is set (a key path or the key value accepted by
 Tauri), it also copies `Agents-Router-<version>-arm64.app.tar.gz` and its `.sig`
-to `dist/`. These release asset names have no spaces; the static feed uses
+to `dist/`. The updater feed is
+`https://github.com/fizzory/agents-router/releases/latest/download/latest.json`;
+its download URLs and Open Releases Page use the same canonical repository.
+These release asset names have no spaces; the static feed uses
 exactly those names, including the version.
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` supplies the key's password. Real release
 keys are created and stored by the maintainer. A signing key means a release
@@ -138,7 +141,7 @@ is available. Failure diagnostics survive at the printed scratch path.
 arm64 with CLT selected, Rust 1.95.0 and cached repo-local tools/Cargo. PR builds
 need no signing secret. `app-build` tests contracts and isolated CLI operations,
 builds/mounts the DMG and uploads it; `self-test` uploads the report or failure
-diagnostics. A strict matching `vX.Y.Z` tag runs `draft-release`, using only the
+diagnostics. A strict matching `vX.Y.Z` tag in `fizzory/agents-router` runs `draft-release`, using only the
 `release` environment's signing secrets, and creates a draft with the DMG,
 versioned updater archive, `.sig` and `latest.json`. All external actions are
 pinned by commit SHA. Tagging and publishing remain maintainer actions.

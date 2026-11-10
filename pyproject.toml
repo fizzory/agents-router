@@ -32,9 +32,9 @@ classifiers = [
 dependencies = ["rich>=14.3.4,<16", "rich-argparse>=1.8,<2"]
 
 [project.urls]
-Homepage = "https://github.com/Watcharagorn/agents-router"
-Repository = "https://github.com/Watcharagorn/agents-router"
-Documentation = "https://github.com/Watcharagorn/agents-router/blob/main/docs/README.md"
+Homepage = "https://github.com/fizzory/agents-router"
+Repository = "https://github.com/fizzory/agents-router"
+Documentation = "https://github.com/fizzory/agents-router/blob/main/docs/README.md"
 
 [project.scripts]
 agt = "agents_router.entry:main"

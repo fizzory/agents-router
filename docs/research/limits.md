@@ -60,7 +60,7 @@ A preset sets the job cap and, where the plan offers fewer efforts, the highest 
 
 Codex plus (4) and free (1) are the project owner's numbers. The rest scale with the plan's published usage multiple and are guesses. Raise or lower any of them with `max_jobs`.
 
-Claude Code also reports each account's 5-hour and weekly usage in its `rate_limit_event`. Codex writes a `rate_limits` snapshot into its rollout files. agt reads those two sources and nothing else. Antigravity exposes no usage; see plans.md 3f.
+Claude Code also reports each account's 5-hour and weekly usage in its `rate_limit_event`. Codex writes a `rate_limits` snapshot into its rollout files. Before a Codex start or role provider selection, agt re-checks all due held-back accounts together through `codex app-server`, outside the admission lock. A pinned account comes first. Account reports also check; MCP reply Room lines only read local files. Each refresh waits at most about 10 seconds in total, and each account is attempted at most once every 10 minutes. `agt accounts reset <name> --runtime codex` checks that account at once. Antigravity exposes no usage; see plans.md 3f.
 
 ## Model pools and quota steps (2026-10-16)
 

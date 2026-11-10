@@ -125,7 +125,7 @@ def load_cursor(group_id: str, number: int) -> dict[str, Any]:
     return cursor
 
 
-def create_job(**kwargs: Any) -> dict[str, Any]:
+def create_job(*, _codex_usage_refreshed: bool = False, **kwargs: Any) -> dict[str, Any]:
     """Validate a request, check the limits, write the job record and start its runner.
 
     Raises limits.LimitError (a ValueError) when a limit says the job can't start now.
@@ -134,6 +134,16 @@ def create_job(**kwargs: Any) -> dict[str, Any]:
 
     if not kwargs.get("start", True):
         return _create_job(**kwargs)
+    if kwargs.get("runtime") == "codex" and not _codex_usage_refreshed:
+        from agents_router import usage_view
+
+        limits.validate_override(kwargs.get("override"))
+        try:
+            config = load_config(cwd=kwargs.get("cwd"))
+        except levels.SettingsError as exc:
+            synclog.refused(exc, levels.find_workspace(kwargs.get("cwd")))
+            raise
+        usage_view.refresh_codex(config, pinned=kwargs.get("account"))
     with file_lock(state_dir() / "admission.lock", timeout=30):
         return _create_job(**kwargs)
 

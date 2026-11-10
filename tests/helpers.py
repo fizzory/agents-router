@@ -42,6 +42,13 @@ DROPPED = {"AGY_CMD", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
            # and the terminal's, so whether output gets color never depends on where the tests run
            "NO_COLOR", "FORCE_COLOR", "CLICOLOR_FORCE", "TTY_COMPATIBLE", "TTY_INTERACTIVE", "COLUMNS", "TERM"}
 OWN_COMMANDS = ("agt", "agents-router-mcp", "csa", "cli-subagents-mcp")
+VENDOR_COMMANDS = ("claude", "codex", "agy", "kiro-cli")
+
+
+def without_commands(folders, commands):
+    extensions = {"", ".exe", ".cmd", ".bat", ".ps1", *os.environ.get("PATHEXT", "").lower().split(";")}
+    return [folder for folder in folders if not any(
+        (Path(folder) / (name + extension)).exists() for name in commands for extension in extensions)]
 
 
 def isolate_process() -> Path:
@@ -60,9 +67,7 @@ def isolate_process() -> Path:
     home = root / "home"
     home.mkdir()
     folders = os.environ.get("PATH", "").split(os.pathsep)
-    kept = [folder for folder in folders if not any(
-        (Path(folder) / name).exists() or (Path(folder) / f"{name}.exe").exists() for name in OWN_COMMANDS
-    )]
+    kept = without_commands(folders, (*OWN_COMMANDS, *VENDOR_COMMANDS))
     os.environ.update(
         HOME=str(home), USERPROFILE=str(home), PATH=os.pathsep.join(kept),
         CLAUDE_CONFIG_DIR=str(home / ".claude"), CODEX_HOME=str(home / ".codex"),
@@ -179,8 +184,7 @@ class ShareHome(unittest.TestCase):
         self.agt_home = self.root / "agents-router"
         fake = lambda kind: json.dumps([sys.executable, str(FAKE_HOST), kind])
         vendor = ("claude", "codex", "agy", "kiro-cli")
-        path = [folder for folder in os.environ.get("PATH", "").split(os.pathsep)
-                if not any((Path(folder) / name).exists() or (Path(folder) / f"{name}.exe").exists() for name in vendor)]
+        path = without_commands(os.environ.get("PATH", "").split(os.pathsep), vendor)
         self._env = patch.dict(os.environ, {
             "PATH": os.pathsep.join(path), "HOME": str(self.user), "USERPROFILE": str(self.user),
             "CLAUDE_CONFIG_DIR": str(self.user / ".claude"), "CODEX_HOME": str(self.user / ".codex"),

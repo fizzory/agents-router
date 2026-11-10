@@ -8,7 +8,7 @@ description: Install, set up, update, repair or uninstall Agents Router (agt) fo
 When `agt` runs here, run `agt guide setup` and follow what it prints: it's the guide for the installed version. If `agt` is missing, install it first (it needs git, and uv or pipx). If `agt` is there but has no `agt guide` command (older than 0.10), run `agt update` first:
 
 ```bash
-uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router
+uv tool install --managed-python git+https://github.com/fizzory/agents-router
 agt guide setup
 ```
 
@@ -25,15 +25,15 @@ You are installing, updating, repairing or removing Agents Router (`agt`) for th
 ## 0. Before you start
 
 - These steps need the network and write to the person's home folder (`~/.local`, `~/.claude*`, `~/.codex`, `~/.agents-router`). In a sandbox (Codex workspace-write, Claude Code's sandbox), ask once for the permission that covers the whole setup.
-- If policy forbids the install, stop and give the person one command to run: `uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router && agt setup`.
+- If policy forbids the install, stop and give the person one command to run: `uv tool install --managed-python git+https://github.com/fizzory/agents-router && agt setup`.
 - Setup needs `git`, and `uv` or `pipx`. If they're missing, point the person to https://docs.astral.sh/uv/getting-started/installation/ (`brew install uv` on a Mac) and stop; don't install them yourself.
 
 ## 1. Install or upgrade
 
 ```bash
 agt --version   # agents-router 0.15.0 or newer: go to step 2
-uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router
-# without uv: pipx install git+https://github.com/Watcharagorn/agents-router
+uv tool install --managed-python git+https://github.com/fizzory/agents-router
+# without uv: pipx install git+https://github.com/fizzory/agents-router
 ```
 
 - **Older than 0.15.0:** run `agt update`, then `agt guide setup` again, because the steps may have changed.
@@ -175,7 +175,7 @@ Run `agt doctor`.
    ```json
    { "mcpServers": { "agents-router": { "command": "/full/path/to/agt", "args": ["mcp"] } } }
    ```
-2. Copy the whole `skills/agents-router/` folder (with its `hosts/` notes) from https://github.com/Watcharagorn/agents-router into the client's skills. If the client takes only rules text, paste `SKILL.md` and the matching host note.
+2. Copy the whole `skills/agents-router/` folder (with its `hosts/` notes) from https://github.com/fizzory/agents-router into the client's skills. If the client takes only rules text, paste `SKILL.md` and the matching host note.
 3. Reload the client and check that `subagent_accounts` answers.
 
 ## 10. Uninstall

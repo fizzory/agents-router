@@ -5,7 +5,7 @@ The host is the CLI your main session runs in. Agents Router is one MCP server, 
 The easy way is to paste the prompt from the README's [Install](../README.md#install) section into your agent. It installs `agt` and follows `agt guide setup`. By hand (Python 3.11+; the installer also fetches rich, for color in a terminal):
 
 ```bash
-uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router
+uv tool install --managed-python git+https://github.com/fizzory/agents-router
 agt setup
 ```
 
@@ -21,19 +21,19 @@ The sections below give the commands it runs. [Updating, and the MCP server alon
 From a terminal (this is what `agt setup` runs; checked with Claude Code 2.1.295):
 
 ```bash
-claude plugin marketplace add Watcharagorn/agents-router
+claude plugin marketplace add fizzory/agents-router
 claude plugin install agents-router@agents-router
 claude plugin list
 ```
 
-Claude Code 2.1.292 and later also take one command: `claude plugin install agents-router --marketplace Watcharagorn/agents-router`. Inside a session the same thing is `/plugin install agents-router --marketplace Watcharagorn/agents-router`, or `/plugin marketplace add Watcharagorn/agents-router` then `/plugin install agents-router@agents-router` on older versions. A plugin installed from a terminal loads when Claude Code restarts, or after `/reload-plugins` in an open session.
+Claude Code 2.1.292 and later also take one command: `claude plugin install agents-router --marketplace fizzory/agents-router`. Inside a session the same thing is `/plugin install agents-router --marketplace fizzory/agents-router`, or `/plugin marketplace add fizzory/agents-router` then `/plugin install agents-router@agents-router` on older versions. A plugin installed from a terminal loads when Claude Code restarts, or after `/reload-plugins` in an open session.
 
 If there is no `claude` command (the Claude desktop app often doesn't put one on PATH), `agt setup` looks for the copy bundled with the app. When it finds none, it adds the marketplace and enables the plugin in `settings.json` instead, keeping every other key and saving a backup:
 
 ```json
 {
   "extraKnownMarketplaces": {
-    "agents-router": { "source": { "source": "github", "repo": "Watcharagorn/agents-router" } }
+    "agents-router": { "source": { "source": "github", "repo": "fizzory/agents-router" } }
   },
   "enabledPlugins": { "agents-router@agents-router": true }
 }
@@ -49,7 +49,7 @@ Run `agt setup --host codex` to install the plugin and three native relay agents
 The plugin commands it runs are:
 
 ```bash
-codex plugin marketplace add Watcharagorn/agents-router
+codex plugin marketplace add fizzory/agents-router
 codex plugin add agents-router@agents-router
 codex plugin list
 ```
@@ -77,7 +77,7 @@ Codex ends a single MCP call after a few minutes (300 seconds in the 0.162.1 sou
 ## Antigravity
 
 ```bash
-agy plugin install https://github.com/Watcharagorn/agents-router
+agy plugin install https://github.com/fizzory/agents-router
 agy plugin list
 ```
 
@@ -133,7 +133,7 @@ That's chosen per job with `runtime` (`claude`, `codex`, `antigravity` or `kiro`
 |---|---|---|
 | Claude Code | `claude plugin marketplace update agents-router`, then `claude plugin update agents-router@agents-router` | `claude mcp add --scope user agents-router -- agt mcp` |
 | Codex | `codex plugin marketplace upgrade agents-router`, then `codex plugin add agents-router@agents-router` | `codex mcp add agents-router -- agt mcp` |
-| Antigravity | `agy plugin install https://github.com/Watcharagorn/agents-router` again | `{"mcpServers": {"agents-router": {"command": "agt", "args": ["mcp"]}}}` in `~/.gemini/config/mcp_config.json` |
+| Antigravity | `agy plugin install https://github.com/fizzory/agents-router` again | `{"mcpServers": {"agents-router": {"command": "agt", "args": ["mcp"]}}}` in `~/.gemini/config/mcp_config.json` |
 
 For a Claude Code profile other than `~/.claude`, run the `claude` commands with `CLAUDE_CONFIG_DIR=<its folder>`; `~/.claude` runs without it.
 

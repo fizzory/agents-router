@@ -23,7 +23,7 @@ from pathlib import Path
 import sys
 import time
 
-REPO = "Watcharagorn/agents-router"
+REPO = "fizzory/agents-router"
 PLUGIN_ID = "agents-router@agents-router"
 
 

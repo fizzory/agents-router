@@ -24,6 +24,7 @@
             "subscriptionType": null,
             "configDirectory": null
           },
+          "held_back": false,
           "busy_slots": 0,
           "running_jobs": 0,
           "limits": {
@@ -44,6 +45,7 @@
             "subscriptionType": null,
             "configDirectory": null
           },
+          "held_back": false,
           "busy_slots": 0,
           "running_jobs": 0,
           "limits": {
@@ -66,6 +68,7 @@
             "subscriptionType": null,
             "configDirectory": null
           },
+          "held_back": false,
           "busy_slots": 0,
           "running_jobs": 0,
           "limits": {
@@ -98,6 +101,7 @@
             "authMethod": null,
             "detail": "Not logged in"
           },
+          "held_back": false,
           "busy_slots": 0,
           "running_jobs": 0,
           "limits": {
@@ -128,6 +132,7 @@
             "loggedIn": false,
             "error": "You are not logged into Antigravity"
           },
+          "held_back": false,
           "busy_slots": 0,
           "running_jobs": 0,
           "limits": {
@@ -159,6 +164,7 @@
             "authMethod": "BuilderId",
             "detail": "{\"accountType\": \"BuilderId\"}"
           },
+          "held_back": false,
           "busy_slots": 0,
           "running_jobs": 0,
           "limits": {

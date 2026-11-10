@@ -7,7 +7,7 @@ from urllib.parse import quote
 import re
 
 PLACEHOLDER = "AGT_UPDATER_PUBLIC_KEY_REQUIRED_BEFORE_RELEASE"
-ENDPOINT = "https://github.com/Watcharagorn/agents-router/releases/latest/download/latest.json"
+ENDPOINT = "https://github.com/fizzory/agents-router/releases/latest/download/latest.json"
 
 
 def validate_public_key(key):
@@ -43,7 +43,7 @@ def latest(version, signature, notes=""):
         "version": version, "notes": notes,
         "pub_date": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "platforms": {"darwin-aarch64": {
-            "url": f"https://github.com/Watcharagorn/agents-router/releases/download/v{version}/{quote(archive_name(version))}",
+            "url": f"https://github.com/fizzory/agents-router/releases/download/v{version}/{quote(archive_name(version))}",
             "signature": signature.strip(),
         }},
     }

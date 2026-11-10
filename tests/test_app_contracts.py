@@ -19,7 +19,7 @@ from test_roles_cli import RolesBase
 from test_share_plan import MacCopy
 from test_share_sync import YES
 
-from agents_router import account_check, cli, config, levels, settings_write, synclog, usage_snapshot
+from agents_router import account_check, cli, config, jobs, levels, settings_write, synclog, usage_snapshot
 from agents_router.share import apply, settings as share_settings
 
 
@@ -130,6 +130,14 @@ class SettingsContractTests(ConfigBase):
         self.assertEqual((next(synclog.entries())["file"], next(synclog.entries())["line"]), (str(self.user_file), 2))
         synclog.refused(levels.SettingsError("can't read", file=self.team_file), None)
         self.assertIsNone(next(synclog.entries())["line"])
+
+    def test_codex_start_settings_error_keeps_refusal_location(self):
+        self.user_file.write_text("[codex]\nmax_jobs_per_account = 0\n", encoding="utf-8")
+        with self.assertRaises(levels.SettingsError):
+            jobs.create_job(runtime="codex", prompt="test", cwd=str(self.project))
+        entry = next(synclog.entries())
+        self.assertEqual((entry["type"], entry["file"], entry["line"]),
+                         ("refused", str(self.user_file), 2))
 
 
 class AccountContractTests(ConfigBase):

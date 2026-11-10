@@ -333,10 +333,11 @@ class UsageTests(TempHome):
         folder.mkdir(parents=True)
         rollout = folder / "rollout-fake.jsonl"
         rollout.write_text(json.dumps({"type": "event_msg", "payload": {"type": "token_count", "rate_limits": {
-            "primary": {"used_percent": 37, "window_minutes": 300, "resets_at": self.now + 100}}}}) + "\n",
+            "primary": {"used_percent": 97, "window_minutes": 300, "resets_at": self.now + 100}}}}) + "\n",
                            encoding="utf-8")
         os.utime(rollout, (self.now - 10, self.now - 10))
-        with patch("agents_router.config.load_config", return_value=self.config):
+        with patch("agents_router.config.load_config", return_value=self.config), \
+                patch("agents_router.runtimes.codex.probe_rate_limits") as probe:
             before = listing(self.home)
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(cli.main(["usage", "--json"]), 0)
@@ -345,8 +346,9 @@ class UsageTests(TempHome):
                 self.assertEqual(cli.main(["usage", "--json", "--refresh"]), 0)
             data = json.loads(stream.getvalue())
             window = next(p for p in data["providers"] if p["runtime"] == "codex")["accounts"][0]["windows"][0]
-            self.assertEqual(window["used_percent"], 37)
+            self.assertEqual(window["used_percent"], 97)
             self.assertEqual(accounts.load_usage("codex")["primary"]["observed_at"], self.now - 10)
+            probe.assert_not_called()  # even a held-back account only rescans local rollouts
 
     def test_fixture_is_generated_by_the_producer_and_repeatable(self):
         self.assertEqual(FIXTURE.read_text(encoding="utf-8"), fixture_text())

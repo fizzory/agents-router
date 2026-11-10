@@ -2,7 +2,7 @@
 use serde::Serialize;
 
 pub const DAY: u64 = 24 * 60 * 60;
-pub const RELEASES: &str = "https://github.com/Watcharagorn/agents-router/releases/latest";
+pub const RELEASES: &str = "https://github.com/fizzory/agents-router/releases/latest";
 
 #[derive(Default, Debug)]
 pub struct Schedule {

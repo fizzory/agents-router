@@ -7,6 +7,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import secrets
 import time
 from typing import Any, BinaryIO
 
@@ -33,14 +34,41 @@ def load_usage(runtime: str) -> dict[str, dict[str, Any]]:
     return data if isinstance(data, dict) else {}
 
 
-def update_usage(runtime: str, account: str, **fields: Any) -> dict[str, Any]:
-    """Merge fields into one account's usage record under a lock."""
+def update_usage(runtime: str, account: str, *, clear_cooldown_if: str | None = None,
+                 deadline: float | None = None,
+                 **fields: Any) -> dict[str, Any]:
+    """Merge under the usage lock; fresh Codex windows may clear only an expected cooldown."""
 
     path = _usage_path(runtime)
-    with file_lock(path.with_suffix(".lock")):
+    with file_lock(path.with_suffix(".lock"), timeout=10 if deadline is None else max(0, deadline - time.monotonic())):
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("usage update deadline passed")
         data = load_usage(runtime)
         record = dict(data.get(account) or {})
+        fresh_windows = False
+        if runtime == "codex":
+            observed = _number(record.get("observed_at") or (record.get("updated") if record.get("windows") else None)) or 0
+            if record.get("windows") and "observed_at" not in record:
+                record["observed_at"] = observed  # metadata changes must not freshen legacy windows
+            if fields.get("windows") is not None:
+                incoming = _number(fields.get("observed_at"))
+                incoming = time.time() if incoming is None else incoming
+                if incoming > observed:
+                    fields["observed_at"] = incoming
+                    fresh_windows = True
+                else:
+                    fields.pop("windows")
+                    fields.pop("observed_at", None)
+            else:
+                fields.pop("observed_at", None)  # only a window observation can advance its timestamp
+        if fields.get("cooldown_until") is not None:
+            fields["cooldown_revision"] = secrets.token_hex(16)
         record.update({key: value for key, value in fields.items() if value is not None})
+        if (fresh_windows and clear_cooldown_if is not None
+                and record.get("cooldown_revision") == clear_cooldown_if):
+            record.pop("cooldown_until", None)
+            record.pop("cooldown_reason", None)
+            record.pop("cooldown_revision", None)
         record["updated"] = time.time()
         data[account] = record
         write_json(path, data)
@@ -123,8 +151,8 @@ def set_pool_cooldown(runtime: str, account: str, pool: str, until: float, reaso
         write_json(path, data)
 
 
-def clear_cooldown(runtime: str, account: str) -> bool:
-    """Forget an account's cooldown. Returns True if it had one."""
+def clear_cooldown(runtime: str, account: str, *, reason: str | None = None, keep_pools: bool = False) -> bool:
+    """Forget a cooldown, optionally only the expected reason and preserving pool cooldowns."""
 
     path = _usage_path(runtime)
     with file_lock(path.with_suffix(".lock")):
@@ -132,9 +160,13 @@ def clear_cooldown(runtime: str, account: str) -> bool:
         record = data.get(account)
         if not isinstance(record, dict) or ("cooldown_until" not in record and not record.get("pools")):
             return False
+        if reason is not None and record.get("cooldown_reason") != reason:
+            return False
         record.pop("cooldown_until", None)
         record.pop("cooldown_reason", None)
-        record.pop("pools", None)
+        record.pop("cooldown_revision", None)
+        if not keep_pools:
+            record.pop("pools", None)
         record["updated"] = time.time()
         write_json(path, data)
     return True

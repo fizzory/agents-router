@@ -41,7 +41,7 @@ class BuildAppTests(unittest.TestCase):
         self.assertEqual(metadata["notes"], "Release notes")
         self.assertTrue(metadata["pub_date"].endswith("Z"))
         self.assertEqual(metadata["platforms"]["darwin-aarch64"], {
-            "url": "https://github.com/Watcharagorn/agents-router/releases/download/v0.17.1/Agents-Router-0.17.1-arm64.app.tar.gz",
+            "url": "https://github.com/fizzory/agents-router/releases/download/v0.17.1/Agents-Router-0.17.1-arm64.app.tar.gz",
             "signature": "signature"})
         self.assertEqual(module.archive_name("0.17.1"), "Agents-Router-0.17.1-arm64.app.tar.gz")
         with self.assertRaises(ValueError):

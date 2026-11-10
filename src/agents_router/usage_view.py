@@ -1,22 +1,29 @@
 """Usage that is already known, shown as one line, plus a free refresh for Codex.
 
 Nothing here calls a model or starts a job. Codex usage is read from the newest rollout
-file in each Codex account's home (only its last `rate_limits` object). Claude usage
+file and re-checked live when an account is held back. Claude usage
 comes from the rate-limit events of jobs that already ran. Antigravity exposes none.
 """
 
 from __future__ import annotations
 
+from threading import Thread
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from agents_router import accounts, health_view, quota
-from agents_router.config import Config, RuntimeConfig
+from agents_router.config import Account, Config, RuntimeConfig, state_dir
+from agents_router.fsutil import file_lock
 from agents_router.limits import NAMES, utilization
+
+if TYPE_CHECKING:
+    from agents_router.runtimes.codex import RateLimits
 
 STALE_AFTER_SECONDS = 1800
 MAX_ROLLOUTS_TRIED = 5
+CODEX_PROBE_INTERVAL_SECONDS = 600
+CODEX_PROBE_TIMEOUT_SECONDS = 10
 WINDOW_LABELS = {"five_hour": "5h", "seven_day": "week", "primary": "5h", "secondary": "week"}
 
 
@@ -38,28 +45,111 @@ def newest_rollouts(home: Path, limit: int = MAX_ROLLOUTS_TRIED) -> list[Path]:
     return found[:limit]
 
 
-def refresh_codex(config: Config) -> None:
-    """Pick up Codex usage from each account's newest rollout file (also the user's own interactive use)."""
+def refresh_codex(config: Config, *, live: bool = True, pinned: str | None = None) -> None:
+    """Read rollouts; check due accounts together within one deadline, submitting the pin first."""
 
     from agents_router.runtimes.codex import last_rate_limits, usage_windows
 
     runtime = config.runtime("codex")
-    usage = accounts.load_usage("codex")
     for account in runtime.listed_accounts():
         try:
             for path in newest_rollouts(account.home):
-                limits = last_rate_limits(path)
-                windows = usage_windows(limits) if limits else {}
+                snapshot = last_rate_limits(path)
+                windows = usage_windows(snapshot[0]) if snapshot else {}
                 if not windows:
                     continue
-                observed = path.stat().st_mtime
-                record = usage.get(account.name) or {}
-                if observed > float(record.get("observed_at") or record.get("updated") or 0):
-                    accounts.update_usage("codex", account.name, windows=windows, observed_at=observed)
+                accounts.update_usage("codex", account.name, windows=windows, observed_at=snapshot[1])
                 break
         except Exception:
             continue  # a convenience: never fail a start over an unreadable file
+    if live:
+        try:
+            usage = accounts.load_usage("codex")
+            ordered = sorted(runtime.listed_accounts(), key=lambda a: (
+                a.name != pinned, float((usage.get(a.name) or {}).get("probed_at") or 0)))
+            now = time.time()
+            due = [account for account in ordered if _probe_due(runtime, usage.get(account.name) or {}, now)]
+            if due:
+                deadline = time.monotonic() + CODEX_PROBE_TIMEOUT_SECONDS
+                probes = [Thread(target=probe_codex, args=(runtime, account),
+                                 kwargs={"deadline": deadline}, daemon=True) for account in due]
+                for probe in probes:
+                    probe.start()
+                for probe in probes:
+                    # Cleanup must not extend admission's deadline or hold up interpreter exit.
+                    probe.join(timeout=max(0, deadline - time.monotonic()))
+        except Exception:
+            pass  # corrupt usage metadata cannot fail a start
     # TODO: Antigravity (agy) exposes no usage; see plans.md 3f.
+
+
+def _usage_cooldown(record: dict[str, Any], now: float) -> bool:
+    from agents_router.runtimes.codex import LIMIT_RE
+
+    reason = record.get("cooldown_reason")
+    return bool(accounts.cooldown_until(record, now) and isinstance(reason, str)
+                and (reason == "usage_limit" or LIMIT_RE.search(reason)))
+
+
+def _codex_probe_lock(account: Account) -> Path:
+    return state_dir() / "codex-probes" / (accounts._home_key(account.home) + ".lock")
+
+
+def _probe_due(runtime: RuntimeConfig, record: dict[str, Any], now: float) -> bool:
+    used = utilization(record, now)
+    return bool(((used is not None and used >= runtime.usage_ceiling) or _usage_cooldown(record, now))
+                and now - float(record.get("probed_at") or 0) >= CODEX_PROBE_INTERVAL_SECONDS)
+
+
+def probe_codex(runtime: RuntimeConfig, account: Account, *, force: bool = False,
+                deadline: float | None = None) -> RateLimits | None:
+    """Reserve a probe attempt before starting it, including failed attempts in the throttle."""
+
+    from agents_router.runtimes.codex import probe_rate_limits
+
+    try:
+        if deadline is None:
+            deadline = time.monotonic() + CODEX_PROBE_TIMEOUT_SECONDS
+        lock = _codex_probe_lock(account)
+        with file_lock(lock, timeout=max(0, deadline - time.monotonic())):
+            now = time.time()
+            record = accounts.load_usage("codex").get(account.name) or {}
+            if not force and not _probe_due(runtime, record, now):
+                return None
+            if time.monotonic() >= deadline:
+                return None
+            record = accounts.update_usage("codex", account.name, probed_at=now, deadline=deadline)
+            cooldown = record.get("cooldown_revision") if _usage_cooldown(record, now) else None
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        result = probe_rate_limits(runtime, account, timeout=remaining)
+        if result is None:
+            return None
+        used = utilization({"windows": result.windows}, time.time())
+        clear = cooldown if (used is not None and used < runtime.usage_ceiling and result.reached_type is None) else None
+        accounts.update_usage("codex", account.name, windows=result.windows, observed_at=result.observed_at,
+                              clear_cooldown_if=clear, deadline=deadline)
+        return result
+    except Exception:
+        return None
+
+
+def held_back(runtime: RuntimeConfig, record: dict[str, Any], now: float) -> str | None:
+    """The ceiling's admission hold, including the latest reset among blocking windows."""
+
+    used = utilization(record, now)
+    if used is None or used < runtime.usage_ceiling:
+        return None
+    text = f"held back: at the {runtime.usage_ceiling:.0%} usage ceiling"
+    blocking = [window for window in (record.get("windows") or {}).values()
+                if isinstance(window, dict) and isinstance(window.get("utilization"), (int, float))
+                and window["utilization"] >= runtime.usage_ceiling
+                and not (isinstance(window.get("resets_at"), (int, float)) and window["resets_at"] <= now)]
+    resets = [window.get("resets_at") for window in blocking]
+    if resets and all(isinstance(value, (int, float)) for value in resets):
+        text += " until " + reset_text(max(resets), now)
+    return text
 
 
 def _age(record: dict[str, Any], now: float) -> float:

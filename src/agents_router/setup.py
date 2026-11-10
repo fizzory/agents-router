@@ -38,7 +38,7 @@ from agents_router.fsutil import copy_exclusive, is_link, no_window_kwargs, same
 from agents_router.runtimes import get_runtime
 from agents_router.runtimes.base import JobSpec, clean_environment
 
-REPO = "Watcharagorn/agents-router"
+REPO = "fizzory/agents-router"
 REPO_URL = f"https://github.com/{REPO}"
 MARKETPLACE = "agents-router"
 PLUGIN = "agents-router"

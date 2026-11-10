@@ -7,7 +7,7 @@ Agents Router (`agt`) keeps agents, skills, MCP servers and instruction files in
 Run these yourself; none of them is a slash command.
 
 ```bash
-uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router   # or: pipx install git+...
+uv tool install --managed-python git+https://github.com/fizzory/agents-router   # or: pipx install git+...
 agt guide setup
 ```
 

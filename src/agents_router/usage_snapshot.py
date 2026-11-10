@@ -359,7 +359,7 @@ def command(args) -> int:
 
     config = load_config()
     if args.refresh:
-        usage_view.refresh_codex(config)
+        usage_view.refresh_codex(config, live=False)
     report = snapshot(config)
     print(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) if args.json else "\n".join(lines(report)))
     return 0

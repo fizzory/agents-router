@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 GUIDE = ROOT / "src" / "agents_router" / "guides" / "setup.md"
 SKILL = ROOT / "skills" / "agents-router-setup" / "SKILL.md"
 MAINTAINER = ROOT / ".claude" / "skills" / "agt-maintainer"
-INSTALL = "uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router"
+INSTALL = "uv tool install --managed-python git+https://github.com/fizzory/agents-router"
 sys.path.insert(0, str(ROOT / "scripts"))
 import sync_guide  # noqa: E402
 

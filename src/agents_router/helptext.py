@@ -49,7 +49,7 @@ ROOT = {
         ]),
         ("Accounts and settings", [
             ("usage", "Show cached usage windows and account availability; --refresh rescans Codex"),
-            ("accounts", "List, check, add, log in, enable, disable, sync, reset or remove accounts"),
+            ("accounts", "List, check, add, log in, enable, disable, sync, reset or remove accounts (Codex reset checks live usage)"),
             ("config", "See and change agt's settings (show, set, unset, revert)"),
             ("roles", "See and change roles: which providers each role uses (show, propose, config)"),
             ("rules", "Show, install or remove the optional delegation rules"),
@@ -73,7 +73,7 @@ ROOT = {
     "footer": [
         [ui.bold("Exit codes"), "  0 done   1 waits for you, or failed   2 wrong command or value   3 needs your choice"],
         [ui.muted("Your CLIs run these, not you:"), " mcp, hook"],
-        [ui.muted("Docs:"), " https://github.com/Watcharagorn/agents-router"],
+        [ui.muted("Docs:"), " https://github.com/fizzory/agents-router"],
     ],
 }
 

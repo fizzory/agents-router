@@ -16,20 +16,27 @@ with `-c` overrides so workers can't start subagents of their own.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path
+import queue
 import re
 import shutil
+import signal
 import subprocess
+import threading
+import time
 import tomllib
 from typing import Any
 
-from agents_router import accounts as pool, sync
+from agents_router import __version__, accounts as pool, sync
 from agents_router.hosts import parent_note
 from agents_router.config import Account, RuntimeConfig, state_dir
 from agents_router import mcp_translate
-from agents_router.fsutil import copy_exclusive, file_lock, is_link, no_window_kwargs, same_path, write_text
+from agents_router.fsutil import copy_exclusive, file_lock, is_link, no_window_kwargs, same_path, worker_process, write_text
 from agents_router.runtimes.base import (
     WORKER_TOOLS_NOTE,
     parent_server,
@@ -82,10 +89,11 @@ def find_rollout(home: Path, thread_id: str) -> Path | None:
     return max(matches, key=lambda path: path.stat().st_mtime) if matches else None
 
 
-def last_rate_limits(path: Path) -> dict[str, Any] | None:
-    """The last `rate_limits` object in a rollout file. Reads nothing else from the conversation."""
+def last_rate_limits(path: Path) -> tuple[dict[str, Any], float] | None:
+    """The last `rate_limits` object and its event time (file mtime for legacy events)."""
 
     try:
+        modified = path.stat().st_mtime
         with open(path, "rb") as handle:
             handle.seek(0, os.SEEK_END)
             size = handle.tell()
@@ -97,12 +105,22 @@ def last_rate_limits(path: Path) -> dict[str, Any] | None:
         if b'"rate_limits"' not in raw:
             continue
         try:
-            payload = json.loads(raw).get("payload")
+            event = json.loads(raw)
+            payload = event.get("payload")
         except (ValueError, AttributeError):
             continue  # a cut-off first line, or not an event
         limits = payload.get("rate_limits") if isinstance(payload, dict) else None
         if isinstance(limits, dict) and isinstance(limits.get("primary") or limits.get("secondary"), dict):
-            return limits
+            timestamp = event.get("timestamp")
+            if timestamp is None:
+                return limits, modified
+            try:
+                observed = datetime.fromisoformat(timestamp)
+                if observed.tzinfo is None:
+                    observed = observed.replace(tzinfo=timezone.utc)
+                return limits, observed.timestamp()
+            except (TypeError, ValueError, OverflowError):
+                continue  # a malformed event time must not freshen old windows with the file's mtime
     return None
 
 
@@ -123,6 +141,106 @@ def usage_windows(limits: dict[str, Any]) -> dict[str, dict[str, float | None]]:
             "resets_at": float(resets) if isinstance(resets, (int, float)) else None,
         }
     return windows
+
+
+@dataclass(frozen=True)
+class RateLimits:
+    windows: dict[str, dict[str, float | None]]
+    reached_type: str | None
+    observed_at: float
+
+
+def _live_rate_limits(result: Any, observed_at: float) -> RateLimits | None:
+    """Validate the app-server shape, then reuse rollout window naming and units."""
+
+    limits = result.get("rateLimits") if isinstance(result, dict) else None
+    if not isinstance(limits, dict) or "rateLimitReachedType" not in limits:
+        return None
+    reached = limits["rateLimitReachedType"]
+    if reached is not None and not isinstance(reached, str):
+        return None
+    converted = {}
+    for key in ("primary", "secondary"):
+        window = limits.get(key)
+        if window is None:
+            continue
+        if not isinstance(window, dict):
+            return None
+        used, minutes, resets = (window.get(name) for name in ("usedPercent", "windowDurationMins", "resetsAt"))
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+               for value in (used, minutes)) or not 0 <= used <= 100 or minutes <= 0:
+            return None
+        if resets is not None and (isinstance(resets, bool) or not isinstance(resets, (int, float))
+                                   or not math.isfinite(resets)):
+            return None
+        converted[key] = {"used_percent": used, "window_minutes": minutes, "resets_at": resets}
+    windows = usage_windows(converted)
+    return RateLimits(windows, reached, observed_at) if windows else None
+
+
+def probe_rate_limits(config: RuntimeConfig, account: Account, timeout: float = 10) -> RateLimits | None:
+    """Read live quota through Codex app-server, without a model call. Fail closed on every error."""
+
+    try:
+        deadline = time.monotonic() + timeout
+        runtime = CodexRuntime()
+        command = runtime.find_binary(config)
+        if not command:
+            return None
+        env = runtime.account_env(config, account)
+        env["CODEX_HOME"] = str(account.home)
+        with worker_process(
+            [*command, "app-server", *runtime._auth_args(account)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, encoding="utf-8", errors="replace", env=env,
+        ) as process:
+            replies: queue.Queue = queue.Queue()
+
+            def read() -> None:
+                try:
+                    for line in process.stdout:
+                        replies.put((line, time.time()))  # receipt, before validation or process cleanup
+                except (OSError, ValueError):
+                    pass
+                finally:
+                    replies.put((None, None))
+
+            reader = threading.Thread(target=read, daemon=True)
+            reader.start()
+
+            def send(message: dict[str, Any]) -> None:
+                process.stdin.write(json.dumps({"jsonrpc": "2.0", **message}) + "\n")
+                process.stdin.flush()
+
+            def response(request_id: int) -> tuple[Any, float]:
+                while True:
+                    line, observed = replies.get(timeout=max(0, deadline - time.monotonic()))
+                    if line is None or time.monotonic() >= deadline:
+                        raise ValueError("Codex probe ended before its response")
+                    message = json.loads(line)
+                    if not isinstance(message, dict):
+                        raise ValueError("Unknown Codex response")
+                    if message.get("id") == request_id:
+                        return message.get("result"), observed
+
+            try:
+                send({"id": 1, "method": "initialize", "params": {
+                    "clientInfo": {"name": "agt", "title": "agt", "version": __version__}}})
+                if not isinstance(response(1)[0], dict):
+                    return None
+                send({"method": "initialized", "params": {}})
+                send({"id": 2, "method": "account/rateLimits/read", "params": None})
+                return _live_rate_limits(*response(2))
+            finally:
+                # POSIX probes need no graceful stop. Windows trees belong to worker_process's Job Object.
+                if os.name != "nt":
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait(timeout=0.1)
+                    except (OSError, subprocess.TimeoutExpired):
+                        pass
+    except Exception:
+        return None  # missing CLI, old protocol, malformed output or a timeout cannot fail a start
 
 
 def _default_home() -> Path:
@@ -472,12 +590,13 @@ class CodexParser:
             return None
         try:
             rollout = find_rollout(self.home, self.session_id)
-            limits = last_rate_limits(rollout) if rollout else None
-            windows = usage_windows(limits) if limits else {}
+            if rollout is None:
+                return None
+            snapshot = last_rate_limits(rollout)
+            windows = usage_windows(snapshot[0]) if snapshot else {}
             if not windows:
                 return None
-            info = {"unifiedWindows": {name: {"utilization": w["utilization"], "resetsAt": w["resets_at"]} for name, w in windows.items()}}
-            pool.record_rate_limit_event("codex", self.account, info)
+            pool.update_usage("codex", self.account, windows=windows, observed_at=snapshot[1])
         except Exception:
             return None  # usage ranking is a convenience: never fail an attempt over it
         full = [w["resets_at"] for w in windows.values() if w["utilization"] >= 1.0 and w["resets_at"]]
