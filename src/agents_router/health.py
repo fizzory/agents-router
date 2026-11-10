@@ -214,12 +214,15 @@ def _states(runtime, account, model, record, now, job_id, skip_rest):
     return HealthState(record["generation"], tuple(result))
 
 
-def read_record(runtime: RuntimeConfig, account: Account, *, now: float | None = None) -> dict[str, Any]:
-    """Return the folder's record for reporting, persisting clock/claim repairs."""
+def read_record(runtime: RuntimeConfig, account: Account, *, now: float | None = None,
+                read_only: bool = False) -> dict[str, Any]:
+    """Return the folder's record; read_only skips locks and never saves repairs."""
 
     if not runtime.circuit_breaker:
         return {"account": account.name, "generation": 0, "circuits": {}}
     now = time.time() if now is None else now
+    if read_only:
+        return _load(runtime, account, now)[1]
     with file_lock(_path(runtime).with_suffix(".lock")):
         data, record, changed = _load(runtime, account, now)
         if changed:

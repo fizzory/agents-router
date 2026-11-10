@@ -865,6 +865,10 @@ def build_parser() -> argparse.ArgumentParser:
     roles_cli.add_parser(sub)
     synclog.add_parser(sub)
 
+    usage = sub.add_parser("usage", help="Show cached usage windows and account availability; writes nothing.")
+    usage.add_argument("--json", action="store_true", help="Print the versioned usage snapshot as JSON.")
+    usage.add_argument("--refresh", action="store_true", help="First refresh Codex usage from local rollout files.")
+
     mcp_parser = sub.add_parser("mcp", help="Run the MCP server on stdio.")
     mcp_parser.add_argument("--worker", help=argparse.SUPPRESS)
 
@@ -1045,6 +1049,10 @@ def main(argv: list[str] | None = None) -> int:
             from agents_router.runner import main as run_job
 
             return run_job(args.job_id)
+        if args.command == "usage":
+            from agents_router.usage_snapshot import command
+
+            return command(args)
         handlers = {
             "rules": rules.command,
             "share": share_commands.command,

@@ -188,7 +188,7 @@ class RuntimeConfig:
             self._found = self._discover()
         return self._found
 
-    def _discover(self) -> list[Account]:
+    def _discover(self, *, cached_only: bool = False) -> list[Account]:
         from agents_router import profiles
         from agents_router.profiles import same_folder
 
@@ -205,7 +205,7 @@ class RuntimeConfig:
             return None if status.get("error") else bool(status.get("loggedIn"))
 
         found = []
-        for profile in profiles.discover(extra=extra, skip=skip, check=check):
+        for profile in profiles.discover(extra=extra, skip=skip, check=check, cached_only=cached_only):
             if profile.name in (self.ignore or []) or any(profile.name == account.name for account in self.accounts):
                 continue
             account = Account(name=profile.name, home=profile.home, setup="own", found=True, login=profile.login,

@@ -261,6 +261,31 @@ def unlock(handle: BinaryIO) -> None:
         handle.close()
 
 
+def lock_busy(path: Path) -> bool:
+    """Probe an existing lock without creating, truncating or writing any file.
+
+    An inaccessible lock is conservatively busy. Unlike try_lock this is safe
+    for reports and filesystem watchers, including empty and vanished files.
+    """
+
+    try:
+        handle = path.open("r+b" if os.name == "nt" else "rb")
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    try:
+        if os.name == "nt":
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:  # pragma: no cover
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return True
+    unlock(handle)
+    return False
+
+
 # Links -----------------------------------------------------------------------
 
 

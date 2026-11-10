@@ -101,6 +101,7 @@ Per host details: [docs/hosts.md](docs/hosts.md).
 | Add a Claude account | `agt accounts add max-2` | [Claude Code](docs/claude-code.md#3-add-more-accounts) |
 | Add a Codex account | `agt accounts add plus-2 --runtime codex` | [Codex](docs/codex.md#extra-accounts) |
 | Test every account | `agt doctor --live --runtime <runtime>` (one tiny job each; uses a little quota) | [Claude Code](docs/claude-code.md#4-check) |
+| See usage and availability | `agt usage` (`--json` for apps; `--refresh` rescans local Codex usage) | [Usage snapshot](docs/configuration.md#usage-snapshot) |
 | Preview delegation rules | `agt rules` | [Delegation rules](docs/delegation.md) |
 
 ## Supported CLIs

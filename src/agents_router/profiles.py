@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import time
@@ -115,8 +116,8 @@ def forget(folder: Path | str | None = None) -> None:
         write_json(path, data)
 
 
-def logged_in(folder: Path, check) -> bool | None:
-    """Cached `claude auth status` for a folder. `check(folder)` runs the real one."""
+def logged_in(folder: Path, check, *, cached_only: bool = False) -> bool | None:
+    """Cached auth; cached_only returns unknown on a miss, without checking or writing."""
 
     from agents_router.fsutil import file_lock, read_json, write_json
 
@@ -127,10 +128,21 @@ def logged_in(folder: Path, check) -> bool | None:
     except OSError:
         stamp = None
     path = _cache_path()
-    cached = (read_json(path, {}) or {}).get(key) if path.exists() else None
+    data = read_json(path, {}) if path.exists() else {}
+    cached = data.get(key) if isinstance(data, dict) else None
     now = time.time()
-    if isinstance(cached, dict) and cached.get("stamp") == stamp and now - float(cached.get("checked") or 0) < AUTH_TTL_SECONDS:
-        return cached.get("logged_in")
+    checked = cached.get("checked") if isinstance(cached, dict) else None
+    try:
+        checked = float(checked) if type(checked) in (int, float) else None
+    except OverflowError:
+        checked = None
+    if (isinstance(cached, dict) and cached.get("stamp") == stamp
+            and checked is not None and math.isfinite(checked)
+            and 0 <= now - checked < AUTH_TTL_SECONDS):
+        result = cached.get("logged_in")
+        return result if type(result) is bool else None
+    if cached_only:
+        return None
     try:
         result = check(folder)
     except Exception:
@@ -172,7 +184,8 @@ def label(folder: Path) -> str:
     return name if name.startswith("claude") else f"claude-{name}" if name else "claude"
 
 
-def discover(*, extra: list[Path] | None = None, skip: list[Path] | None = None, check=None) -> list[Profile]:
+def discover(*, extra: list[Path] | None = None, skip: list[Path] | None = None, check=None,
+             cached_only: bool = False) -> list[Profile]:
     """Claude folders that have a login, named after the folder.
 
     A folder counts once `.claude.json` holds an `oauthAccount` (it was logged in at some point);
@@ -187,7 +200,7 @@ def discover(*, extra: list[Path] | None = None, skip: list[Path] | None = None,
         info = account_info(folder)
         if not info["login"]:
             continue
-        state = logged_in(folder, check) if check else None
+        state = logged_in(folder, check, cached_only=cached_only) if check or cached_only else None
         found.append(Profile(name=label(folder), home=folder, logged_in=state, **info))
     names = [profile.name for profile in found]
     for profile in found:

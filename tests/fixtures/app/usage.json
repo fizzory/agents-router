@@ -1,0 +1,256 @@
+{
+  "schema_version": 1,
+  "agt_version": "0.16.1",
+  "generated_at": 1800000000.0,
+  "providers": [
+    {
+      "runtime": "claude",
+      "label": "Claude Code",
+      "accounts": [
+        {
+          "name": "claude-work",
+          "enabled": true,
+          "availability": "ok",
+          "reason": null,
+          "until": null,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": 2,
+          "unhealthy_models": [
+            {
+              "model": "opus",
+              "reason": "model at capacity",
+              "until": 1800000060.0,
+              "availability": "unhealthy"
+            }
+          ],
+          "windows": [
+            {
+              "name": "five_hour",
+              "label": "5h",
+              "used_percent": 17,
+              "resets_at": 1800003600.0,
+              "observed_at": 1799999940.0,
+              "stale": false,
+              "reset": false
+            },
+            {
+              "name": "seven_day",
+              "label": "week",
+              "used_percent": 42,
+              "resets_at": 1800086400.0,
+              "observed_at": 1799999940.0,
+              "stale": false,
+              "reset": false
+            }
+          ]
+        },
+        {
+          "name": "claude-cooling",
+          "enabled": true,
+          "availability": "cooling",
+          "reason": "usage limit",
+          "until": 1800000600.0,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": 2,
+          "unhealthy_models": [],
+          "windows": []
+        },
+        {
+          "name": "claude-logged-out",
+          "enabled": true,
+          "availability": "logged_out",
+          "reason": "cached login check says logged out",
+          "until": null,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": 2,
+          "unhealthy_models": [],
+          "windows": []
+        },
+        {
+          "name": "claude-unknown",
+          "enabled": true,
+          "availability": "unknown",
+          "reason": "no cached login check",
+          "until": null,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": 2,
+          "unhealthy_models": [],
+          "windows": []
+        },
+        {
+          "name": "claude-busy",
+          "enabled": true,
+          "availability": "busy",
+          "reason": "every execution slot is occupied",
+          "until": null,
+          "running_jobs": 2,
+          "busy_slots": 2,
+          "capacity": 2,
+          "unhealthy_models": [],
+          "windows": []
+        },
+        {
+          "name": "claude-off",
+          "enabled": false,
+          "availability": "off",
+          "reason": "disabled in agt settings",
+          "until": null,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": 2,
+          "unhealthy_models": [],
+          "windows": []
+        },
+        {
+          "name": "claude-stale",
+          "enabled": true,
+          "availability": "ok",
+          "reason": null,
+          "until": null,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": 2,
+          "unhealthy_models": [],
+          "windows": [
+            {
+              "name": "five_hour",
+              "label": "5h",
+              "used_percent": 70,
+              "resets_at": 1800003600.0,
+              "observed_at": 1799996000.0,
+              "stale": true,
+              "reset": false
+            }
+          ]
+        },
+        {
+          "name": "claude-reset",
+          "enabled": true,
+          "availability": "ok",
+          "reason": null,
+          "until": null,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": 2,
+          "unhealthy_models": [],
+          "windows": [
+            {
+              "name": "five_hour",
+              "label": "5h",
+              "used_percent": 100,
+              "resets_at": 1799999999.0,
+              "observed_at": 1799996000.0,
+              "stale": true,
+              "reset": true
+            }
+          ]
+        },
+        {
+          "name": "claude-unhealthy",
+          "enabled": true,
+          "availability": "unhealthy",
+          "reason": "model at capacity",
+          "until": 1800000120.0,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": 2,
+          "unhealthy_models": [],
+          "windows": []
+        },
+        {
+          "name": "claude-recovering",
+          "enabled": true,
+          "availability": "recovering",
+          "reason": "model at capacity",
+          "until": 1799999999.0,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": 2,
+          "unhealthy_models": [],
+          "windows": []
+        }
+      ]
+    },
+    {
+      "runtime": "codex",
+      "label": "Codex",
+      "accounts": [
+        {
+          "name": "primary",
+          "enabled": true,
+          "availability": "unknown",
+          "reason": "no cached login check",
+          "until": null,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": null,
+          "unhealthy_models": [],
+          "windows": []
+        }
+      ]
+    },
+    {
+      "runtime": "antigravity",
+      "label": "Antigravity",
+      "accounts": [
+        {
+          "name": "primary",
+          "enabled": true,
+          "availability": "unknown",
+          "reason": "no cached login check",
+          "until": null,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": null,
+          "unhealthy_models": [],
+          "windows": []
+        }
+      ]
+    },
+    {
+      "runtime": "kiro",
+      "label": "Kiro",
+      "accounts": [
+        {
+          "name": "primary",
+          "enabled": true,
+          "availability": "unknown",
+          "reason": "no cached login check",
+          "until": null,
+          "running_jobs": 0,
+          "busy_slots": 0,
+          "capacity": null,
+          "unhealthy_models": [],
+          "windows": []
+        }
+      ]
+    }
+  ],
+  "jobs": {
+    "active": 2,
+    "queued": 0,
+    "starting": 0,
+    "running": 2,
+    "unassigned": 0,
+    "removed_accounts": 0,
+    "surviving_workers": 0
+  },
+  "uninstall_blockers": [
+    {
+      "kind": "active_job",
+      "job_id": "fixture-busy-0",
+      "runtime": "claude",
+      "account": "claude-busy"
+    },
+    {
+      "kind": "active_job",
+      "job_id": "fixture-busy-1",
+      "runtime": "claude",
+      "account": "claude-busy"
+    }
+  ]
+}

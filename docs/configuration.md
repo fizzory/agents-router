@@ -66,6 +66,44 @@ Typed by you in a terminal, the change just applies: the command is your words. 
 
 `max_jobs_by_room` and the `[[<runtime>.pools]]` and account tables are edited by hand (`agt accounts` handles accounts).
 
+## Usage snapshot
+
+`agt usage` shows one line per account: its canonical name, availability, and
+each known usage window's percent used and reset time. Blocked accounts show
+`back HH:MM`. Figures older than 30 minutes are marked `stale`; a window whose
+reset has passed is marked `reset` instead. Kiro and Antigravity have no usage windows.
+
+Plain `agt usage`, including `--json`, reads local records only. It starts no
+provider commands and creates, changes or deletes no state. `--refresh` first
+rescans local Codex rollout files and updates Codex's usage cache. Neither form
+makes a model request. Login state comes from agt's cached checks; an absent,
+expired or invalidated check means `unknown`. Currently only Claude has a persisted
+login-check cache, so the other providers can report blockers but otherwise stay `unknown`.
+
+The JSON contract has `schema_version: 1`, `agt_version`, `generated_at` (epoch
+seconds), and `providers`. Each provider has `runtime`, `label` and `accounts`.
+Each account has `name`, `enabled`, `availability`, `reason`, `until` (epoch or
+null), `running_jobs`, `busy_slots` (occupied account execution leases), `capacity`
+(the account's concurrent-job cap, or null for unlimited), `unhealthy_models`,
+and `windows`. Each window carries `name`, `label`, `used_percent`, `resets_at`,
+`observed_at`, `stale` and `reset`. Shared logins share usage and cooldowns;
+each window keeps its source observation time.
+
+Availability uses this precedence: `off`, `logged_out`, `unhealthy`, `cooling`,
+`recovering`, `busy`, `ok`, `unknown`. Model-only health circuits appear in
+`unhealthy_models` with `model`, `reason`, `until` and `availability`. A malformed
+account record becomes `unknown` with a `problem` note; other accounts remain readable.
+
+Global `jobs` totals report `active`, `queued`, `starting`, `running`, `unassigned`,
+`removed_accounts` and `surviving_workers`. These include jobs outside the current
+workspace, removed accounts and occupied leases left by surviving workers.
+`uninstall_blockers` lists one entry per active job or unattributed occupied lease,
+with `kind`, `job_id`, `runtime` and `account` (unknown identities are null).
+An empty list means nothing currently blocks uninstall. A caller must recheck
+under the admission lock immediately before uninstalling; this snapshot is not a reservation.
+
+Regenerate the app fixture with `PYTHONPATH=src:tests python3 tests/generate_usage_fixture.py`.
+
 ## The log
 
 agt writes one line for each thing it changes to `~/.agents-router/state/log/<year>-<month>.jsonl`:

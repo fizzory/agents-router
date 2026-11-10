@@ -48,6 +48,7 @@ ROOT = {
             ("share", ["Keep them the same across Claude Code, Codex, Antigravity and Kiro ", ui.muted("(agt share --help)")]),
         ]),
         ("Accounts and settings", [
+            ("usage", "Show cached usage windows and account availability; --refresh rescans Codex"),
             ("accounts", "List, add, log in, sync, reset or remove accounts"),
             ("config", "See and change agt's settings (show, set, unset)"),
             ("roles", "See and change roles: which providers each role uses (show, propose, config)"),
