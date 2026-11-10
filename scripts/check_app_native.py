@@ -40,6 +40,14 @@ def main():
             except subprocess.TimeoutExpired:
                 raise SystemExit(f"Native self-test timed out (child killed); see {LOG}") from None
         text = LOG.read_text()
+        def callback_json(marker):
+            match = re.search(re.escape(marker) + r"=(.+)", text)
+            if not match:
+                return None
+            value = json.loads(match[1])
+            return json.loads(value) if isinstance(value, str) else value
+
+        expected_rows = len(json.loads((ROOT / "tests/fixtures/app/config-show.json").read_text())["settings"])
         sizes = re.findall(r"resized-to-content requested=(\d+) height=(\d+) cap=(\d+) top=(-?\d+) mode=(\w+)", text)
         checks = [result.returncode == 0,
                   "class=AgtPopoverPanel NSPanel" in text,
@@ -51,10 +59,16 @@ def main():
                       for requested, height, cap, _top, _mode in sizes),
                   ("popover reduce-motion=true" in text or
                    any(mode == "animate" for _requested, _height, _cap, _top, mode in sizes)),
+                  callback_json("self-test settings-content") == {"pane":"accounts", "rows":expected_rows},
+                  "settings hidden activation=Accessory; webview retained" in text,
+                  "single-instance callback on main thread" in text,
+                  "self-test second-launch-success=true" in text,
+                  "self-test settings-reopened-visible=true" in text,
+                  callback_json("self-test settings-retained") == {"pane":"general", "retained":"yes"},
                   "self-test complete; quitting" in text]
         requests = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
         checks += [bool(requests), requests.count(["usage", "--json"]) == 1,
-                   all(argv in (["usage", "--json"], ["usage", "--json", "--refresh"]) for argv in requests)]
+                   all(argv in (["usage", "--json"], ["usage", "--json", "--refresh"], ["config", "show", "--all", "--json"]) for argv in requests)]
         for line in text.splitlines():
             if any(key in line for key in ("class=AgtPopoverPanel", "posted NSWorkspace", "reason=debounced", "hidden reason=blur", "hidden reason=Esc", "popover resized-to-content", "self-test complete")):
                 print(line)

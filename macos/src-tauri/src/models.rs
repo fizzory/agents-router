@@ -497,7 +497,7 @@ pub enum Snapshot {
 }
 
 pub fn decode(kind: CommandKind, bytes: &[u8]) -> Result<Snapshot, String> {
-    let value: Value =
+    let mut value: Value =
         serde_json::from_slice(bytes).map_err(|e| format!("invalid agt JSON: {e}"))?;
     // Legacy commands have no version. If one is supplied it must still be understood.
     if let Some(version) = value.get("schema_version") {
@@ -512,6 +512,13 @@ pub fn decode(kind: CommandKind, bytes: &[u8]) -> Result<Snapshot, String> {
     }
     if value.get("error").and_then(Value::as_str) == Some("needs_choice") {
         return parse!(NeedsChoice, Choice);
+    }
+    // config set/unset retain the CLI's original top-level exit-3 shape.
+    if value.get("error").and_then(Value::as_str) == Some("needs_user_words") {
+        value = serde_json::json!({"ok":false, "error": {
+            "code":"needs_user_words", "needs_user_words":true,
+            "message":value["ask"], "ask":value["ask"], "key":value["key"], "retry":value["retry"]
+        }});
     }
     if value.get("ok") == Some(&Value::Bool(false)) {
         return parse!(ErrorEnvelope, Error);
@@ -543,9 +550,13 @@ pub const FIXTURES: &[(&str, CommandKind)] = &[
     ("usage.json", CommandKind::Usage),
     ("usage-popover.json", CommandKind::Usage),
     ("usage-nothing.json", CommandKind::Usage),
+    ("usage-idle.json", CommandKind::Usage),
     ("config-show.json", CommandKind::ConfigShow),
+    ("config-show-levels.json", CommandKind::ConfigShow),
+    ("config-show-broken.json", CommandKind::ConfigShow),
     ("config-set.json", CommandKind::ConfigSet),
     ("config-set-error.json", CommandKind::ConfigSet),
+    ("config-set-needs-user-words.json", CommandKind::ConfigSet),
     ("config-unset-absent.json", CommandKind::ConfigUnset),
     ("config-revert.json", CommandKind::ConfigRevert),
     ("accounts-list.json", CommandKind::AccountsList),

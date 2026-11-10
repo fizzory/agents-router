@@ -7,6 +7,9 @@
   --muted: #595961;
   --panel: #f5f5f7;
   --surface: #fff;
+  --sidebar: #e7e7eb;
+  --field: #fff;
+  --selection: color-mix(in srgb, AccentColor 24%, transparent);
   --line: #a1a1aa;
   --track: #a1a1aa;
   --accent: AccentColor;
@@ -22,6 +25,6 @@
   --icon-hit: 22px;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --muted: #b3b3bc; --panel: #252529; --surface: #303034; --line: #5c5c65; --track: #5c5c65;
+  :root { --muted: #b3b3bc; --panel: #252529; --surface: #303034; --sidebar: #202024; --field: #3c3c43; --selection: color-mix(in srgb, AccentColor 55%, transparent); --line: #5c5c65; --track: #5c5c65;
     --available: #3bc865; --attention: #ffb12b; --unavailable: #ff453a; }
 }

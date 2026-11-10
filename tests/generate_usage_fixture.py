@@ -74,7 +74,7 @@ def build_fixture(scenario="base") -> dict:
                     "opened_at": now - 61, "open_until": until, "reason": "model at capacity"}}}
             write_json(state / "claude-health.json", health)
             busy = runtime.accounts[4]
-            for index in range(2 if scenario == "base" else 4):
+            for index in range(0 if scenario == "idle" else 2 if scenario == "base" else 4):
                 slot = accounts._slot_path(runtime, busy, index)
                 slot.parent.mkdir(parents=True, exist_ok=True)
                 slot.write_bytes(b"\0")
@@ -101,7 +101,7 @@ def fixture_text() -> str:
 def fixture_texts() -> dict:
     return {"usage.json": fixture_text(), **{
         f"usage-{name}.json": json.dumps(build_fixture(name), indent=2, ensure_ascii=False, allow_nan=False) + "\n"
-        for name in ("popover", "nothing")}}
+        for name in ("popover", "nothing", "idle")}}
 
 
 def popover_states_text() -> str:

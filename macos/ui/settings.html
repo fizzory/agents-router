@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>General</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="motion.css">
+  <link rel="stylesheet" href="settings.css">
+  <script type="module" src="settings.js"></script>
+</head>
+<body data-pane="general">
+  <aside class="sidebar" aria-label="Settings navigation">
+    <div class="window-drag" data-tauri-drag-region></div>
+    <label class="search-box"><span id="search-icon" aria-hidden="true"></span><input id="search" type="search" placeholder="Search" aria-label="Search settings" autocomplete="off" spellcheck="false"></label>
+    <nav aria-label="Settings panes">
+      <button type="button" data-pane="general" aria-current="page">General<span id="general-dot" class="attention-dot" hidden></span></button>
+      <button type="button" data-pane="roles">Roles</button>
+      <button type="button" data-pane="accounts">Accounts</button>
+      <button type="button" data-pane="sharing">Sharing</button>
+      <button type="button" data-pane="activity">Activity</button>
+    </nav>
+  </aside>
+  <div class="main">
+    <header data-tauri-drag-region aria-label="Settings toolbar"><strong id="pane-title">General</strong><button type="button" id="scope" class="scope" aria-label="Settings scope" aria-haspopup="menu" aria-expanded="false">User ▾</button></header>
+    <main id="content" aria-label="General settings">
+      <div id="install-banner" class="banner" hidden><span></span><button type="button"></button></div>
+      <div id="broken-banner" class="banner error-banner" role="alert" hidden><span></span><button type="button">Open settings.toml</button></div>
+      <p id="status" role="status">Reading settings…</p>
+      <div id="settings" aria-label="Settings"></div>
+      <details id="file-only"><summary>File only</summary><div id="file-rows"></div></details>
+      <p id="no-match" hidden>No match</p>
+      <div id="general-footer">
+        <div class="login-row"><label for="open-at-login">Open at login</label><input id="open-at-login" class="switch-input" type="checkbox" role="switch"><span class="row-slot"></span></div>
+        <div id="install-group"><div class="version-row"><span>Installed version</span><output id="version">—</output><span class="row-slot"></span></div><span id="uninstall-wrapper" hidden tabindex="0"><button id="uninstall" type="button">Uninstall command line tool…</button></span></div>
+      </div>
+      <p id="pending-pane" hidden></p>
+    </main>
+  </div>
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+  <div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
+</body>
+</html>

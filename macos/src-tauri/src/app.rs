@@ -1,8 +1,9 @@
 //! Long-lived native refresh/lifecycle and fixed-purpose popover commands.
 use crate::{
     client::{AgtClient, ClientError, CommandOutcome, ReadReply, Request},
-    models::{CommandKind, Snapshot, Usage},
+    models::{CommandKind, ConfigShow, Level, Snapshot, Usage},
     native,
+    settings::{self, SettingsCore},
     terminal::{TerminalAction, TerminalLauncher},
     watcher::{SettingsWatcher, WatchPaths},
 };
@@ -17,7 +18,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, State,
 };
@@ -43,6 +44,7 @@ pub struct PopoverSnapshot {
     pub update_version: Option<String>,
 }
 struct Paths {
+    home: PathBuf,
     launcher: PathBuf,
     agt_home: PathBuf,
     explicit_home: Option<PathBuf>,
@@ -94,6 +96,7 @@ impl Paths {
             return Err("agt home and config paths must be absolute".into());
         }
         Ok(Self {
+            home: home.clone(),
             launcher,
             agt_home,
             explicit_home,
@@ -108,6 +111,7 @@ pub struct AppState {
     snapshot: Mutex<PopoverSnapshot>,
     watcher: Mutex<Option<SettingsWatcher>>,
     quitting: AtomicBool,
+    pub settings_target: Mutex<serde_json::Value>,
 }
 
 fn usage_error(error: ClientError) -> String {
@@ -143,6 +147,15 @@ fn publish_status(app: &tauri::AppHandle, snapshot: PopoverSnapshot, fresh: bool
             "usage-updated"
         } else {
             "popover-status"
+        },
+        &snapshot,
+    );
+    let _ = app.emit_to(
+        "settings",
+        if fresh {
+            "usage-updated"
+        } else {
+            "settings-status"
         },
         &snapshot,
     );
@@ -268,6 +281,144 @@ fn open_settings(app: tauri::AppHandle, runtime: Option<String>, account: Option
         native::open_settings(&app, mtm, target)
     });
 }
+#[tauri::command]
+fn get_settings_target(state: State<'_, AppState>) -> serde_json::Value {
+    state
+        .settings_target
+        .lock()
+        .expect("settings target")
+        .clone()
+}
+
+#[tauri::command]
+fn show_setting_menu(window: tauri::WebviewWindow, key: String) -> Result<(), String> {
+    if window.label() != "settings"
+        || key.is_empty()
+        || !key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._".contains(c))
+    {
+        return Err("Choose a settings row".into());
+    }
+    let item = MenuItem::with_id(
+        &window,
+        format!("setting-history:{key}"),
+        "Show history",
+        true,
+        None::<&str>,
+    )
+    .map_err(|error| error.to_string())?;
+    Menu::with_items(&window, &[&item])
+        .and_then(|menu| window.popup_menu(&menu))
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
+async fn config_show(
+    state: State<'_, SettingsCore>,
+    workspace: Option<PathBuf>,
+) -> Result<ConfigShow, String> {
+    state.show(workspace).await.map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn config_set(
+    state: State<'_, SettingsCore>,
+    key: String,
+    value: String,
+    level: Level,
+    workspace: Option<PathBuf>,
+    revision: String,
+    user_said: Option<String>,
+) -> Result<serde_json::Value, String> {
+    settings::outcome_json(
+        state
+            .write(key, Some(value), level, workspace, revision, user_said)
+            .await
+            .map_err(|e| e.to_string())?,
+    )
+}
+#[tauri::command]
+async fn config_unset(
+    state: State<'_, SettingsCore>,
+    key: String,
+    level: Level,
+    workspace: Option<PathBuf>,
+    revision: String,
+    user_said: Option<String>,
+) -> Result<serde_json::Value, String> {
+    settings::outcome_json(
+        state
+            .write(key, None, level, workspace, revision, user_said)
+            .await
+            .map_err(|e| e.to_string())?,
+    )
+}
+#[tauri::command]
+async fn config_revert(
+    state: State<'_, SettingsCore>,
+    entry: String,
+    workspace: Option<PathBuf>,
+    user_said: Option<String>,
+) -> Result<serde_json::Value, String> {
+    settings::outcome_json(
+        state
+            .revert(entry, workspace, user_said)
+            .await
+            .map_err(|e| e.to_string())?,
+    )
+}
+#[tauri::command]
+async fn open_settings_file(
+    app: tauri::AppHandle,
+    state: State<'_, SettingsCore>,
+    file: String,
+    line: u64,
+) -> Result<(), String> {
+    let path = state.checked_file(&file, line)?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    main_thread(&app, move |_app, mtm| {
+        native::open_settings_file(mtm, path, line, tx)
+    });
+    rx.await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn choose_workspace(app: tauri::AppHandle) -> Result<Option<PathBuf>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut dialog = app.dialog().file();
+    if let Some(window) = app.get_webview_window("settings") {
+        dialog = dialog.set_parent(&window);
+    }
+    dialog.pick_folder(move |folder| {
+        let _ = tx.send(folder);
+    });
+    rx.await
+        .map_err(|e| e.to_string())?
+        .map(|folder| {
+            folder
+                .into_path()
+                .map_err(|e| e.to_string())?
+                .canonicalize()
+                .map_err(|e| e.to_string())
+        })
+        .transpose()
+}
+#[tauri::command]
+fn get_open_at_login(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_open_at_login(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    }
+    .map_err(|e| e.to_string())?;
+    manager.is_enabled().map_err(|e| e.to_string())
+}
 fn known_account(state: &AppState, runtime: &str, account: &str) -> Result<(), String> {
     if account.starts_with('-') || !matches!(runtime, "claude" | "codex" | "kiro" | "antigravity") {
         return Err("Unknown account".into());
@@ -380,6 +531,63 @@ fn tray_menu(app: &tauri::AppHandle, update: Option<&str>) -> tauri::Result<Menu
     menu.append(&MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?)?;
     Ok(menu)
 }
+
+pub(crate) fn settings_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    Menu::with_items(
+        app,
+        &[
+            &Submenu::with_items(
+                app,
+                "Agents Router",
+                true,
+                &[
+                    &PredefinedMenuItem::about(app, Some("About Agents Router"), None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::hide(app, None)?,
+                    &PredefinedMenuItem::hide_others(app, None)?,
+                    &PredefinedMenuItem::show_all(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &MenuItem::with_id(
+                        app,
+                        "quit",
+                        "Quit Agents Router",
+                        true,
+                        Some("CmdOrCtrl+Q"),
+                    )?,
+                ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &MenuItem::with_id(app, "settings-undo", "Undo", true, Some("CmdOrCtrl+Z"))?,
+                    &MenuItem::with_id(
+                        app,
+                        "settings-redo",
+                        "Redo",
+                        true,
+                        Some("CmdOrCtrl+Shift+Z"),
+                    )?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::cut(app, None)?,
+                    &PredefinedMenuItem::copy(app, None)?,
+                    &PredefinedMenuItem::paste(app, None)?,
+                    &PredefinedMenuItem::select_all(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "Window",
+                true,
+                &[
+                    &PredefinedMenuItem::minimize(app, None)?,
+                    &PredefinedMenuItem::close_window(app, None)?,
+                ],
+            )?,
+        ],
+    )
+}
 /// Step 10's updater calls this after its automatic check; never opens an alert.
 pub fn set_pending_update(app: &tauri::AppHandle, version: Option<String>) {
     let snapshot = {
@@ -400,9 +608,11 @@ pub fn set_pending_update(app: &tauri::AppHandle, version: Option<String>) {
 
 pub fn run() {
     let paths = Paths::discover().expect("valid app paths");
+    let client = AgtClient::new(paths.launcher.clone(), paths.explicit_home.clone())
+        .expect("absolute launcher");
+    let settings = SettingsCore::new(client.clone(), paths.home.clone());
     let state = AppState {
-        client: AgtClient::new(paths.launcher.clone(), paths.explicit_home.clone())
-            .expect("absolute launcher"),
+        client,
         terminal: TerminalLauncher::new(paths.launcher, paths.handoffs)
             .expect("absolute handoff path"),
         snapshot: Mutex::new(PopoverSnapshot {
@@ -411,28 +621,71 @@ pub fn run() {
         }),
         watcher: Mutex::new(None),
         quitting: AtomicBool::new(false),
+        settings_target: Mutex::new(serde_json::json!({"pane":"general"})),
     };
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             main_thread(app, |app, mtm| {
                 log("single-instance callback on main thread");
-                native::show(&app, mtm);
+                native::open_settings(&app, mtm, serde_json::json!({"pane":"general"}));
             });
         }))
         .plugin(tauri_nspanel::init())
         .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(settings::autostart_plugin())
         .manage(state)
+        .manage(settings)
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             refresh_usage,
             hide_popover,
             set_popover_height,
             open_settings,
+            get_settings_target,
+            show_setting_menu,
+            config_show,
+            config_set,
+            config_unset,
+            config_revert,
+            open_settings_file,
+            choose_workspace,
+            get_open_at_login,
+            set_open_at_login,
             login_account,
             check_account,
             check_for_updates,
             quit_app
         ])
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            id if id.starts_with("setting-history:") => {
+                let key = &id["setting-history:".len()..];
+                let _ = app.emit_to(
+                    "settings",
+                    "settings-history",
+                    serde_json::json!({"key":key}),
+                );
+            }
+            "settings-undo" | "settings-redo" => {
+                if app
+                    .get_webview_window("settings")
+                    .is_some_and(|w| w.is_visible().unwrap_or(false))
+                {
+                    let action = if event.id.as_ref() == "settings-undo" {
+                        "undo"
+                    } else {
+                        "redo"
+                    };
+                    let _ = app.emit_to(
+                        "settings",
+                        "settings-edit",
+                        serde_json::json!({"action":action}),
+                    );
+                }
+            }
+            "quit" => quit(app),
+            _ => (),
+        })
         .on_window_event(|window, event| {
             let app = window.app_handle();
             match event {
@@ -449,7 +702,9 @@ pub fn run() {
                     } else {
                         let _ = window.hide();
                         main_thread(app, |app, _mtm| {
+                            let _ = app.remove_menu();
                             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                            log("settings hidden activation=Accessory; webview retained");
                         });
                     }
                 }
@@ -560,7 +815,7 @@ fn debug_self_test(app: &tauri::AppHandle) {
         main_thread(&app, |_app, mtm| native::post_wake(mtm));
         tokio::time::sleep(Duration::from_secs(3)).await;
         main_thread(&app, |app, mtm| native::show(&app, mtm));
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
         // Let the first-show snap finish, then exercise a real DOM/frame resize.
         main_thread(&app, |app, _mtm| {
             if let Some(window) = app.get_webview_window("popover") {
@@ -586,6 +841,64 @@ fn debug_self_test(app: &tauri::AppHandle) {
             }
         });
         tokio::time::sleep(Duration::from_secs(2)).await;
+        main_thread(&app, |app, mtm| {
+            native::open_settings(
+                &app,
+                mtm,
+                serde_json::json!({"pane":"accounts","account":"work","runtime":"claude"}),
+            );
+            let edit = app
+                .menu()
+                .expect("native menu")
+                .items()
+                .expect("menu items")
+                .into_iter()
+                .find_map(|item| {
+                    item.as_submenu()
+                        .filter(|submenu| submenu.text().ok().as_deref() == Some("Edit"))
+                        .cloned()
+                })
+                .expect("native Edit menu");
+            assert!(edit.get("settings-undo").is_some());
+            assert!(edit.get("settings-redo").is_some());
+        });
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        main_thread(&app, |app, _mtm| {
+            if let Some(window) = app.get_webview_window("settings") {
+                let _ = window.eval_with_callback(
+                    "document.body.dataset.retained='yes'; JSON.stringify({pane:document.body.dataset.pane,rows:document.querySelectorAll('.setting-row').length})",
+                    |value| log(&format!("self-test settings-content={value}")),
+                );
+                let _ = window.close();
+            }
+        });
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        // Exercise the actual single-instance plugin callback with the same
+        // isolated debug environment. This never starts agt or a provider CLI.
+        let secondary =
+            tokio::process::Command::new(std::env::current_exe().expect("app executable"))
+                .arg("--self-test-secondary")
+                .kill_on_drop(true)
+                .status()
+                .await;
+        log(&format!(
+            "self-test second-launch-success={}",
+            secondary.is_ok_and(|s| s.success())
+        ));
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        main_thread(&app, |app, _mtm| {
+            if let Some(window) = app.get_webview_window("settings") {
+                log(&format!(
+                    "self-test settings-reopened-visible={}",
+                    window.is_visible().unwrap_or(false)
+                ));
+                let _ = window.eval_with_callback(
+                    "JSON.stringify({pane:document.body.dataset.pane,retained:document.body.dataset.retained})",
+                    |value| log(&format!("self-test settings-retained={value}")),
+                );
+            }
+        });
+        tokio::time::sleep(Duration::from_secs(1)).await;
         log("self-test complete; quitting");
         quit(&app);
     });

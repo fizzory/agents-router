@@ -22,6 +22,8 @@ if args[:1] == ["usage"] and "--json" in args:
     print((FIXTURES / name).read_text())
 elif args[:2] == ["accounts", "check"] and "--json" in args:
     print((FIXTURES / "accounts-check.json").read_text())
+elif args[:2] == ["config", "show"] and "--json" in args:
+    print((FIXTURES / "config-show.json").read_text())
 else:
     print("fake app agt: unsupported request", file=sys.stderr)
     sys.exit(2)

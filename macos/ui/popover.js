@@ -1,4 +1,5 @@
 import * as api from './tauri.js';
+import { attachTooltips } from './tooltip.js';
 import { popoverModel } from './logic/rows.js';
 import { createRow, updateRow, fitName, element } from './row-view.js';
 import { contentHeight, createHeightReporter, cssPanelMotion } from './logic/height.js';
@@ -147,31 +148,7 @@ menu.addEventListener('keydown', (event) => {
   if (event.key === 'Tab') closeMenu();
 });
 document.addEventListener('pointerdown', (event) => { if (!menu.contains(event.target) && !more.contains(event.target)) closeMenu(); });
-let tooltipTimer, tooltipTarget = null, neighbour = false;
-function hideTooltip() {
-  clearTimeout(tooltipTimer);
-  if (tooltipTarget) tooltipTarget.removeAttribute('aria-describedby');
-  tooltipTarget = null; tooltip.hidden = true; tooltip.classList.remove('visible');
-}
-function showTooltip(target, immediate) {
-  const warm = neighbour; hideTooltip(); tooltipTarget = target;
-  const show = () => {
-    tooltip.textContent = target.dataset.tooltip; tooltip.hidden = false;
-    const box = target.getBoundingClientRect(), size = tooltip.getBoundingClientRect();
-    tooltip.style.left = `${Math.max(6, Math.min(box.left, innerWidth - size.width - 6))}px`;
-    tooltip.style.top = `${box.top >= size.height + 6 ? box.top - size.height - 5 : Math.min(box.bottom + 5, innerHeight - size.height - 6)}px`;
-    target.setAttribute('aria-describedby', 'tooltip');
-    requestAnimationFrame(() => tooltip.classList.add('visible')); neighbour = true;
-  };
-  if (immediate || warm) show(); else tooltipTimer = setTimeout(show, motion('--tooltip-delay'));
-}
-document.addEventListener('pointerover', (event) => {
-  const target = event.target.closest('[data-tooltip]');
-  if (target && target !== tooltipTarget) showTooltip(target, false);
-  else if (!target) { hideTooltip(); neighbour = false; }
-});
-document.addEventListener('focusin', (event) => { const target = event.target.closest('[data-tooltip]'); if (target) showTooltip(target, true); });
-document.addEventListener('focusout', hideTooltip);
+const hideTooltip = attachTooltips(tooltip);
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
   event.preventDefault();

@@ -4,6 +4,8 @@ pub mod glyph;
 pub mod models;
 mod native;
 pub mod placement;
+pub mod roundtrip;
+pub mod settings;
 pub mod terminal;
 pub mod watcher;
 

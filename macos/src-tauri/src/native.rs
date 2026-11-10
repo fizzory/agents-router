@@ -353,15 +353,119 @@ fn apply_glyph(app: &tauri::AppHandle, glyph: Glyph) -> tauri::Result<()> {
     })
 }
 
-/// Step 5 fills this window and handles the target event; activation/close hooks are ready.
+/// Retain the webview across close/reopen and bring Settings ahead of other apps.
 pub fn open_settings(app: &tauri::AppHandle, mtm: MainThreadMarker, target: serde_json::Value) {
-    use tauri::Emitter;
+    use tauri::{Emitter, Manager};
     hide(app, mtm, "settings");
+    *app.state::<app::AppState>()
+        .settings_target
+        .lock()
+        .expect("settings target") = target.clone();
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    match app::settings_menu(app).and_then(|menu| app.set_menu(menu)) {
+        Ok(_) => (),
+        Err(error) => app::log(&format!("Settings menu failed: {error}")),
+    }
     if let Some(window) = app.get_webview_window("settings") {
         let _ = window.show();
+        let _ = window.unminimize();
         let _ = window.set_focus();
+        let _ = app.show();
         let _ = app.emit_to("settings", "settings-target", target);
     }
-    app::log("Settings hook: activation=Regular; target delivered (page is step 5)");
+    app::log("Settings shown activation=Regular; webview retained; target delivered");
+}
+
+/// Launch Services resolves the default editor. Send a line position without
+/// AppleScript or Automation permission; an unsuccessful open reveals in Finder.
+pub fn open_settings_file(
+    _mtm: MainThreadMarker,
+    path: std::path::PathBuf,
+    line: u64,
+    reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+) {
+    use objc2::{msg_send, ClassType};
+    use objc2_app_kit::{NSRunningApplication, NSWorkspaceOpenConfiguration};
+    use objc2_foundation::{NSAppleEventDescriptor, NSArray, NSBundle, NSError, NSURL};
+    let workspace = NSWorkspace::sharedWorkspace();
+    let file = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+    let Some(editor) = workspace.URLForApplicationToOpenURL(&file) else {
+        workspace.activateFileViewerSelectingURLs(&NSArray::from_slice(&[&*file]));
+        let _ = reply.send(Ok(()));
+        return;
+    };
+    let bundle_id = NSBundle::bundleWithURL(&editor)
+        .and_then(|b| b.bundleIdentifier())
+        .map(|id| id.to_string());
+    // VS Code's documented URL protocol preserves line selection in an already
+    // running instance. Other editors receive the conventional kpos open event.
+    let protocol = match bundle_id.as_deref() {
+        Some("com.microsoft.VSCode") => Some("vscode"),
+        Some("com.microsoft.VSCodeInsiders") => Some("vscode-insiders"),
+        _ => None,
+    };
+    let url = protocol
+        .and_then(|scheme| {
+            let encoded = tauri::Url::from_file_path(&path).ok()?;
+            NSURL::URLWithString(&NSString::from_str(&format!(
+                "{scheme}://file{}:{line}:1",
+                encoded.as_str().strip_prefix("file://")?
+            )))
+        })
+        .unwrap_or_else(|| file.clone());
+    let config = NSWorkspaceOpenConfiguration::new();
+    if protocol.is_none() {
+        let fourcc = |s: &[u8; 4]| u32::from_be_bytes(*s);
+        // The bindings gate these stable Foundation methods behind an optional
+        // CoreServices feature. Keep the existing locked dependency graph and
+        // use their exact Objective-C signatures here instead.
+        let event: Retained<NSAppleEventDescriptor> = unsafe {
+            msg_send![NSAppleEventDescriptor::class(),
+            appleEventWithEventClass: fourcc(b"aevt"), eventID: fourcc(b"odoc"),
+            targetDescriptor: None::<&NSAppleEventDescriptor>, returnID: -1_i16, transactionID: 0_i32]
+        };
+        let files = NSAppleEventDescriptor::listDescriptor();
+        files.insertDescriptor_atIndex(&NSAppleEventDescriptor::descriptorWithFileURL(&file), 1);
+        unsafe {
+            let _: () =
+                msg_send![&*event, setParamDescriptor: &*files, forKeyword: fourcc(b"----")];
+        }
+        // Metrowerks/Xcode SelectionRange: two int16 fields, four int32 fields.
+        // Explicit bytes avoid alignment/padding and native `long` size changes.
+        let mut position = Vec::with_capacity(20);
+        position.extend(0_i16.to_ne_bytes());
+        position.extend(((line.saturating_sub(1)).min(i16::MAX as u64) as i16).to_ne_bytes());
+        for value in [0_i32, 0, 0, 0] {
+            position.extend(value.to_ne_bytes());
+        }
+        // SAFETY: Foundation copies the 20 initialized bytes during this call.
+        let selection: Option<Retained<NSAppleEventDescriptor>> = unsafe {
+            msg_send![NSAppleEventDescriptor::class(),
+            descriptorWithDescriptorType: fourcc(b"TEXT"), bytes: position.as_ptr().cast::<std::ffi::c_void>(), length: position.len()]
+        };
+        if let Some(selection) = selection {
+            unsafe {
+                let _: () = msg_send![&*event, setParamDescriptor: &*selection, forKeyword: fourcc(b"kpos")];
+            }
+        }
+        config.setAppleEvent(Some(&event));
+    }
+    let reply = std::sync::Mutex::new(Some(reply));
+    let completion = block2::RcBlock::new(
+        move |_application: *mut NSRunningApplication, error: *mut NSError| {
+            if !error.is_null() {
+                NSWorkspace::sharedWorkspace()
+                    .activateFileViewerSelectingURLs(&NSArray::from_slice(&[&*file]));
+            }
+            if let Some(reply) = reply.lock().expect("editor reply").take() {
+                let _ = reply.send(Ok(()));
+            }
+        },
+    );
+    workspace.openURLs_withApplicationAtURL_configuration_completionHandler(
+        &NSArray::from_slice(&[&*url]),
+        &editor,
+        &config,
+        Some(&completion),
+    );
 }

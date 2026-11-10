@@ -306,6 +306,12 @@ pub fn interpret_exit(
             Ok(CommandOutcome::NeedsUserWords(error.error))
         }
         (Some(2), Snapshot::Error(error)) => Ok(CommandOutcome::Refused(error.error)),
+        // A broken TOML file still returns the schema and rows with its diagnostic.
+        (Some(2), Snapshot::Config(config))
+            if kind == CommandKind::ConfigShow && config.error.is_some() =>
+        {
+            Ok(CommandOutcome::Data(Box::new(Snapshot::Config(config))))
+        }
         (Some(0), Snapshot::Error(_)) | (Some(0), Snapshot::Choice(_)) => Err(
             ClientError::InvalidResponse("success exit carried a refusal".into()),
         ),
@@ -355,6 +361,19 @@ mod tests {
             ),
             Ok(CommandOutcome::Refused(_))
         ));
+        assert!(matches!(
+            interpret_exit(CommandKind::ConfigSet, Some(3), include_bytes!("../../../tests/fixtures/app/config-set-needs-user-words.json"), b""),
+            Ok(CommandOutcome::NeedsUserWords(error)) if error.message.contains("max_depth")
+        ));
+        let mut broken: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../../tests/fixtures/app/config-show.json"
+        ))
+        .unwrap();
+        broken["error"] = "/settings.toml:2: invalid TOML".into();
+        assert!(
+            matches!(interpret_exit(CommandKind::ConfigShow, Some(2), &serde_json::to_vec(&broken).unwrap(), b""),
+            Ok(CommandOutcome::Data(data)) if matches!(*data, Snapshot::Config(_)))
+        );
         assert!(interpret_exit(CommandKind::RolesConfig, Some(9), words, b"failed").is_err());
     }
 

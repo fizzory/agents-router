@@ -25,6 +25,11 @@
 .panel-show { animation: panel-in var(--panel-time) var(--ease-out) both; }
 .tooltip { transition: opacity var(--tooltip-time) var(--ease-out); }
 .app-menu:not([hidden]) { animation: number-in var(--hover-time) var(--ease-out) both; }
+.popup-menu { animation: number-in var(--hover-time) var(--ease-out) both; }
+.switch, .switch-input { transition: background-color var(--hover-time) var(--ease-out); }
+.switch-thumb, .switch-input::after { transition: transform var(--hover-time) var(--ease-out); }
+.setting-flash { animation: setting-flash var(--flash-time) var(--ease-out); }
+@keyframes setting-flash { from { background-color: color-mix(in srgb, AccentColor 28%, transparent); } to { background-color: transparent; } }
 @keyframes digit-roll { from { transform: translateY(0); } to { transform: translateY(-14px); } }
 @keyframes number-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes number-out { from { opacity: 1; } to { opacity: 0; } }
@@ -38,4 +43,5 @@ body[data-active="false"] *, body[data-active="false"] { animation: none !import
   .digit-strip { transform: translateY(-14px); }
   .panel-show { animation-name: number-in; }
   .refresh-busy, .inline-action[aria-busy="true"] .icon { opacity: .55; }
+  .switch-thumb, .switch-input::after { transition: none; }
 }

@@ -27,6 +27,7 @@ import tomllib
 import unittest
 
 import helpers  # noqa: F401 (isolate homes, CLIs and background services)
+from agents_router.config_cli import KEYS
 
 ROOT = Path(__file__).resolve().parents[1]
 TAURI = Path("macos/src-tauri")
@@ -183,6 +184,16 @@ def check_sources(root):
     if set(capabilities) != windows or not isinstance(enabled, list) or set(enabled) != windows:
         fail("capability", "enable exactly one explicit capability per window")
 
+    inventory = load_json(root / UI / "settings-inventory.json").get("settings", {})
+    if not isinstance(inventory, dict) or set(inventory) != set(KEYS):
+        fail("settings-inventory", "every config show --all key needs exactly one UI mapping")
+    else:
+        for name, key in KEYS.items():
+            expected = "command:" + key.changed_by if key.kind == "fixed" and key.changed_by else (
+                "read-only" if key.kind == "fixed" else "control:" + key.kind)
+            if inventory[name] != expected:
+                fail("settings-inventory", f"{name}: expected {expected}")
+
     for path in sorted((root / UI).rglob("*")):
         if path.suffix not in (".css", ".js", ".html"):
             continue
@@ -299,6 +310,22 @@ class AppSourceTests(unittest.TestCase):
             cap["permissions"] = ["core:window:allow-close"]
             self.write(root, path, json.dumps(cap))
         self.reject("capability", mutate)
+
+    def test_settings_inventory_matches_producer(self):
+        from generate_settings_inventory import inventory_data
+        self.assertEqual(json.loads((ROOT / UI / "settings-inventory.json").read_text()), inventory_data())
+
+    def test_rejects_missing_key_or_wrong_control_in_settings_inventory(self):
+        def mutate(root, remove):
+            path = UI / "settings-inventory.json"
+            inventory = json.loads((root / path).read_text())
+            if remove:
+                inventory["settings"].pop("max_jobs")
+            else:
+                inventory["settings"]["max_jobs"] = "control:bool"
+            self.write(root, path, json.dumps(inventory))
+        self.reject("settings-inventory", lambda root: mutate(root, True))
+        self.reject("settings-inventory", lambda root: mutate(root, False))
 
     def test_rejects_remote_or_disabled_csp(self):
         for csp in (None, "default-src 'self'; connect-src https:",

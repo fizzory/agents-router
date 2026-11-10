@@ -1,4 +1,31 @@
 {
-  "popover": ["allow-get-snapshot", "allow-refresh-usage", "allow-hide-popover", "allow-set-popover-height", "allow-open-settings", "allow-login-account", "allow-check-account", "allow-check-for-updates", "allow-quit-app", "core:event:allow-listen", "core:event:allow-unlisten"],
-  "settings": []
+  "popover": [
+    "allow-get-snapshot",
+    "allow-refresh-usage",
+    "allow-hide-popover",
+    "allow-set-popover-height",
+    "allow-open-settings",
+    "allow-login-account",
+    "allow-check-account",
+    "allow-check-for-updates",
+    "allow-quit-app",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ],
+  "settings": [
+    "allow-get-snapshot",
+    "allow-get-settings-target",
+    "allow-show-setting-menu",
+    "allow-config-show",
+    "allow-config-set",
+    "allow-config-unset",
+    "allow-config-revert",
+    "allow-open-settings-file",
+    "allow-choose-workspace",
+    "allow-get-open-at-login",
+    "allow-set-open-at-login",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging"
+  ]
 }

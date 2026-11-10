@@ -95,8 +95,23 @@ def fixture_texts() -> dict[str, str]:
             with patch.dict(os.environ, env), patch("time.time", return_value=NOW), \
                     patch("agents_router.hosts.detect_host", return_value="unknown"), patch("sys.stdin.isatty", return_value=False):
                 capture("config-show", ["config", "show"])
+                # General edge states, with distinct User/Workspace file-only
+                # values. Capture the producer rather than editing golden JSON.
+                user = agt / "settings.toml"
+                original = user.read_text()
+                user.write_text(original + '\n[kiro]\nmax_jobs_by_room = [[0, 2]]\n', encoding="utf-8")
+                workspace_file = project / ".agt" / "settings.toml"
+                original_workspace = workspace_file.read_text()
+                workspace_file.write_text(original_workspace + '[codex]\nmax_jobs_by_room = [[0, 1]]\n', encoding="utf-8")
+                capture("config-show-levels", ["config", "show", "--all"])
+                user.write_text('max_jobs = 6\ninvalid = ?\n', encoding="utf-8")
+                capture("config-show-broken", ["config", "show", "--all"], 2)
+                user.write_text(original, encoding="utf-8")
+                workspace_file.write_text(original_workspace, encoding="utf-8")
                 capture("config-set", ["config", "set", "max_depth", "2", "--user"])
                 entry = next(synclog.entries())["id"]
+                with patch("agents_router.hosts.detect_host", return_value="claude"):
+                    capture("config-set-needs-user-words", ["config", "set", "max_depth", "3", "--user"], 3)
                 capture("config-set-error", ["config", "set", "codex.usage_ceiling", "wrong", "--user"], 2)
                 capture("config-unset-absent", ["config", "unset", "kiro.default_model", "--user"])
                 capture("accounts-list", ["accounts", "list"])

@@ -13,3 +13,22 @@ export const quitApp = () => invoke("quit_app");
 export const onUsageUpdated = (handler) => listen("usage-updated", ({ payload }) => handler(payload));
 export const onPopoverStatus = (handler) => listen("popover-status", ({ payload }) => handler(payload));
 export const onUpdateRequested = (handler) => listen("update-requested", handler);
+
+// Settings capability only. Scope is {workspace: absolute folder or null}; writes
+// additionally require {key, level, revision, userSaid?}, and set takes {value}.
+export const configShow = (workspace = null) => invoke("config_show", { workspace });
+export const configSet = ({ key, value, level, workspace = null, revision, userSaid = null }) =>
+  invoke("config_set", { key, value, level, workspace, revision, userSaid });
+export const configUnset = ({ key, level, workspace = null, revision, userSaid = null }) =>
+  invoke("config_unset", { key, level, workspace, revision, userSaid });
+export const configRevert = ({ entry, workspace = null, userSaid = null }) => invoke("config_revert", { entry, workspace, userSaid });
+export const openSettingsFile = (file, line = 1) => invoke("open_settings_file", { file, line });
+export const chooseWorkspace = () => invoke("choose_workspace");
+export const getOpenAtLogin = () => invoke("get_open_at_login");
+export const setOpenAtLogin = (enabled) => invoke("set_open_at_login", { enabled });
+export const getSettingsTarget = () => invoke("get_settings_target");
+export const showSettingMenu = (key) => invoke("show_setting_menu", { key });
+export const onSettingsHistory = (handler) => listen("settings-history", ({ payload }) => handler(payload));
+export const onSettingsTarget = (handler) => listen("settings-target", ({ payload }) => handler(payload));
+export const onSettingsEdit = (handler) => listen("settings-edit", ({ payload }) => handler(payload));
+export const onSettingsStatus = (handler) => listen("settings-status", ({ payload }) => handler(payload));
