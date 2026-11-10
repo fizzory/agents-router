@@ -129,7 +129,7 @@ def _load() -> settings.Settings | None:
     try:
         saved = settings.load()
     except settings.SettingsError as exc:
-        synclog.refused(str(exc), None)
+        synclog.refused(exc, None)
         try:
             text = good_settings_path().read_text(encoding="utf-8")
             return settings.parse(tomllib.loads(text).get("share", {}), good_settings_path())
@@ -197,6 +197,19 @@ def stale(saved: settings.Settings, included: list[providers.Provider] | None = 
 
 
 def background_sync(trigger: str, *, if_stale: bool = True) -> tuple[str, list[str]]:
+    """Take settings.lock before apply.lock, without waiting in a hook or watcher."""
+    from agents_router import settings_write
+
+    if apply.in_worker():
+        return "inside an agt worker", []
+    try:
+        with settings_write.locked(timeout=0):
+            return _background_sync(trigger, if_stale=if_stale)
+    except TimeoutError:
+        return "another run had the settings", []
+
+
+def _background_sync(trigger: str, *, if_stale: bool = True) -> tuple[str, list[str]]:
     """A sync of your user folders and every listed repo that never waits for a lock. Returns what happened and what it wrote."""
 
     if apply.in_worker():

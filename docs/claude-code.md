@@ -62,16 +62,21 @@ agt accounts add max-2
 
 This creates `~/.agents-router/homes/claude/max-2`, links in your shared setup, and opens Claude Code's own login. Sign in with the account that profile should use. If you belong to several organizations, switch to the right one in the browser before you click Authorize; the login uses whichever organization is active there.
 
+`agt accounts add max-2 --check --json` validates the name and folder without creating anything or checking auth. A real add validates again. After login, agt checks the measured login state and caches it; exit 0 from the login alone is not proof of authentication. `agt accounts login primary` opens the primary account's login too.
+
 The tool never reads or copies the login. Each account folder keeps its own credentials, state and session history.
 
 ## 4. Check
 
 ```bash
 agt accounts
+agt accounts check primary --json
 agt doctor --live
 ```
 
 `agt accounts` shows each account's login state, plan, last known usage, cooldown and health without making model calls. `doctor --live` runs one tiny job per account (on Haiku for Claude) and prints what each one loaded (model, permission mode, MCP servers, plugins, skills, agents), then lists any differences between accounts. It can check an unhealthy account before its rest ends and records the outcome; a success clears the account and tested-model health. Account pins, usage limits, access and single-trial rules still apply.
+
+`accounts check [name] --json` explicitly refreshes cached login state without quota, with ten seconds for its probes. `agt usage --json` only reads that result. `accounts enable|disable max-2 --json` switch registered extra accounts under the settings lock, with a backup and log entry. The primary account and discovered profiles are refused; use `ignore` to leave a discovered profile out. See [account contracts](configuration.md#account-checks-and-switches).
 
 ## 5. Use it
 

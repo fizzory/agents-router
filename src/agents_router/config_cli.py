@@ -1,4 +1,4 @@
-"""`agt config show|set|unset`: see and change agt's settings, one key at a time.
+"""`agt config show|set|unset|revert`: see and change agt's settings, one key at a time.
 
 `show` lists the settings set in this workspace (`--all`: every one) and
 where each value comes from: an environment variable, a file (user,
@@ -25,6 +25,7 @@ import argparse
 from dataclasses import dataclass
 import difflib
 import json
+import math
 import os
 from pathlib import Path
 import shlex
@@ -215,6 +216,8 @@ def _parse(key: Key, text: str) -> Any:
             value = int(word) if key.kind == "int" else float(word)
         except ValueError:
             raise ValueError(f"{key.name} takes a number, not {text!r}") from None
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(f"{key.name} takes a finite number, not {text!r}")
         if key.minimum is not None and value < key.minimum:
             extra = "; `agt config unset` it for no cap" if key.cap else ""
             raise ValueError(f"{key.name} must be at least {key.minimum:g}{extra}")
@@ -260,12 +263,18 @@ def _looser(key: Key, old: Any, new: Any) -> bool:
 # Files ------------------------------------------------------------------------
 
 
+def accepted_levels(key: Key) -> tuple[str, ...]:
+    """The same scope rule for the JSON schema, source selection and writes."""
+
+    return ("user",) if key.user_only else ("workspace", "local") if key.personal else levels.LEVELS
+
+
 def _source(key: Key, layers: list[levels.Layer]) -> tuple[str, levels.Layer | None]:
     """Where the value in effect comes from: a level and its file, or the default (or an environment variable)."""
 
     found: tuple[str, levels.Layer | None] = ("default", None)
     for layer in layers:
-        if (layer.level == "user") == key.personal and (key.user_only or key.personal):
+        if layer.level not in accepted_levels(key):
             continue  # machine-wide keys count only in your user file, account picks only in a workspace's
         table = layer.data.get(key.table, {}) if key.table else layer.data
         if isinstance(table, dict) and key.field in table:
@@ -305,7 +314,7 @@ def _level(args: argparse.Namespace, key: Key, workspace: levels.Workspace | Non
     machine = key.user_only
     if named:
         level = named[0]
-        if level != "user" and machine:
+        if level not in accepted_levels(key) and machine:
             what = "agt's share settings apply to your user-level folders" if key.table == "share" else "it's machine-wide"
             raise ValueError(f"{key.name} goes in your user settings only ({config.user_settings_path()}): {what}")
         if level != "user" and workspace is None:
@@ -318,7 +327,7 @@ def _level(args: argparse.Namespace, key: Key, workspace: levels.Workspace | Non
         level = "user"
     else:
         level = "local" if key.personal else "workspace"
-    if key.personal and level == "user":
+    if level not in accepted_levels(key):
         raise ValueError(f"{key.name} picks accounts for one workspace; run it in one, or turn an account off "
                          f"everywhere with `agt accounts disable <name>`")
     return level
@@ -349,18 +358,27 @@ def _change(args: argparse.Namespace, unset: bool) -> int:
     layers = levels.layers(user, workspace)
     level = _level(args, key, workspace, layers, unset)
     location = _files(workspace)[level]
-    try:
-        old_text = location.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        old_text = ""
+    own = next((layer for layer in layers if layer.path == location), None)
+    old_revision = own.revision if own else levels.revision(None)
+    old_text = own.text if own else ""
+    # A worktree may read its main checkout's local file, but edits belong to this checkout.
+    expected = getattr(args, "if_unchanged", None)
+    if expected is not None and expected != old_revision:
+        raise ValueError(f"{location} changed since that change (agt log shows what changed); read it again before writing")
     level_old = levels.read_value(old_text, key.table, key.field)
+    previous = {"level": level, "present": level_old is not levels.MISSING, "value": _plain(level_old)}
     if unset:
         if level_old is levels.MISSING:
-            print(f"{key.name} isn't set in {location} ({level}); nothing to unset.")
+            if args.json:
+                print(json.dumps({"ok": True, "key": key.name, "file": str(location), "level": level,
+                                  "changed": False, "previous": previous, "revision": old_revision}, indent=2))
+            else:
+                print(f"{key.name} isn't set in {location} ({level}); nothing to unset.")
             return 0
         new_text = levels.drop_line(old_text, key.table, key.field, location)
     else:
-        new_text = levels.set_line(old_text, key.table, key.field, codex_toml.render_value(_parse(key, args.value)), location)
+        value = args.restore_value if hasattr(args, "restore_value") else _parse(key, args.value)
+        new_text = levels.set_line(old_text, key.table, key.field, codex_toml.render_value(value), location)
     after = levels.layers(user, workspace, override={location: new_text})
     upto = levels.LEVELS.index(level)
     before_cfg, before_share = _effective(layers)
@@ -398,9 +416,12 @@ def _change(args: argparse.Namespace, unset: bool) -> int:
     limited = _limits(key, after_cfg, new, after)
     synclog.append({"type": "setting", **synclog.where(workspace), "file": str(location), "level": level,
                     "key": key.name, "old": _plain(level_old), "new": None if unset else _plain(levels.read_value(new_text, key.table, key.field)),
+                    "old_present": previous["present"], "new_present": not unset,
+                    "revision": levels.revision(new_text.encode("utf-8")),
                     "command": command, **who})
     triggers = _refresh_share(key)
-    report = {"key": key.name, "old": old, "new": new, "file": str(location), "level": level, "applies": key.applies,
+    report = {"ok": True, "key": key.name, "old": old, "new": new, "file": str(location), "level": level, "applies": key.applies,
+              "changed": True, "previous": previous, "revision": levels.revision(new_text.encode("utf-8")),
               "effective": new, "overridden_by": overridden, "still_limited_by": limited, "undo": undo,
               "backup": str(backup) if backup else None, "excluded_in": excluded, "triggers": triggers}
     if args.json:
@@ -475,12 +496,17 @@ def _show(args: argparse.Namespace) -> int:
         rows.append({"key": key.name, "value": value, "shown": _text(key, value), "source": level,
                      "file": str(layer.path) if layer else None, "line": line, "description": key.description,
                      "needs_user_words": bool(key.guard), "user_only": key.user_only,
-                     "changed_by": key.changed_by or None, "applies": key.applies})
-    shown_files = [{"level": level, "file": str(path), "exists": path.exists()} for level, path in files.items()]
+                     "changed_by": key.changed_by or None, "applies": key.applies,
+                     "kind": key.kind, "choices": list(key.choices), "minimum": key.minimum, "cap": key.cap,
+                     "editable": key.kind != "fixed", "accepted_levels": list(accepted_levels(key)),
+                     "still_limited_by": _limits(key, loaded, value, layers),
+                     "levels": {name: _level_value(key, name, path, layers) for name, path in files.items()}})
+    shown_files = [{"level": name, "file": str(path), "exists": any(layer.level == name and layer.path == path for layer in layers)}
+                   for name, path in files.items()]
     if workspace is not None and not workspace.local.exists() and workspace.local_fallback() is not None:
         shown_files[-1].update(read_from=str(workspace.local_fallback()))
     if args.json:
-        print(json.dumps({"workspace": str(workspace.root) if workspace else None, "files": shown_files,
+        print(json.dumps({"schema_version": 1, "workspace": str(workspace.root) if workspace else None, "files": shown_files,
                           "error": error, "notes": notes, "settings": rows}, indent=2, ensure_ascii=False, default=str))
         return 2 if error else 0
     explicit = [row for row in rows if row["source"] != "default"]
@@ -515,6 +541,16 @@ def _show(args: argparse.Namespace) -> int:
         lines += ["", *([ui.warn("Note:"), " ", *ui.inline_tilde(note)] for note in notes)]
     ui.out(*lines)
     return 2 if error else 0
+
+
+def _level_value(key: Key, name: str, path: Path, layers: list[levels.Layer]) -> dict[str, Any]:
+    layer = next((layer for layer in layers if layer.level == name), None)
+    table = (layer.data.get(key.table, {}) if key.table else layer.data) if layer else {}
+    value = table.get(key.field, levels.MISSING) if isinstance(table, dict) else levels.MISSING
+    return {"present": value is not levels.MISSING, "value": _plain(value),
+            "file": str(layer.path if layer else path),
+            "line": levels.line_of(layer.text, key.table, key.field) if layer else None,
+            "revision": layer.revision if layer else levels.revision(None)}
 
 
 def _where(row: dict[str, Any]) -> str:
@@ -612,7 +648,7 @@ def _picked(count: int) -> str:
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
-    parser = sub.add_parser("config", help="See and change agt's settings (show, set, unset).",
+    parser = sub.add_parser("config", help="See and change agt's settings (show, set, unset, revert).",
                             description=__doc__.split("\n\n", 1)[0])
     actions = parser.add_subparsers(dest="config_action", required=True)
     show = actions.add_parser("show", help="The settings set here, with where each comes from; --all lists every one.")
@@ -629,10 +665,48 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         action.add_argument("--user-said", metavar="WORDS",
                             help="From an agent: the user's own words, for a change that raises a limit or loosens safety.")
         action.add_argument("--json", action="store_true")
+        action.add_argument("--if-unchanged", metavar="REVISION", help="Write only if this file still has the revision returned by show/set/unset.")
+    revert = actions.add_parser("revert", help="Restore one setting from an agt log entry, only if its value still matches.")
+    revert.add_argument("entry", metavar="YYYY-MM:LINE", help="The entry id from agt log --json.")
+    revert.add_argument("--user-said", metavar="WORDS", help="The user's words, for a change that raises a limit or loosens safety.")
+    revert.add_argument("--json", action="store_true")
+
+
+def _revert(args: argparse.Namespace) -> int:
+    entry = synclog.get_entry(args.entry)
+    key = _key(entry.get("key", ""))
+    args.key = key.name
+    if entry.get("type") != "setting" or entry.get("level") not in accepted_levels(key):
+        raise ValueError("that log entry isn't a setting agt config can restore")
+    workspace = levels.find_workspace()
+    level = entry["level"]
+    location = _files(workspace).get(level)
+    if location is None or str(location) != entry.get("file"):
+        raise ValueError("run this in the workspace that owns that log entry")
+    layer = levels.read(level, location)
+    current = levels.read_value(layer.text, key.table, key.field) if layer else levels.MISSING
+    present = entry.get("new_present", entry.get("new") is not None)
+    if (current is not levels.MISSING) != present or (present and current != entry.get("new")):
+        raise ValueError(f"{key.name} changed since that log entry; read it again before restoring")
+    for name in levels.LEVELS:
+        setattr(args, name, name == level)
+    args.if_unchanged = layer.revision if layer else levels.revision(None)
+    old_present = entry.get("old_present", entry.get("old") is not None)
+    value = entry.get("old")
+    args.restore_value = value
+    # For the human command in the log; restoration writes the exact old value, including empty lists.
+    args.value = ",".join(str(item) for item in value) if isinstance(value, list) else _text(key, value)
+    return _change(args, unset=not old_present)
 
 
 def command(args: argparse.Namespace) -> int:
     if args.config_action == "show":
         return _show(args)
-    with settings_write.locked():  # re-read and write under one lock, so two writers never interleave
-        return _change(args, unset=args.config_action == "unset")
+    try:
+        with settings_write.locked():  # re-read and write under one lock, so two writers never interleave
+            return _revert(args) if args.config_action == "revert" else _change(args, unset=args.config_action == "unset")
+    except (ValueError, RuntimeError, OSError) as exc:
+        if not args.json:
+            raise
+        print(json.dumps({"ok": False, "error": {"key": getattr(args, "key", None), "message": str(exc)}}, indent=2))
+        return 2

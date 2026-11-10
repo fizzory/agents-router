@@ -637,18 +637,18 @@ def _checked(layer: levels.Layer, data: dict[str, Any]) -> None:
     for name in RUNTIMES:
         table = data.get(name, {})
         if not isinstance(table, dict):
-            raise levels.SettingsError(f"{levels.where(layer, None, name)}: {name} must be a [{name}] table")
+            raise levels.error(layer, None, name, f"{name} must be a [{name}] table")
         try:
             _runtime_from(name, table)
         except (TypeError, ValueError) as exc:
             culprit = next((key for key in table if _fails(lambda key=key: _runtime_from(name, {key: table[key]}))), None)
-            raise levels.SettingsError(f"{levels.where(layer, name, culprit)}: {exc}") from None
+            raise levels.error(layer, name, culprit, str(exc)) from None
     top = {key: data[key] for key in TOP_KEYS if key in data}
     try:
         _top_from(top)
     except (TypeError, ValueError) as exc:
         culprit = next((key for key in top if _fails(lambda key=key: _top_from({key: top[key]}))), None)
-        raise levels.SettingsError(f"{levels.where(layer, None, culprit)}: {culprit}: {exc}") from None
+        raise levels.error(layer, None, culprit, f"{culprit}: {exc}") from None
 
 
 def _note_legacy(notes: list[str]) -> None:
@@ -663,7 +663,7 @@ def _note_legacy(notes: list[str]) -> None:
         print(f"agt: {note}", file=sys.stderr)
 
 
-def load_config(path: Path | None = None, cwd: Path | str | None = None) -> Config:
+def load_config(path: Path | None = None, cwd: Path | str | None = None, *, cached_only: bool = False) -> Config:
     """The settings in effect in `cwd`'s workspace (the current folder by default).
 
     The user, workspace and local files are merged key by key, later levels
@@ -678,7 +678,7 @@ def load_config(path: Path | None = None, cwd: Path | str | None = None) -> Conf
         found = [layer for layer in [levels.read("user", path)] if layer]
     else:
         found = levels.layers(user_settings_path(), levels.find_workspace(cwd))
-    config = from_layers(found, notes)
+    config = from_layers(found, notes, cached_only=cached_only)
     set_session(config, session_folder())
     return config
 
@@ -719,17 +719,16 @@ def subagents_from_layers(found: list[levels.Layer]) -> SubagentsConfig:
     for layer in found:
         table = layer.data.get("subagents", {})
         if not isinstance(table, dict):
-            raise levels.SettingsError(f"{levels.where(layer, None, 'subagents')}: subagents must be a [subagents] table")
+            raise levels.error(layer, None, "subagents", "subagents must be a [subagents] table")
         if "prefer_roles" in table:
             value = table["prefer_roles"]
             if not isinstance(value, bool):
-                raise levels.SettingsError(f"{levels.where(layer, 'subagents', 'prefer_roles')}: "
-                                           "[subagents] prefer_roles must be true or false")
+                raise levels.error(layer, "subagents", "prefer_roles", "[subagents] prefer_roles must be true or false")
             settings.prefer_roles = value
     return settings
 
 
-def from_layers(found: list[levels.Layer], notes: list[str] | None = None) -> Config:
+def from_layers(found: list[levels.Layer], notes: list[str] | None = None, *, cached_only: bool = False) -> Config:
     """The settings these files give, lowest level first (see load_config)."""
 
     notes = [] if notes is None else notes
@@ -754,6 +753,9 @@ def from_layers(found: list[levels.Layer], notes: list[str] | None = None) -> Co
         for name in RUNTIMES:
             tables[name].update(data.get(name) or {})
     runtimes = {name: _runtime_from(name, tables[name]) for name in RUNTIMES}
+    if cached_only:
+        for runtime in runtimes.values():
+            runtime._found = runtime._discover(cached_only=True) if runtime.runtime == "claude" else []
     for name, (layer, chosen) in picks.items():
         known = {"primary", *(account.name for account in runtimes[name].accounts)}
         known |= {account.name for account in runtimes[name].found_accounts()} if any(

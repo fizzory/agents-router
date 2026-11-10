@@ -21,6 +21,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 
 REPO = "Watcharagorn/agents-router"
 PLUGIN_ID = "agents-router@agents-router"
@@ -48,6 +49,14 @@ def main():
     if argv[:1] == ["--version"]:
         print(f"fake-{kind} 1.0")
         return 0
+    if ((kind == "claude" and argv[:2] == ["auth", "login"])
+            or (kind == "codex" and argv[:1] == ["login"] and argv[1:2] != ["status"])):
+        if not os.environ.get("FAKE_HOST_LOGIN_LEAVES_LOGGED_OUT"):
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "logged_in").touch()
+        return 0
+    if argv[:2] in (["auth", "status"], ["login", "status"]) or argv[:1] in (["whoami"], ["models"]):
+        time.sleep(float(os.environ.get("FAKE_HOST_AUTH_DELAY", "0")))
     if kind == "claude" and argv[:2] == ["auth", "status"]:
         print(json.dumps({"loggedIn": (folder / "logged_in").exists(), "authMethod": "claude.ai"}))
         return 0
@@ -63,6 +72,12 @@ def main():
             return 1
         print(json.dumps({"accountType": "BuilderId"}))
         return 0
+    if kind == "agy" and argv == ["models"]:
+        if (folder / "logged_in").exists():
+            print("gemini-pro Gemini Pro")
+            return 0
+        print("You are not logged into Antigravity", file=sys.stderr)
+        return 1
     if kind == "kiro" and argv == ["chat", "--help"]:
         print("Usage: kiro-cli chat [OPTIONS] [INPUT]\n\nOptions:")
         print("      --v2                      Launch the V2 agent")

@@ -1,0 +1,7 @@
+{
+  "ok": false,
+  "error": {
+    "key": "codex.usage_ceiling",
+    "message": "codex.usage_ceiling takes a number, not 'wrong'"
+  }
+}

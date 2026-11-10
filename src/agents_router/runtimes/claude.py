@@ -338,7 +338,7 @@ class ClaudeRuntime:
         candidates += sorted((path for path in bundles if Path(path).is_file()), key=_version_key, reverse=True)
         return [candidates[0]] if candidates else None
 
-    def _run_quiet(self, config: RuntimeConfig, args: list[str], env: dict[str, str] | None = None) -> tuple[int, str]:
+    def _run_quiet(self, config: RuntimeConfig, args: list[str], env: dict[str, str] | None = None, *, timeout: float = 60) -> tuple[int, str]:
         command = self.find_binary(config)
         if not command:
             return 127, "claude binary not found"
@@ -349,7 +349,7 @@ class ClaudeRuntime:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=60,
+                timeout=timeout,
                 env=env,
                 stdin=subprocess.DEVNULL,
                 **no_window_kwargs(),
@@ -372,10 +372,10 @@ class ClaudeRuntime:
             env["CLAUDE_CONFIG_DIR"] = str(account.home)
         return env
 
-    def auth_status(self, config: RuntimeConfig, account: Account) -> dict[str, Any]:
+    def auth_status(self, config: RuntimeConfig, account: Account, *, timeout: float = 60) -> dict[str, Any]:
         """`claude auth status --json` for one account. Makes no model request."""
 
-        code, output = self._run_quiet(config, ["auth", "status", "--json"], env=self.account_env(config, account))
+        code, output = self._run_quiet(config, ["auth", "status", "--json"], env=self.account_env(config, account), timeout=timeout)
         try:
             data = json.loads(output[output.index("{"):])
         except ValueError:

@@ -49,8 +49,8 @@ ROOT = {
         ]),
         ("Accounts and settings", [
             ("usage", "Show cached usage windows and account availability; --refresh rescans Codex"),
-            ("accounts", "List, add, log in, sync, reset or remove accounts"),
-            ("config", "See and change agt's settings (show, set, unset)"),
+            ("accounts", "List, check, add, log in, enable, disable, sync, reset or remove accounts"),
+            ("config", "See and change agt's settings (show, set, unset, revert)"),
             ("roles", "See and change roles: which providers each role uses (show, propose, config)"),
             ("rules", "Show, install or remove the optional delegation rules"),
             ("log", "What agt changed and why, newest first"),
@@ -88,6 +88,7 @@ SHARE = {
         ]),
         ("See where things stand", [
             ("status", "What's in sync, what differs and what waits for you; writes nothing"),
+            ("list", "Read-only item and CLI cells with editability; --json exits 0"),
             ("plugins", "Plugins another CLI could install; plugins apply installs the ones you pick"),
             ("settings", "Every share setting, where it comes from and the command that changes it"),
         ]),

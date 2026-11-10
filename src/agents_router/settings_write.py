@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import threading
 import time
 from typing import Any, Iterator
 
@@ -20,6 +21,7 @@ from agents_router import config, fsutil, hosts, levels
 from agents_router.share import gitexclude
 
 NEEDS_WORDS = 3
+_lock_state = threading.local()
 
 
 def agent() -> bool:
@@ -60,17 +62,30 @@ def backup(location: Path, level: str) -> Path | None:
         return None
     folder = config.state_dir() / "backups" / "settings"
     fsutil.make_private_dir(folder)
-    target = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}-{level}.toml"
+    target = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}-{time.time_ns()}-{level}.toml"
     shutil.copy2(location, target)
     return target
 
 
 @contextlib.contextmanager
-def locked() -> Iterator[None]:
-    """One settings writer at a time; re-read the file inside the block."""
+def locked(*, timeout: float = 30.0) -> Iterator[None]:
+    """One settings writer at a time; re-read inside the block. Nesting on this thread is safe.
 
-    with fsutil.file_lock(config.state_dir() / "locks" / "settings.lock", timeout=30.0):
+    Sharing always takes this lock BEFORE share.apply.lock, including background
+    syncs that may save renamed picks. Never acquire settings.lock under apply.lock.
+    """
+
+    key = (os.getpid(), str(config.state_dir() / "locks" / "settings.lock"))
+    if getattr(_lock_state, "key", None) == key:
         yield
+        return
+    with fsutil.file_lock(Path(key[1]), timeout=timeout):
+        previous = getattr(_lock_state, "key", None)
+        _lock_state.key = key
+        try:
+            yield
+        finally:
+            _lock_state.key = previous
 
 
 def exclude_local(location: Path) -> str | None:

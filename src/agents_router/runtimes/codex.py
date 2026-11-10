@@ -572,14 +572,14 @@ class CodexRuntime:
     def _auth_args(self, account: Account) -> list[str]:
         return [] if account.is_primary else ["-c", FILE_AUTH]
 
-    def _run_quiet(self, config: RuntimeConfig, args: list[str], env: dict[str, str] | None = None) -> tuple[int, str]:
+    def _run_quiet(self, config: RuntimeConfig, args: list[str], env: dict[str, str] | None = None, *, timeout: float = 60) -> tuple[int, str]:
         command = self.find_binary(config)
         if not command:
             return 127, "codex binary not found"
         try:
             completed = subprocess.run(
                 [*command, *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=60, env=env, stdin=subprocess.DEVNULL, **no_window_kwargs(),
+                timeout=timeout, env=env, stdin=subprocess.DEVNULL, **no_window_kwargs(),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return 1, f"{type(exc).__name__}: {exc}"
@@ -589,10 +589,10 @@ class CodexRuntime:
         code, output = self._run_quiet(config, ["--version"], env=clean_environment())
         return output.strip().splitlines()[0] if code == 0 and output.strip() else None
 
-    def auth_status(self, config: RuntimeConfig, account: Account) -> dict[str, Any]:
+    def auth_status(self, config: RuntimeConfig, account: Account, *, timeout: float = 60) -> dict[str, Any]:
         """`codex login status` for one account. Makes no model request."""
 
-        code, output = self._run_quiet(config, ["login", "status", *self._auth_args(account)], env=self.account_env(config, account))
+        code, output = self._run_quiet(config, ["login", "status", *self._auth_args(account)], env=self.account_env(config, account), timeout=timeout)
         text = output.strip()
         logged_in = code == 0 and text.lower().startswith("logged in")
         method = None

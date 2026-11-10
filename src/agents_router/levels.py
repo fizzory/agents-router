@@ -22,6 +22,7 @@ checkout's, so your account picks follow you.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -37,6 +38,17 @@ HEADER_RE = re.compile(r"^\s*\[\[?\s*([A-Za-z0-9_.\-\"' ]+?)\s*\]\]?\s*(?:#.*)?$
 
 class SettingsError(ValueError):
     """A settings file can't be used; the message names the file, and the line when agt can tell."""
+
+    def __init__(self, message: str, *, file: Path | str | None = None, line: int | None = None):
+        super().__init__(message)
+        self.file = str(file) if file is not None else None
+        self.line = line
+
+
+def revision(raw: bytes | None) -> str:
+    """An opaque revision of the exact bytes read; an absent file differs from an empty one."""
+
+    return "missing" if raw is None else hashlib.sha256(raw).hexdigest()
 
 
 @dataclass
@@ -79,6 +91,11 @@ class Layer:
     path: Path
     text: str
     data: dict[str, Any]
+    raw: bytes | None = None
+
+    @property
+    def revision(self) -> str:
+        return revision(self.raw if self.raw is not None else self.text.encode("utf-8"))
 
 
 def _main_checkout(checkout: Path) -> Path | None:
@@ -115,21 +132,24 @@ def find_workspace(cwd: Path | str | None = None) -> Workspace | None:
     return Workspace(root, checkout, _main_checkout(checkout) if checkout is not None else None)
 
 
-def parse(level: str, path: Path, text: str) -> Layer:
+def parse(level: str, path: Path, text: str, raw: bytes | None = None) -> Layer:
     try:
-        return Layer(level, path, text, tomllib.loads(text))
+        return Layer(level, path, text, tomllib.loads(text), raw)
     except tomllib.TOMLDecodeError as exc:
-        raise SettingsError(f"{path}: {exc}") from None
+        raise SettingsError(f"{path}: {exc}", file=path, line=getattr(exc, "lineno", None)) from None
 
 
 def read(level: str, path: Path) -> Layer | None:
     try:
-        text = path.read_text(encoding="utf-8")
+        raw = path.read_bytes()
     except FileNotFoundError:
         return None
     except OSError as exc:
-        raise SettingsError(f"{path} can't be read ({exc})") from None
-    return parse(level, path, text)
+        raise SettingsError(f"{path} can't be read ({exc})", file=path) from None
+    try:
+        return parse(level, path, raw.decode("utf-8"), raw)
+    except UnicodeDecodeError as exc:
+        raise SettingsError(f"{path}: {exc}", file=path) from None
 
 
 def layers(user: Path, workspace: Workspace | None, override: dict[Path, str] | None = None) -> list[Layer]:
@@ -192,6 +212,13 @@ def where(layer: Layer, table: str | None, key: str | None) -> str:
     return f"{layer.path}:{line}" if line else str(layer.path)
 
 
+def error(layer: Layer, table: str | None, key: str | None, message: str) -> SettingsError:
+    """Keep the display location and its structured fields together."""
+
+    return SettingsError(f"{where(layer, table, key)}: {message}", file=layer.path,
+                         line=line_of(layer.text, table, key) if key else None)
+
+
 def _comment_at(line: str) -> int | None:
     """Where a `# comment` starts, outside of strings."""
 
@@ -231,12 +258,12 @@ def _key_line(lines: list[str], region: tuple[int, int] | None, table: str | Non
     name = f"{table}.{key}" if table else key
     if index is None:
         if read_value(text, table, key) is not MISSING:
-            raise SettingsError(f"{path}: {name} is set as a dotted key or an inline table; change it there by hand")
+            raise SettingsError(f"{path}: {name} is set as a dotted key or an inline table; change it there by hand", file=path)
         return None
     try:
         tomllib.loads(lines[index])
     except tomllib.TOMLDecodeError:
-        raise SettingsError(f"{path}: {name} spans more than one line; change it there by hand") from None
+        raise SettingsError(f"{path}: {name} spans more than one line; change it there by hand", file=path, line=index + 1) from None
     return index
 
 
@@ -311,9 +338,14 @@ def replace_tables(location: Path, ours: Callable[[str], bool], rendered: str) -
         text = location.read_text(encoding="utf-8")
     except FileNotFoundError:
         text = ""
+    return write(location, replacing_tables(text, ours, rendered))
+
+
+def replacing_tables(text: str, ours: Callable[[str], bool], rendered: str) -> str:
+    """Render a table replacement from the bytes a locked writer already read."""
     kept = split(text, ours)[0]
     while kept and not kept[-1].strip():
         kept.pop()
     if not kept:
         kept = ["# agt settings. See docs/configuration.md."]
-    return write(location, "\n".join(kept) + "\n" + ("\n" + rendered if rendered else ""))
+    return "\n".join(kept) + "\n" + ("\n" + rendered if rendered else "")

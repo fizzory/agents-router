@@ -164,7 +164,7 @@ def _create_job(
     try:
         config = load_config(cwd=cwd)
     except levels.SettingsError as exc:
-        synclog.refused(str(exc), workspace)
+        synclog.refused(exc, workspace)
         raise
     synclog.notice(workspace)
     host = host or detect_host()

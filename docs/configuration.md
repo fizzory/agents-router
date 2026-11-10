@@ -42,6 +42,10 @@ agt config unset codex.max_jobs         # back to the next level, or the default
 
 `show` lists each key with its value and its source: the default, an environment variable (`CLAUDE_CONFIG_DIR` for `claude.primary`, say), or a file and its line. `--json` adds each key's description and whether an agent needs the user's words to change it.
 
+For apps, `show --json` has `schema_version: 1`. Each row adds `kind`, `choices`, `minimum`, `cap`, `editable`, `accepted_levels` and `still_limited_by`. Fixed keys have `editable: false` and a `changed_by` command. `levels` holds each available level's `present`, `value`, `file`, `line` and `revision`, all from the same bytes read. An absent file has revision `missing`; an empty file has its own SHA-256 revision. A worktree reading the main checkout's local file names that file.
+
+`set|unset --json` return `ok`, the edited file's `revision`, and `previous: {level, present, value}`. `previous` describes that level even when another level masks it. Undo sets that value if it was present, or unsets the key otherwise, at the same level. Pass `--if-unchanged REVISION` to refuse the write if the file changed since. Unsetting an absent key returns `ok: true`, `changed: false` and the current revision. Validation errors exit 2 with `{"ok": false, "error": {"key", "message"}}`. The exit-3 `needs_user_words` refusal below keeps its existing shape.
+
 `set` and `unset` change one line of one file. Comments and every other line stay as they are, and the old file is backed up to `~/.agents-router/state/backups/settings/`. Each prints the old and new value, the file, what still limits the value or overrides it here, and the command that undoes it:
 
 ```text
@@ -104,6 +108,21 @@ under the admission lock immediately before uninstalling; this snapshot is not a
 
 Regenerate the app fixture with `PYTHONPATH=src:tests python3 tests/generate_usage_fixture.py`.
 
+## Account checks and switches
+
+```bash
+agt accounts check primary --json                 # this runtime's primary login; Claude by default
+agt accounts check --runtime codex --json         # every account on one runtime
+agt accounts add spare --runtime codex --check --json
+agt accounts disable spare --runtime codex --json
+agt accounts enable spare --runtime codex --json
+agt accounts login primary                       # the person completes the interactive login
+```
+
+`check` uses the runtime's existing quota-free auth probe, with a ten-second total probe budget. It caches the measured result for ten minutes; `usage` only reads that cache and never runs the check. Its JSON has `schema_version`, `runtime` and `accounts`; each result has `account`, `logged_in` (true, false or null), `checked_at` (Unix seconds) and nullable `error`. A timeout or missing CLI is unknown. A completed check exits 0 even when the account is logged out or unknown. After a login exits 0, agt runs the same check: the login's exit code alone never marks an account authenticated. Adding an account also records the check, including with `--no-login`.
+
+`add --check` validates the name, runtime and folder without creating folders, saving settings or probing auth. Success has `ok`, `account`, `runtime` and `home`. It reserves nothing; a real add validates again. `enable|disable --json` return `{"ok": true, "account": "spare", "enabled": false}` (true when enabled). The primary account and discovered Claude profiles cannot be switched. Refusals return `{"ok": false, "error": {"account", "runtime", "message", "exit_code"}}`, keep their exit code and leave settings, backups and log untouched. Account switches and config writes share one settings lock, back up the old file and log the change.
+
 ## The log
 
 agt writes one line for each thing it changes to `~/.agents-router/state/log/<year>-<month>.jsonl`:
@@ -120,7 +139,10 @@ agt log                           # this workspace's entries and your user level
 agt log --all                     # every workspace
 agt log --item reviewer --since 7d
 agt log --key codex.max_jobs --json
+agt config revert 2026-11:12 --json # restore a setting by its log entry id
 ```
+
+`log --json` gives each entry an `id` (`YYYY-MM:LINE`, stable while that log month is retained). `config revert ID` restores the entry's old setting at its original level, only when that level's present/value still matches the logged new value. It compares under the settings lock, then uses the file's revision guard for the write. Other levels may mask the setting; they do not change the comparison. Run it in the entry's workspace for workspace or local settings. The normal validation and user-words rules apply. Refused settings entries carry `file` and nullable `line` from the settings error.
 
 `--since` takes `30m`, `12h`, `7d`, `2w`, `today`, `yesterday` or a date such as `2026-10-01`. In a workspace, the list ends with how many entries other workspaces have.
 

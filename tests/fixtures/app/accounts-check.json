@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "runtime": "claude",
+  "accounts": [
+    {
+      "account": "primary",
+      "logged_in": true,
+      "checked_at": 1800000000.0,
+      "error": null
+    }
+  ]
+}

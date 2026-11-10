@@ -198,20 +198,20 @@ def check_layer(layer: levels.Layer) -> None:
 
     tables = layer.data.get("roles", {})
     if not isinstance(tables, dict):
-        raise levels.SettingsError(f"{levels.where(layer, None, 'roles')}: roles must be [roles.<name>] tables")
+        raise levels.error(layer, None, "roles", "roles must be [roles.<name>] tables")
     for name, table in tables.items():
         try:
             check_name(name)
         except RoleError as exc:
-            raise levels.SettingsError(f"{levels.where(layer, 'roles.' + name, None)}: {exc}") from None
+            raise levels.error(layer, "roles." + name, None, str(exc)) from None
         if not isinstance(table, dict):
-            raise levels.SettingsError(f"{layer.path}: roles.{name} must be a [roles.{name}] table")
+            raise levels.SettingsError(f"{layer.path}: roles.{name} must be a [roles.{name}] table", file=layer.path)
         for key, value in table.items():
             try:
                 _check_key(name, key, value)
             except RoleError as exc:
                 fix = _fix(layer, f"{name} --only <providers>" if key == "providers" else f"{name} --unset {key}")
-                raise levels.SettingsError(f"{levels.where(layer, 'roles.' + name, key)}: {exc}{fix}") from None
+                raise levels.error(layer, "roles." + name, key, f"{exc}{fix}") from None
 
 
 def from_layers(found: list[levels.Layer]) -> dict[str, Role]:
@@ -232,13 +232,13 @@ def from_layers(found: list[levels.Layer]) -> dict[str, Role]:
         if access is None:
             if not enabled:
                 continue  # a custom role turned off before it was ever made: nothing to run
-            raise levels.SettingsError(f"{levels.where(last, 'roles.' + name, None)}: custom role {name} needs "
+            raise levels.error(last, "roles." + name, None, f"custom role {name} needs "
                                        "access = \"read\", \"edit\" or \"full\"" + _fix(last, f"{name} --access read"))
         providers = [parse_provider(item) for item in table.get("providers", [])]
         if enabled and not providers:
             hint = (f"role {name} has {access} access, so its providers need an order" if access in ONE_AT_A_TIME
                     else f"role {name} has no providers")
-            raise levels.SettingsError(f"{levels.where(last, 'roles.' + name, 'providers')}: {hint}; "
+            raise levels.error(last, "roles." + name, "providers", f"{hint}; "
                                        f"to stop using it: agt roles config --disable {name}")
         out[name] = Role(name, access, providers, enabled, table.get("description"), table.get("prompt_file"),
                          dict(sources[name]))

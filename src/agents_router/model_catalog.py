@@ -2,7 +2,8 @@
 
 Adapters read provider inputs; this module owns request deduplication and the Kiro
 cache. Workers are daemons and publish through a queue, so cancelling a picker
-never waits for a provider process. No catalog is created by roles show.
+never waits for a provider process. Plain roles show creates no catalog;
+--discover-models explicitly requests one with a bounded wait.
 """
 
 from __future__ import annotations

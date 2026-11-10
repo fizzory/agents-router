@@ -97,8 +97,14 @@ Per host details: [docs/hosts.md](docs/hosts.md).
 | See what sharing would do | `agt share enable --dry-run` | [Sharing](docs/share.md#turning-it-on) |
 | Turn sharing on | `agt share enable`, then Enter | [Sharing](docs/share.md#turning-it-on) |
 | Check what's in sync | `agt share status` | [Sharing](docs/share.md#everyday-use) |
+| Read sharing cells for an app | `agt share list --json` | [Sharing](docs/share.md#everyday-use) |
+| Read role choices for an app | `agt roles show --json [--discover-models]` | [Roles](docs/roles.md) |
 | Use your other Claude profiles | Nothing to set up: `account=claude-work` | [Claude Code](docs/claude-code.md#2-your-other-profiles-work-with-no-setup) |
 | Add a Claude account | `agt accounts add max-2` | [Claude Code](docs/claude-code.md#3-add-more-accounts) |
+| Check a login without using quota | `agt accounts check primary --json` | [Configuration](docs/configuration.md#account-checks-and-switches) |
+| Validate a new account | `agt accounts add max-2 --check --json` | [Configuration](docs/configuration.md#account-checks-and-switches) |
+| Inspect settings for an app | `agt config show --json` | [Configuration](docs/configuration.md#agt-config) |
+| Revert a logged setting | `agt config revert YYYY-MM:LINE --json` | [Configuration](docs/configuration.md#the-log) |
 | Add a Codex account | `agt accounts add plus-2 --runtime codex` | [Codex](docs/codex.md#extra-accounts) |
 | Test every account | `agt doctor --live --runtime <runtime>` (one tiny job each; uses a little quota) | [Claude Code](docs/claude-code.md#4-check) |
 | See usage and availability | `agt usage` (`--json` for apps; `--refresh` rescans local Codex usage) | [Usage snapshot](docs/configuration.md#usage-snapshot) |

@@ -1,0 +1,140 @@
+{
+  "runtimes": [
+    {
+      "runtime": "claude",
+      "binary": "claude",
+      "version": "fake-claude 1.0",
+      "primary_setup": "<ROOT>/home/.claude",
+      "failover": "on-limit",
+      "limits": {
+        "usage_ceiling": 0.95,
+        "when_full": "refuse"
+      },
+      "accounts": [
+        {
+          "name": "primary",
+          "home": "<ROOT>/home/.claude",
+          "enabled": true,
+          "takes_unpinned_jobs": true,
+          "auth": {
+            "loggedIn": true,
+            "authMethod": "claude.ai",
+            "subscriptionType": null,
+            "configDirectory": null
+          },
+          "busy_slots": 0,
+          "running_jobs": 0,
+          "limits": {
+            "max_jobs": null,
+            "max_jobs_from": "default"
+          }
+        },
+        {
+          "name": "work",
+          "home": "<ROOT>/home/accounts/work",
+          "enabled": true,
+          "takes_unpinned_jobs": true,
+          "auth": {
+            "loggedIn": false,
+            "authMethod": "claude.ai",
+            "subscriptionType": null,
+            "configDirectory": null
+          },
+          "busy_slots": 0,
+          "running_jobs": 0,
+          "limits": {
+            "max_jobs": null,
+            "max_jobs_from": "default"
+          }
+        }
+      ]
+    },
+    {
+      "runtime": "codex",
+      "binary": "codex",
+      "version": "fake-codex 1.0",
+      "primary_setup": "<ROOT>/home/.codex",
+      "failover": "on-limit",
+      "limits": {
+        "usage_ceiling": 0.95,
+        "when_full": "refuse",
+        "max_jobs": 4
+      },
+      "accounts": [
+        {
+          "name": "primary",
+          "home": "<ROOT>/home/.codex",
+          "enabled": true,
+          "auth": {
+            "loggedIn": false,
+            "authMethod": null,
+            "detail": "Not logged in"
+          },
+          "busy_slots": 0,
+          "running_jobs": 0,
+          "limits": {
+            "max_jobs": null,
+            "max_jobs_from": "default"
+          }
+        }
+      ]
+    },
+    {
+      "runtime": "antigravity",
+      "binary": "agy",
+      "version": "fake-agy 1.0",
+      "primary_setup": "<ROOT>/home/.gemini/antigravity-cli",
+      "failover": "on-limit",
+      "limits": {
+        "usage_ceiling": 0.95,
+        "when_full": "refuse"
+      },
+      "accounts": [
+        {
+          "name": "primary",
+          "home": "<ROOT>/home/.gemini/antigravity-cli",
+          "enabled": true,
+          "auth": {
+            "loggedIn": false,
+            "error": "You are not logged into Antigravity"
+          },
+          "busy_slots": 0,
+          "running_jobs": 0,
+          "limits": {
+            "max_jobs": null,
+            "max_jobs_from": "default"
+          }
+        }
+      ]
+    },
+    {
+      "runtime": "kiro",
+      "binary": "kiro",
+      "version": "fake-kiro 1.0",
+      "primary_setup": "<ROOT>/home/.kiro",
+      "failover": "on-limit",
+      "limits": {
+        "usage_ceiling": 0.95,
+        "when_full": "refuse"
+      },
+      "accounts": [
+        {
+          "name": "primary",
+          "home": "<ROOT>/home/.kiro",
+          "enabled": true,
+          "auth": {
+            "loggedIn": true,
+            "authMethod": "BuilderId",
+            "detail": "{\"accountType\": \"BuilderId\"}"
+          },
+          "busy_slots": 0,
+          "running_jobs": 0,
+          "limits": {
+            "max_jobs": null,
+            "max_jobs_from": "default"
+          }
+        }
+      ]
+    }
+  ]
+}

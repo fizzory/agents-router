@@ -124,6 +124,8 @@ Set one up only when the person says yes; don't interview them.
 | Rules | Ask for their home and try-first models, run `agt rules --show --target claude --home-high "<model>" ...`, then the same with `--install` |
 | Another login | `agt accounts add <name>`; the person completes the browser login |
 
+`agt accounts add <name> --runtime <runtime> --check --json` validates without creating folders or checking auth; the real add validates again. `agt accounts check [name] --runtime <runtime> --json` refreshes cached login state without quota, with a ten-second probe budget. Login and add cache the measured check after a successful login command, rather than treating exit 0 as authentication. `agt accounts login primary` is accepted. `accounts enable|disable <name> --json` switch registered extra accounts with a settings lock, backup and log entry; primary and discovered profiles return a structured refusal without changing settings.
+
 ## 6. Hand-off: what's left for the person
 
 Give them a numbered list built from `still_needed`:

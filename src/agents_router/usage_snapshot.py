@@ -226,8 +226,11 @@ def _account(runtime: RuntimeConfig, account: Account, usage: dict, problems: di
         circuit = circuits.get("account", {})
         opened = circuit.get("opened_at") is not None
         cooling = accounts.cooldown_until(record, now)
-        auth = (profiles.logged_in(account.home, None, cached_only=True) if runtime.runtime == "claude"
-                else account.logged_in)
+        from agents_router import account_check
+
+        auth = account_check.cached(runtime, account)
+        if auth is None and runtime.runtime != "claude":
+            auth = account.logged_in
         if not account.enabled:
             state, reason, until = "off", "disabled in agt settings", None
         elif auth is False:

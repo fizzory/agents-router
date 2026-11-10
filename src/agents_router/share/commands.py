@@ -42,7 +42,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from agents_router import helptext, hosts, synclog, ui
+from agents_router import helptext, hosts, settings_write, synclog, ui
 from agents_router.config import default_primary, load_config
 from agents_router.share import (
     apply, attention, engine, gitexclude, hooks, instructions, mcp, model, plugin_view, plugins, names, normalize, picker, plan as planner, providers, scope,
@@ -150,6 +150,9 @@ def add_parser(subparsers) -> None:
     status = actions.add_parser("status", help="What's in sync, what differs and what waits for you; writes nothing.")
     status.add_argument("--diff", action="store_true", help="Show how the copies of each conflict differ.")
     status.add_argument("--json", action="store_true")
+    listing = actions.add_parser("list", help="Read-only item and CLI cells, including whether each can be changed; exits 0.")
+    listing.add_argument("--json", action="store_true")
+    listing.add_argument("--repo", metavar="PATH", help="A listed repo's items (inside a listed repo, it's that repo's).")
     pick = actions.add_parser("pick", help="Change which CLIs get an item; with no flags, show what goes where.")
     pick.add_argument("item", nargs="?", help="The agent or skill: a bare name, or agents/<name> or skills/<name>.")
     pick.add_argument("--in", dest="in_labels", action="append", default=[], metavar="LABEL[,LABEL]",
@@ -943,6 +946,22 @@ def _intro(plan: planner.Plan) -> str:
 
 def _enable_write(args: argparse.Namespace, saved: settings.Settings, *, screen: bool = False,
                   setup: bool = False) -> int | None:
+    """Setup calls this directly, so it must take settings.lock before apply.lock too."""
+    if apply.in_worker():
+        print(IN_WORKER)
+        return 2
+    with settings_write.locked():
+        if setup:
+            # Setup's two explicit switches override the fresh saved answers;
+            # unrelated picks made since its preview must survive.
+            fresh = settings.load()
+            fresh.worktrees, fresh.codex_session = saved.worktrees, saved.codex_session
+            saved = fresh
+        return _enable_write_locked(args, saved, screen=screen, setup=setup)
+
+
+def _enable_write_locked(args: argparse.Namespace, saved: settings.Settings, *, screen: bool = False,
+                         setup: bool = False) -> int | None:
     """`enable --yes`: save your answers and apply the plan. On the screen, None means the plan changed meanwhile.
     `setup`: the report is part of `agt setup`'s, under its headline."""
 
@@ -965,7 +984,7 @@ def _enable_write(args: argparse.Namespace, saved: settings.Settings, *, screen:
         if (plan.conflicts or (plan.mcp is not None and plan.mcp.conflicts)) and not (args.if_plan or args.accept_suggested):
             return _needs_choice(plan, line, args.json)
         answers = _saved_answers(plan, args, saved)
-        saved_at = settings.save(answers)
+        saved_at = settings.save(answers, log_changes=False)
         result = apply.apply(plan, current, command="agt share enable")
         result.replayed = replayed
         _after_renames(argparse.Namespace(**{key: value for key, value in vars(args).items() if key != "kinds"}),
@@ -1428,27 +1447,9 @@ def _show_picks(args: argparse.Namespace, plan: planner.Plan, key: str | None) -
 
 
 def _grid_cell(item: planner.Item, label: str, made: set[str]) -> picker.Cell:
-    """One cell of the pick grid: ticked where the item is or goes, and fixed where agt never changes it."""
+    from agents_router.share.listing import pick_cell
 
-    cell = item.cells.get(label, planner.Cell(planner.BLOCKED, "not a folder agt shares"))
-    state, note = cell.state, cell.note
-    if state == planner.HAS:
-        if note:  # your original, or a folder another CLI reads
-            return picker.Cell(picker.FIXED, note)
-        if label not in made:
-            return picker.Cell(picker.FIXED, "your original: agt never removes it")
-        return picker.Cell(picker.ON, "agt's copy; untick to remove it, with a backup", there=True)
-    if state in (planner.COPY, planner.UPDATE, planner.CONFLICTED):
-        return picker.Cell(picker.ON, note or "agt copies it there", there=state != planner.COPY and label in made)
-    if state == planner.WAITING:
-        if note.startswith(planner.NEW_WAITING):
-            return picker.Cell(picker.OFF, "new: tick where it should go")
-        if note == "its folder is missing or frozen this run":
-            return picker.Cell(picker.FIXED, note)
-        return picker.Cell(picker.ON, note, there=label in made)
-    if state == planner.BLOCKED:
-        return picker.Cell(picker.BLOCKED, note)
-    return picker.Cell(picker.OFF, note or "left out")  # unticked, kept as your own file, or a removal still to finish
+    return pick_cell(item, label, made)
 
 
 def _pick_grid(args: argparse.Namespace, plan: planner.Plan, shown: list[planner.Item]) -> int:
@@ -3348,7 +3349,21 @@ def command(args: argparse.Namespace) -> int:
     global _verbose
     _verbose = bool(getattr(args, "verbose", False))
     try:
-        return _command(args, action)
+        readonly = apply.in_worker() or action in (None, "status", "settings", "scan", "list") or getattr(args, "dry_run", False) \
+            or (action == "enable" and not args.yes) \
+            or (action == "cli" and args.cli_command == "list") \
+            or (action == "repo" and args.repo_command == "list") \
+            or (action == "plugins" and not args.plugins_command and getattr(args, "json", False))
+        background = action == "sync" and (args.if_stale or args.quiet or args.trigger != "command")
+        if readonly or background:  # background_sync owns its nonblocking settings lock
+            return _command(args, action)
+        # Lock order: settings.lock -> apply.lock. Read, modify, backup and log
+        # all share settings inside this block, never from an earlier snapshot.
+        with settings_write.locked():
+            return _command(args, action)
+    except TimeoutError as exc:
+        print(f"agt share: {exc}", file=sys.stderr)
+        return 1
     finally:
         _verbose = False
 
@@ -3363,6 +3378,19 @@ def _command(args: argparse.Namespace, action: str | None) -> int:
             return _sync(args)
         if action == "status":
             return _status(args)
+        if action == "list":
+            from agents_router.share import listing
+
+            with scope.use(_item_scope(args) if args.repo else scope.scope_of(Path.cwd()) or scope.USER):
+                saved, current = settings.load(), state.load()
+                plan = _plan(args, current, saved)
+                report = listing.snapshot(plan, current, enabled=saved.enabled)
+                if args.json:
+                    _print(report)
+                else:
+                    for item in report["items"]:
+                        print(item["id"] + ": " + ", ".join(f"{label}={cell['state']}" for label, cell in item["cells"].items()))
+                return 0
         if action == "settings":
             from agents_router import config_cli
 

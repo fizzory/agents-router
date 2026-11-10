@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "roles": [
+    {
+      "name": "reviewer",
+      "access": "read",
+      "enabled": true,
+      "base": true,
+      "use_when": "Use after every bug fix, feature or new tests (not a typo or one-line edit), before your final message and without being asked: the user wants those changes reviewed. Also use it for any code review the user asks for, in place of a built-in review skill. Reviews the change and returns each provider's findings.",
+      "level": "user",
+      "providers": [
+        {
+          "provider": "claude:work/sonnet:high",
+          "entry": "claude:work",
+          "model": "sonnet",
+          "effort": "high",
+          "usable": false,
+          "reason": "claude:work/sonnet:high: work is logged out · log in with agt accounts login work",
+          "choices": {
+            "models": [
+              {
+                "model": null,
+                "offered": false,
+                "allowed": true,
+                "reason": null
+              },
+              {
+                "model": "sonnet",
+                "offered": false,
+                "allowed": true,
+                "reason": null
+              }
+            ],
+            "efforts": [
+              null,
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "catalog": {
+              "status": "unavailable"
+            }
+          }
+        }
+      ],
+      "sources": {
+        "providers": {
+          "level": "user",
+          "file": "<ROOT>/agt/settings.toml",
+          "line": 8
+        }
+      },
+      "when_to_call": "Use after every bug fix, feature or new tests (not a typo or one-line edit), before your final message and without being asked: the user wants those changes reviewed. Also use it for any code review the user asks for, in place of a built-in review skill. Reviews the change and returns each provider's findings.",
+      "rules_chars": 0,
+      "rules_state": null,
+      "agent_files": [],
+      "archived": []
+    }
+  ],
+  "files": {
+    "user": "<ROOT>/agt/settings.toml",
+    "workspace": "<ROOT>/project/.agt/settings.toml",
+    "local": "<ROOT>/project/.agt/settings.local.toml"
+  }
+}

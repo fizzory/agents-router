@@ -513,7 +513,7 @@ class AntigravityRuntime:
         code, output = self._run_quiet(config, ["--version"])
         return output.strip().splitlines()[0] if code == 0 and output.strip() else None
 
-    def auth_status(self, config: RuntimeConfig, account: Account) -> dict[str, Any]:
+    def auth_status(self, config: RuntimeConfig, account: Account, *, timeout: float = 90) -> dict[str, Any]:
         """Primary: lists models, which needs a login but no model request. Extra accounts: the login file.
 
         agy models isn't run for an extra account: without a login it would wait for a login code.
@@ -523,7 +523,7 @@ class AntigravityRuntime:
             if self.logged_in(account):
                 return {"loggedIn": True, "method": "file"}
             return {"loggedIn": False, "method": "file", "error": f"no login file yet. {self.login_hint(account)}"}
-        code, output = self._run_quiet(config, ["models"], timeout=90)
+        code, output = self._run_quiet(config, ["models"], timeout=timeout)
         models = [line.split()[0] for line in output.splitlines() if re.match(r"^[a-z0-9][a-z0-9._-]*\s", line)]
         if code == 0 and models:
             return {"loggedIn": True, "models": models}

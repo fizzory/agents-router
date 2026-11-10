@@ -102,12 +102,12 @@ class ShowTests(RolesBase):
         with patch.object(roles_grid, "RoleGrid", side_effect=AssertionError("JSON does not use the grid")):
             code, shown = self.json("roles", "show")
         self.assertEqual(code, 0)
-        self.assertEqual(set(shown), {"roles", "files"})
+        self.assertEqual(set(shown), {"schema_version", "roles", "files"})
         builder = next(row for row in shown["roles"] if row["name"] == "builder")
         self.assertEqual(set(builder), {"name", "access", "enabled", "base", "use_when", "level", "providers",
-                                        "when_to_call", "rules_chars", "rules_state", "agent_files", "archived"})
+                                        "when_to_call", "rules_chars", "rules_state", "agent_files", "archived", "sources"})
         self.assertEqual((builder["access"], builder["enabled"], builder["level"]), ("edit", True, "user"))
-        self.assertEqual(builder["providers"], [
+        self.assertEqual([{k: v for k, v in p.items() if k != "choices"} for p in builder["providers"]], [
             {"provider": "claude:claude-work/opus", "entry": "claude:claude-work", "model": "opus", "effort": None,
              "usable": True, "reason": None},
             {"provider": "codex:work/gpt-6.1-sol", "entry": "codex:work", "model": "gpt-6.1-sol", "effort": None,
@@ -172,7 +172,7 @@ class ShowTests(RolesBase):
         before = self.user_file.read_bytes()
         code, out, err = self.agt("roles", "config", "verifier", "--unset", "enabled", "--json", env=AGENT)
         self.assertEqual(code, 3, out + err)
-        self.assertIn("verifier would be turned on", json.loads(out)["ask"])
+        self.assertIn("verifier would be turned on", json.loads(out)["error"]["ask"])
         self.same_bytes(self.user_file, before)
         code, out, err = self.agt("roles", "config", "verifier", "--unset", "enabled", "--user-said", "turn it on",
                                   env=AGENT)
@@ -567,11 +567,11 @@ class AgentTests(RolesBase):
         before = self.user_file.read_bytes()
         code, refusal = self.json("roles", "config", "builder", "--add", "kiro:primary", env=AGENT)
         self.assertEqual(code, 3)
-        self.assertEqual(refusal["error"], "needs_user_words")
-        self.assertEqual(refusal["role"], "builder")
-        self.assertEqual(refusal["ask"], "kiro:primary would join builder, which edits files. Ask the user, and pass "
+        self.assertEqual(refusal["error"]["code"], "needs_user_words")
+        self.assertEqual(refusal["error"]["role"], "builder")
+        self.assertEqual(refusal["error"]["ask"], "kiro:primary would join builder, which edits files. Ask the user, and pass "
                                          "their own words.")
-        self.assertEqual(refusal["retry"], "agt roles config builder --add kiro:primary --user-said \"<the user's words>\"")
+        self.assertEqual(refusal["error"]["retry"], "agt roles config builder --add kiro:primary --user-said \"<the user's words>\"")
         self.same_bytes(self.user_file, before)
         self.assertEqual(self.backups(), [])
         code, out, err = self.agt("roles", "config", "builder", "--add", "kiro:primary", "--user-said",
@@ -622,7 +622,7 @@ class AgentTests(RolesBase):
         before = self.user_file.read_bytes()
         code, refusal = self.json("roles", "config", "general-worker", "--access", "full", "--user", env=AGENT)
         self.assertEqual(code, 3)
-        self.assertEqual(refusal["ask"], "general-worker would go from edit to full access. Ask the user, and pass "
+        self.assertEqual(refusal["error"]["ask"], "general-worker would go from edit to full access. Ask the user, and pass "
                                          "their own words.")
         self.same_bytes(self.user_file, before)
         code, out, err = self.agt("roles", "config", "general-worker", "--access", "full", "--user", "--user-said",
@@ -651,7 +651,7 @@ class AgentTests(RolesBase):
         }
         for argv, ask in asks.items():
             code, refusal = self.json("roles", "config", *argv, env=AGENT)
-            self.assertEqual((code, refusal["ask"]), (3, f"{ask}. Ask the user, and pass their own words."), argv)
+            self.assertEqual((code, refusal["error"]["ask"]), (3, f"{ask}. Ask the user, and pass their own words."), argv)
             self.same_bytes(self.user_file, before)
         for argv in (("ops", "--access", "edit"), ("ops", "--access", "read"), ("--set-effort", "codex:work=low")):
             code, out, err = self.agt("roles", "config", *argv, env=AGENT)

@@ -293,6 +293,18 @@ Waiting for you
 
 ### Choosing where an item goes
 
+`agt share list --json` is a read-only listing that exits 0 even when items need attention or sharing is off.
+It returns `schema_version: 1`, `enabled`, `folders`, and `items`. Each item has a stable `id` (the kind and
+agt's normalized identity), `kind`, `name`, and a `cells` map keyed by CLI folder label. Each cell carries its
+planner `state`, `note`, `editable`, and a `reason` when editing is unavailable. Agents, skills, MCP servers,
+hooks, plugins and instructions use their own planner decisions; no commands or secret values are included.
+`--repo PATH` lists a listed repo's items; inside a listed repo, that scope is the default. `share status --json`
+keeps its attention exit code, and `share pick --json` still exits 3 when it returns `needs_choice`.
+
+Sharing writers take the settings lock before reading settings, then `apply.lock` before changing CLI copies.
+Background syncs use the same order without waiting. Backup, settings write and audit entries stay under the
+settings lock, including renamed picks. No path may acquire the settings lock while holding `apply.lock`.
+
 `agt share pick` in a terminal opens a grid of items by CLI: the arrow keys move, Space ticks or unticks a cell, `a` ticks and `n` unticks a whole row, Enter saves, and Esc or `q` quits without saving. The line under the grid names each change before you press Enter ("explorer leaves kiro"). By command:
 
 ```bash
