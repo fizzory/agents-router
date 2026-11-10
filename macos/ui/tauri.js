@@ -5,7 +5,7 @@ export const getSnapshot = () => invoke("get_snapshot");
 export const refreshUsage = () => invoke("refresh_usage");
 export const hidePopover = () => invoke("hide_popover");
 export const setPopoverHeight = ({ height, durationMs, curve }) => invoke("set_popover_height", { height, durationMs, curve });
-export const openSettings = ({ runtime = null, account = null } = {}) => invoke("open_settings", { runtime, account });
+export const openSettings = ({ runtime = null, account = null, install = false } = {}) => invoke("open_settings", { runtime, account, install });
 export const loginAccount = (runtime, account) => invoke("login_account", { runtime, account });
 export const checkAccount = (runtime, account) => invoke("check_account", { runtime, account });
 export const checkForUpdates = () => invoke("check_for_updates");
@@ -54,3 +54,7 @@ export const activityUndoSync = entry => invoke("activity_undo_sync", { entry })
 export const copyText = text => invoke("copy_text", { text });
 
 export const setupRoles = () => invoke("setup_roles");
+
+export const getInstallStatus = () => invoke("get_install_status");
+export const onInstallStatus = handler => listen("install-status", ({ payload }) => handler(payload));
+export const installAction = action => invoke("install_action", { action });

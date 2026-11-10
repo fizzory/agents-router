@@ -1,6 +1,9 @@
 pub mod app;
 pub mod client;
 pub mod glyph;
+pub mod install;
+mod install_app;
+pub mod install_check;
 pub mod models;
 mod native;
 pub mod panes;

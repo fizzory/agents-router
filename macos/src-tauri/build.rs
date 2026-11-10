@@ -2,6 +2,8 @@ fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "get_snapshot",
+            "get_install_status",
+            "install_action",
             "refresh_usage",
             "hide_popover",
             "set_popover_height",

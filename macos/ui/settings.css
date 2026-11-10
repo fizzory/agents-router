@@ -146,3 +146,7 @@ main { min-width: 0; overflow: auto; padding: 9px 12px 14px; }
 mark { background: color-mix(in srgb, AccentColor 24%, transparent); color: inherit; border-radius: 2px; }
 
 .role-off-menu .popup-item { opacity: .6; }
+
+.install-sheet .sheet-message:empty { display: none; }
+.install-sheet .sheet-message { padding-left: 0; color: var(--muted); min-height: 0; margin-bottom: 12px; overflow-wrap: anywhere; }
+.install-sheet .sheet-actions { margin-top: 0; }

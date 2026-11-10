@@ -55,7 +55,7 @@ function renderFooter(model) {
   footerKey = key; footer.hidden = !model; footer.replaceChildren();
   if (!model) return;
   footer.dataset.tooltip = model.tooltip;
-  const activate = () => (model.action === 'update' ? api.checkForUpdates() : model.action === 'refresh' ? api.refreshUsage() : api.openSettings()).catch(report);
+  const activate = () => (model.action === 'update' ? api.checkForUpdates() : model.action === 'refresh' ? api.refreshUsage() : api.openSettings({ install: model.action === 'settings' })).catch(report);
   if (model.button) {
     const button = element(document, 'button', 'inline-action', model.button);
     button.setAttribute('aria-label', `${model.text}. ${model.button}`);

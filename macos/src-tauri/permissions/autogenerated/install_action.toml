@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-install-action"
+description = "Enables the install_action command without any pre-configured scope."
+commands.allow = ["install_action"]
+
+[[permission]]
+identifier = "deny-install-action"
+description = "Denies the install_action command without any pre-configured scope."
+commands.deny = ["install_action"]

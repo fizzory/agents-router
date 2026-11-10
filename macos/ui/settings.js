@@ -5,6 +5,7 @@ import { SettingsHistory } from './logic/settings-history.js';
 import { element, icon, makeControl, popup, highlightMatches } from './settings-controls.js';
 import { attachTooltips } from './tooltip.js';
 import { SettingsPanes } from './panes.js';
+import { InstallUI } from './install-ui.js';
 
 const $ = selector => document.querySelector(selector);
 const status = $('#status'), rows = $('#settings'), login = $('#open-at-login'), search = $('#search');
@@ -16,6 +17,8 @@ const history = new SettingsHistory({ set: configSet, unset: configUnset, roles:
   navigate: target => navigate(target), reload: async () => { await load(true); await panes.refresh(); }, report: showError });
 const panes = new SettingsPanes({ scope: () => scope, config: () => config, snapshot: () => snapshot,
   busy: () => busy, history, navigate, render, report: announceFailure });
+
+const installer = new InstallUI(() => renderInstall());
 
 function showError(key, message) {
   if (document.body.dataset.pane !== 'general') panes.errors.set(key, message);
@@ -119,16 +122,20 @@ function createRow(row, providerFirst) {
 }
 function renderInstall() {
   const model = installState(snapshot), visible = document.body.dataset.pane === 'general' && !search.value;
+  if (!model.problem && installer.status.setup_unknown) model.problem = { message: 'Setup status unknown', action: 'Check again' };
   const banner = $('#install-banner'); banner.hidden = !model.problem || !visible;
   $('#general-dot').hidden = !model.problem;
   if (model.problem) {
     banner.querySelector('span').textContent = model.problem.message;
     banner.querySelector('button').textContent = model.problem.action;
   }
-  $('#version').textContent = model.version ? `agt ${model.version}` : model.problem?.action === 'Install' ? 'Not installed' : 'Unavailable';
+  const version = 'version' in installer.status ? installer.status.version : model.version;
+  if ('version' in installer.status) model.owned = model.owned && !!installer.status.version;
+  $('#version').textContent = version ? `agt ${version}` : model.problem?.action === 'Install' ? 'Not installed' : 'Unavailable';
   $('#uninstall-wrapper').hidden = !model.owned;
   $('#uninstall-wrapper').dataset.tooltip = model.uninstallTooltip;
   $('#uninstall').disabled = model.uninstallDisabled;
+  $('#restore-cli').hidden = !installer.status.can_restore;
 }
 function render() {
   hideTooltip();
@@ -207,10 +214,13 @@ login.addEventListener('change', () => run(async () => {
   catch (error) { login.checked = previous; announceFailure(error); }
   finally { login.disabled = false; }
 }));
-// Install/Repair and uninstall transactions are implemented in step 7. Keep
-// these explicit actions at the IPC boundary; never execute a frontend command.
-$('#install-banner button').addEventListener('click', () => { status.textContent = `${$('#install-banner button').textContent} is not available in this build.`; });
-$('#uninstall').addEventListener('click', () => { status.textContent = 'Uninstall is not available in this build.'; });
+$('#install-banner button').addEventListener('click', () => run(() => {
+  const problem = installState(snapshot).problem;
+  return installer.action(problem?.action === 'Repair' ? 'repair' : problem ? 'install' : 'check-setup');
+}));
+$('#uninstall').addEventListener('click', () => run(() => installer.action('uninstall')));
+$('#restore-cli').addEventListener('click', () => run(() => installer.action('restore')));
+await installer.start();
 await onSettingsEdit(({ action }) => run(() => edit(action)));
 await onSettingsTarget(target => run(() => navigate(target)));
 await onSettingsHistory(({ key }) => { setPane('activity'); document.body.dataset.historyKey = key; search.value = key; render(); run(() => panes.load('activity', true)); });

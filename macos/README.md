@@ -2,7 +2,7 @@
 
 The production executable is the stable launcher at
 `~/Library/Application Support/Agents Router/bin/agt`. The app never searches
-PATH. Runtime installation is implemented in a later plan step.
+PATH. Runtime installation is described below.
 
 ## Runtime manifest and CLI ownership (step 7)
 
@@ -282,3 +282,55 @@ at 640 × 420, using fake-agt responses, are saved under
 `.mentor/plans/agt-macos-app/evidence/step6-{roles,accounts,sharing,activity}-{light,dark}.png`.
 They verify this Mac's WebKit; the macOS 14.0 baseline and native captures stay
 in the plan's later release checks.
+
+## Runtime installation (step 8)
+
+First launch stages `Contents/Resources/runtime` in
+`$AGT_APP_SUPPORT/runtimes/.staging-*`, validates the manifest, plugin and
+isolated agt version, then renames it and atomically switches `current`.
+`install.lock` serializes installs across launches; an interrupted copy leaves
+`current` usable. The stable launcher resolves that symlink once with `pwd -P`
+and execs the physical Python with `-I`. A foreign public agt stays in place
+until Replace; its original file/link and physical target are saved for Restore
+previous agt and uninstall. Foreign version detection reads distribution metadata
+without running that CLI. An older bundled version requires Downgrade.
+
+`AGT_APP_SUPPORT`, `AGT_BIN_DIR` and `AGT_HOME` override all CLI destinations.
+`AGT_APPLICATIONS_DIRS` is an OS path-list (`:` on macOS), ordered system then
+user Applications. Production defaults are `/Applications` and `~/Applications`.
+Install refuses a translocated or read-only app and apps outside these folders;
+Move to Applications copies to the first writable destination, opens that copy
+and quits. It refuses to overwrite an existing app.
+
+Settings alone grants `get_install_status` and `install_action`. The latter
+accepts a fixed action name and verifies the current dialog; it accepts no path,
+executable or arguments. `install-status` carries progress/dialog state. The popover’s Install/Repair
+opens Settings with `open_settings`’s optional `install: true`, requesting the
+same fixed transaction. The
+retained Settings sheet comes forward on first launch or a second launch during
+install. Return selects its default (Cancel for Downgrade); Escape cancels.
+After the last first-launch sheet closes, the popover opens once. Onboarding
+requires positive `plugin.planned`, `roles.planned` or Sharing changes from
+`setup --dry-run --json`, with a ten-second deadline. A timeout leaves Setup
+status unknown / Check again in General. Set up hands the stable launcher to
+Terminal. Subsequent versions refresh plugins using bundled `agt update
+--no-package` once per version, recording successful completion under `updated/`.
+
+Uninstall and cleanup take agt's actual `state/admission.lock`, then re-read
+`usage --json` while holding it. They use `uninstall_blockers`, including
+unassigned jobs, removed accounts and surviving workers. Cleanup keeps current,
+previous and every active job's physical runtime from `spec.json`/`status.json`;
+an unidentified runtime reference defers cleanup. Uninstall removes owned
+launchers, runtimes and derived plugins, and restores a saved CLI only when its
+target survives. It keeps settings, AGT_HOME and the saved install lock. Deleting
+the app alone leaves its installed CLI and these files behind; use Settings to
+uninstall the CLI first.
+
+`cargo run --locked --bin agt-app-check -- --install-cli` creates a child with an
+empty environment and scratch HOME, provider folders, PATH and all three install
+overrides. It copies the shipped plugin and builds a small `bin/python3` shim:
+version validation uses the test version, other calls run the repository's real
+agt. Provider executables are `fake_host.py`; no installed agt or real provider
+CLI runs. Each `OK:` line names its checked lifecycle case. Move records a
+relaunch argv instead of opening a copied app. No runtime payload is bundled
+until step 9.

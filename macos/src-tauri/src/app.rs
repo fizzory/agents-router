@@ -1,6 +1,7 @@
 //! Long-lived native refresh/lifecycle and fixed-purpose popover commands.
 use crate::{
     client::{AgtClient, ClientError, CommandOutcome, ReadReply, Request},
+    install_app::{self, InstallController},
     models::{CommandKind, ConfigShow, Level, Snapshot, Usage},
     native,
     panes::RoleEdit,
@@ -108,7 +109,7 @@ impl Paths {
             agt_home,
             explicit_home,
             settings,
-            handoffs: home.join("Library/Application Support/Agents Router/handoffs"),
+            handoffs: support.join("handoffs"),
         })
     }
 }
@@ -132,7 +133,7 @@ fn usage_error(error: ClientError) -> String {
     }
 }
 
-fn main_thread(
+pub(crate) fn main_thread(
     app: &tauri::AppHandle,
     f: impl FnOnce(tauri::AppHandle, MainThreadMarker) + Send + 'static,
 ) {
@@ -282,11 +283,19 @@ fn set_popover_height(
     Ok(())
 }
 #[tauri::command]
-fn open_settings(app: tauri::AppHandle, runtime: Option<String>, account: Option<String>) {
+fn open_settings(
+    app: tauri::AppHandle,
+    runtime: Option<String>,
+    account: Option<String>,
+    install: Option<bool>,
+) {
     let target = serde_json::json!({"pane": if account.is_some() { "accounts" } else { "general" }, "runtime": runtime, "account": account});
     main_thread(&app, move |app, mtm| {
         native::open_settings(&app, mtm, target)
     });
+    if install == Some(true) {
+        install_app::request_install(&app);
+    }
 }
 #[tauri::command]
 fn get_settings_target(state: State<'_, AppState>) -> serde_json::Value {
@@ -514,7 +523,10 @@ async fn accounts_toggle(
     request_usage(&app, false, "settings-account-toggle");
     settings::outcome_json(result?)
 }
-async fn terminal_handoff(state: &AppState, action: TerminalAction) -> Result<(), String> {
+pub(crate) async fn terminal_handoff(
+    state: &AppState,
+    action: TerminalAction,
+) -> Result<(), String> {
     let handoff = state.terminal.prepare(&action).map_err(|e| e.to_string())?;
     state
         .terminal
@@ -724,7 +736,7 @@ fn update_requested(app: &tauri::AppHandle) {
 fn quit_app(app: tauri::AppHandle) {
     quit(&app);
 }
-fn quit(app: &tauri::AppHandle) {
+pub(crate) fn quit(app: &tauri::AppHandle) {
     app.state::<AppState>()
         .quitting
         .store(true, Ordering::Relaxed);
@@ -866,8 +878,11 @@ pub fn run() {
         .plugin(settings::autostart_plugin())
         .manage(state)
         .manage(settings)
+        .manage(InstallController::new().expect("valid install paths"))
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
+            install_app::get_install_status,
+            install_app::install_action,
             refresh_usage,
             hide_popover,
             set_popover_height,
@@ -955,6 +970,12 @@ pub fn run() {
                 }
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
+                    if window.label() == "settings" && app.state::<InstallController>().pending() {
+                        main_thread(app, |app, mtm| {
+                            native::open_settings(&app, mtm, serde_json::json!({"pane":"general"}))
+                        });
+                        return;
+                    }
                     if window.label() == "popover" {
                         main_thread(app, |app, mtm| native::hide(&app, mtm, "close-request"));
                     } else {
@@ -1016,6 +1037,7 @@ pub fn run() {
             native::observe_wake(mtm, watcher.wake_trigger());
             *app.state::<AppState>().watcher.lock().expect("watcher") = Some(watcher);
             request_usage(app.handle(), true, "startup");
+            install_app::start(app.handle());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let mut timer = tokio::time::interval_at(

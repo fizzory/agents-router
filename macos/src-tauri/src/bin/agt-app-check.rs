@@ -4,6 +4,12 @@ use std::path::Path;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let roundtrip = match args.as_slice() {
+        [flag] if flag == "--install-cli" => Some(agents_router_app::install_check::run()),
+        [flag, root] if flag == "--install-cli-isolated" => Some(
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(agents_router_app::install_check::isolated(Path::new(root))),
+        ),
         [flag] if flag == "--roundtrip" => Some(agents_router_app::roundtrip::run()),
         [flag, root] if flag == "--roundtrip-isolated" => Some(
             tokio::runtime::Runtime::new()
