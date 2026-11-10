@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "agt_version": "0.16.3",
+  "agt_version": "0.17.0",
   "generated_at": 1794337200.0,
   "install": {
     "source": "app",
-    "version": "0.16.3"
+    "version": "0.17.0"
   },
   "providers": [
     {

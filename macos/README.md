@@ -14,9 +14,9 @@ runtime before validation and publication. The published location is
 {
   "schema_version": 1,
   "source": "app",
-  "app_version": "0.16.3",
-  "runtime_version": "0.16.3",
-  "python_version": "3.13.0",
+  "app_version": "0.17.0",
+  "runtime_version": "0.17.0",
+  "python_version": "3.13.18",
   "plugin_path": "plugin"
 }
 ```
@@ -65,6 +65,47 @@ checkouts report `source`; only an app manifest grants app uninstall ownership.
 All Cargo invocations use `export CARGO_HOME=$PWD/build/cargo-home` from the
 repository root and `--locked`. Tools are checked by
 `scripts/check_app_tools.sh`; this task installs no tools.
+
+## Release build (step 9)
+
+Run `scripts/build_app.sh` on an Apple Silicon Mac with Command Line Tools.
+It checks the prepared tools before creating anything, then requires the Python,
+plugin, Cargo and Tauri versions to agree (including Cargo.lock). It downloads
+the CPython distribution pinned in `scripts/python-runtime.lock`, checks SHA256,
+and builds agt's wheel with pinned build tools. Both build and runtime dependency
+installs use hash-locked requirements and universal wheels. Python tooling,
+Cargo, pip caches, downloads and staging stay under `build/`.
+
+The runtime contains the executable standard library and shared dependencies,
+agt and its dependencies, the complete shipped plugin tree, and `agt-bundle.json`.
+Headers, static libraries, Python's test suite and pip are omitted. Portable
+checked-hash bytecode is compiled before signing, so the bare
+`python3 -I -m agents_router --version` command creates no unsealed resources.
+Only `bin/python3` is shipped: Tauri dereferences resource symlinks, so keeping
+the `python` and `python3.13` aliases would copy the interpreter three times.
+Every Mach-O and nested bundle is signed ad hoc inside-out before Tauri runs.
+Only the generated `build/release.conf.json` adds the runtime resource; the base
+Tauri config stays usable for development without a staged runtime.
+
+The script writes `dist/Agents-Router-<version>-arm64.dmg`. When
+`TAURI_SIGNING_PRIVATE_KEY` is set (a key path or the key value accepted by
+Tauri), it also copies `Agents Router.app.tar.gz` and its `.sig` to `dist/`.
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` supplies the key's password. Real release
+keys are created and stored by the maintainer; the step 9 smoke check uses only
+a throwaway key under `build/`. For that check, `TAURI_SIGNING_PUBLIC_KEY`
+accepts the throwaway public key value or `.pub` path and overrides only the
+generated overlay. Production builds use `plugins.updater.pubkey` in the base
+config (step 10); the build refuses a signing key without a public key.
+
+The build verifies the app and every nested Mach-O with strict codesign,
+requires arm64 and minimum OS <= 14.0, compares the shipped plugin bytes, and
+runs Python, native-module imports and `agt --version` in a private scratch
+home. It mounts the DMG read-only to check the app and `/Applications` link,
+then detaches it. A signed updater archive is extracted and checked the same
+way. Strict signature verification runs again after Python execution.
+`build/app-build-report.json` records every binary and apparent file sizes
+(symlinks counted once): shell <= 20 MiB, runtime <= 120 MiB, app <= 140 MiB,
+DMG <= 50 MiB. A failed check makes the build fail.
 
 ## Isolated native smoke check
 
@@ -334,3 +375,17 @@ agt. Provider executables are `fake_host.py`; no installed agt or real provider
 CLI runs. Each `OK:` line names its checked lifecycle case. Move records a
 relaunch argv instead of opening a copied app. No runtime payload is bundled
 until step 9.
+
+Step 9 measurement on this Command Line Tools-only Apple Silicon Mac (0.17.0,
+CPython 3.13.18+20261026, ad hoc app and throwaway-signed updater):
+
+| Component | Apparent bytes | MiB | Budget (MiB) |
+| --- | ---: | ---: | ---: |
+| App shell | 16,347,861 | 15.59 | 20 |
+| Runtime | 83,927,233 | 80.04 | 120 |
+| Complete app | 100,275,094 | 95.63 | 140 |
+| DMG | 36,657,480 | 34.96 | 50 |
+
+The provisional runtime and aggregate budgets in plan §8 row 17 are confirmed.
+The measurement excludes caches and build tools. `build/app-build-report.json`
+also records all 12 Mach-O architectures and minimum OS versions.
