@@ -19,8 +19,43 @@ use tauri::{webview::PageLoadEvent, Manager};
 #[derive(Default)]
 struct State {
     loads: Mutex<BTreeMap<String, usize>>,
+    finished: Mutex<BTreeMap<String, bool>>,
+    stage: Mutex<String>,
     pages: Mutex<Value>,
     written: AtomicBool,
+}
+impl State {
+    fn page_load(&self, label: &str, event: PageLoadEvent) {
+        if event == PageLoadEvent::Started {
+            *self.loads.lock().unwrap().entry(label.into()).or_default() += 1;
+        }
+        self.finished
+            .lock()
+            .unwrap()
+            .insert(label.into(), event == PageLoadEvent::Finished);
+    }
+
+    fn page_finished(&self, label: &str) -> bool {
+        self.finished.lock().unwrap().get(label) == Some(&true)
+    }
+
+    async fn wait_for_loads(&self) {
+        *self.stage.lock().unwrap() = "waiting for both native page loads".into();
+        // wry 0.57 queues only the script, dropping its callback, before the
+        // first didCommitNavigation. A fixed delay is not a readiness signal.
+        // Keep the native 60 s deadline running while WebKit starts up.
+        while !["popover", "settings"]
+            .iter()
+            .all(|name| self.page_finished(name))
+        {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    fn diagnostics(&self) -> Value {
+        json!({"stage": self.stage.lock().unwrap().clone(),
+            "native_load_finished": self.finished.lock().unwrap().clone()})
+    }
 }
 fn enabled() -> bool {
     std::env::var_os("AGT_APP_SELFTEST").is_some()
@@ -67,15 +102,14 @@ pub fn instrument(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::
             include_str!("selftest.js").replace("__AGT_EXPECTED__", &expected.to_string()),
         )
         .on_page_load(|view, payload| {
-            if payload.event() == PageLoadEvent::Started {
-                *view
-                    .state::<State>()
-                    .loads
-                    .lock()
-                    .unwrap()
-                    .entry(view.label().into())
-                    .or_default() += 1;
-            }
+            view.state::<State>()
+                .page_load(view.label(), payload.event());
+            eprintln!(
+                "ci-selftest {} native page load {:?}: {}",
+                view.label(),
+                payload.event(),
+                payload.url()
+            );
         })
         .on_web_content_process_terminate(|view| {
             if let Ok(path) = report_path() {
@@ -168,7 +202,8 @@ fn finish(
         pages
     };
     let report = json!({"schema_version":1,"pass":pass,"os_version":os_version,"os_build":os_build,"architecture":arch,"webkit_cf_bundle_version":webkit,
-        "baseline_macos_14_0":"unverified; this run proves only the reported host WebKit", "windows_shown":shown,"loads":loads,"pages":pages,"error":error});
+        "baseline_macos_14_0":"unverified; this run proves only the reported host WebKit", "windows_shown":shown,"loads":loads,"pages":pages,"error":error,
+        "diagnostics":handle.state::<State>().diagnostics()});
     let written = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -210,7 +245,16 @@ fn valid_page(page: &Value, settings: bool) -> bool {
         }
 }
 async fn read_page(handle: &tauri::AppHandle, label: &str) -> Result<Value, String> {
-    let window = handle.get_webview_window(label).ok_or("window missing")?;
+    let state = handle.state::<State>();
+    *state.stage.lock().unwrap() = format!("reading {label} observer");
+    if !state.page_finished(label) {
+        return Err(format!(
+            "{label}: refusing WebKit evaluation before native page load finished"
+        ));
+    }
+    let window = handle
+        .get_webview_window(label)
+        .ok_or_else(|| format!("{label}: window missing"))?;
     let (tx, rx) = tokio::sync::oneshot::channel();
     let tx = Mutex::new(Some(tx));
     window
@@ -222,17 +266,28 @@ async fn read_page(handle: &tauri::AppHandle, label: &str) -> Result<Value, Stri
                 }
             },
         )
-        .map_err(|e| e.to_string())?;
-    let reply = tokio::time::timeout(Duration::from_secs(2), rx)
-        .await
-        .map_err(|_| "WebKit callback deadline")?
-        .map_err(|e| e.to_string())?;
-    let value: Value = serde_json::from_str(&reply).map_err(|e| e.to_string())?;
+        .map_err(|e| format!("{label}: scheduling WebKit evaluation: {e}"))?;
+    let reply = receive_reply(rx).await.map_err(|error| {
+        format!(
+            "{label}: {error}; url={:?}; native loads={:?}; diagnostics={}",
+            window.url(),
+            state.loads.lock().unwrap(),
+            state.diagnostics()
+        )
+    })?;
+    let value: Value = serde_json::from_str(&reply)
+        .map_err(|e| format!("{label}: invalid WebKit evaluation reply {reply:?}: {e}"))?;
     if let Some(text) = value.as_str() {
         serde_json::from_str(text).map_err(|e| e.to_string())
     } else {
         Ok(value)
     }
+}
+async fn receive_reply(rx: tokio::sync::oneshot::Receiver<String>) -> Result<String, String> {
+    tokio::time::timeout(Duration::from_secs(2), rx)
+        .await
+        .map_err(|_| "2 s WebKit callback deadline".to_owned())?
+        .map_err(|_| "channel closed: WebKit dropped the evaluation callback without a reply (wry discards callbacks when evaluation precedes the first navigation commit)".to_owned())
 }
 pub fn start(handle: &tauri::AppHandle) {
     if !enabled() {
@@ -275,6 +330,8 @@ pub fn start(handle: &tauri::AppHandle) {
             && handle
                 .get_webview_window("settings")
                 .is_some_and(|w| w.is_visible().unwrap_or(false));
+        handle.state::<State>().wait_for_loads().await;
+        *handle.state::<State>().stage.lock().unwrap() = "starting Settings pane probes".into();
         if let Some(window) = handle.get_webview_window("settings") {
             if let Err(error) = window.eval("window.__AGT_CI_BEGIN = true") {
                 finish(&handle, &path, Value::Null, shown, Some(error.to_string()));
@@ -314,4 +371,45 @@ pub fn start(handle: &tauri::AppHandle) {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{future::Future, task::Poll};
+
+    #[tokio::test]
+    async fn slow_webkit_loads_gate_evaluation_and_reloads_still_count() {
+        let state = State::default();
+        let wait = state.wait_for_loads();
+        tokio::pin!(wait);
+        // No commit yet: wry would discard an eval callback at this point.
+        assert!(std::future::poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx).is_pending())).await);
+        for label in ["popover", "settings"] {
+            state.page_load(label, PageLoadEvent::Started);
+        }
+        state.page_load("popover", PageLoadEvent::Finished);
+        assert!(std::future::poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx).is_pending())).await);
+        state.page_load("settings", PageLoadEvent::Finished);
+        tokio::time::timeout(Duration::from_secs(1), wait)
+            .await
+            .unwrap();
+        assert_eq!(
+            *state.loads.lock().unwrap(),
+            BTreeMap::from([("popover".into(), 1), ("settings".into(), 1)])
+        );
+        state.page_load("settings", PageLoadEvent::Started);
+        assert!(!state.page_finished("settings"));
+        assert_eq!(state.loads.lock().unwrap()["settings"], 2);
+    }
+
+    #[tokio::test]
+    async fn discarded_callback_reports_why_the_channel_closed() {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        drop(tx); // wry's pre-commit script queue drops this callback capture.
+        let error = receive_reply(rx).await.unwrap_err();
+        assert!(error.contains("channel closed"));
+        assert!(error.contains("dropped the evaluation callback without a reply"));
+        assert!(error.contains("first navigation commit"));
+    }
 }

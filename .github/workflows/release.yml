@@ -31,7 +31,7 @@ jobs:
         run: python3 -m unittest test_app_sources test_build_app
       - name: Rust tests
         working-directory: macos/src-tauri
-        run: cargo test --locked
+        run: cargo test --locked --features ci-selftest
       - name: Frontend logic tests
         run: node --test macos/ui/logic
       - name: Golden contracts and isolated CLI checks
