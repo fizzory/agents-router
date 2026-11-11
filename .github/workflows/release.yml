@@ -38,10 +38,25 @@ jobs:
         working-directory: macos/src-tauri
         run: |
           cargo run --locked --bin agt-app-check -- ../../tests/fixtures/app
+          cargo run --locked --bin agt-app-check -- --stdin usage < ../../tests/fixtures/app/usage.json
           cargo run --locked --bin agt-app-check -- --roundtrip
           cargo run --locked --bin agt-app-check -- --install-cli
       - name: Build and mount keyless release DMG
         run: scripts/build_app.sh
+      - name: Install bundled CLI and decode live usage in scratch
+        run: |
+          set -euo pipefail
+          scratch=$(mktemp -d)
+          trap 'rm -rf "$scratch"' EXIT
+          ditto "$CARGO_TARGET_DIR/aarch64-apple-darwin/release/bundle/macos/Agents Router.app" "$scratch/Agents Router.app"
+          checker="$CARGO_TARGET_DIR/debug/agt-app-check"
+          export HOME="$scratch/home" AGT_HOME="$scratch/agt"
+          export AGT_APP_SUPPORT="$scratch/support" AGT_BIN_DIR="$scratch/bin"
+          export AGT_CONFIG_DIR="$scratch/agt" PATH=/usr/bin:/bin
+          mkdir -p "$HOME"
+          "$checker" --install-cli --app "$scratch/Agents Router.app"
+          "$AGT_BIN_DIR/agt" --version
+          "$AGT_BIN_DIR/agt" usage --json | "$checker" --stdin usage
       - name: Upload verified DMG
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

@@ -28,6 +28,44 @@ fn require(value: bool, message: &str) -> Result<()> {
         Err(message.into())
     }
 }
+/// Unlike app first launch, a developer check must opt into every destination.
+pub async fn from_app(app: &Path) -> Result<()> {
+    for name in ["AGT_APP_SUPPORT", "AGT_BIN_DIR", "AGT_HOME"] {
+        require(
+            std::env::var_os(name).is_some(),
+            &format!("--install-cli --app requires explicit {name}"),
+        )?;
+    }
+    let mut paths = InstallPaths::discover()?;
+    let app = app
+        .canonicalize()
+        .map_err(|e| format!("Missing app bundle {}: {e}", app.display()))?;
+    // The checker also accepts a writable copied app under the temporary root.
+    // Production app location checks and mounted/translocated refusal stay intact.
+    let temporary = std::env::temp_dir().canonicalize().map_err(err)?;
+    if app.starts_with(temporary) {
+        paths
+            .applications
+            .push(app.parent().ok_or("App has no parent")?.to_path_buf());
+    }
+    let installed = install::install_bundle(&paths, &app, false).await?;
+    println!(
+        "OK: installed agt {} from {}",
+        installed.version,
+        app.display()
+    );
+    println!(
+        "runtime: {}",
+        paths.current().ok_or("No installed runtime")?.display()
+    );
+    println!("launcher: {}", paths.launcher().display());
+    println!("public: {}", paths.public().display());
+    println!("AGT_HOME: {}", paths.agt_home.display());
+    if let Some(foreign) = installed.foreign {
+        println!("Kept foreign public CLI: {}", foreign.target.display());
+    }
+    Ok(())
+}
 pub fn run() -> Result<()> {
     let root = Scratch(std::env::temp_dir().join(format!(
         "agt-app-install-{}-{}",

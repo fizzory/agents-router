@@ -485,6 +485,21 @@ CLI runs. Each `OK:` line names its checked lifecycle case. Move records a
 relaunch argv instead of opening a copied app. No runtime payload is bundled
 until step 9.
 
+`agt-app-check --install-cli --app <path>` installs from that app's own
+`Contents/Resources/runtime` through the same transaction as first launch.
+It requires explicit absolute `AGT_APP_SUPPORT`, `AGT_BIN_DIR` and `AGT_HOME`
+destinations and prints the installed version and paths. A writable app copied
+under `$TMPDIR` is accepted for this check; mounted and translocated apps still
+require Move to Applications. It preserves a foreign public CLI.
+The checker is a development binary, outside the release app:
+`CARGO_HOME="$PWD/build/cargo-home" cargo build --locked --manifest-path macos/src-tauri/Cargo.toml --bin agt-app-check`.
+
+Pipe one JSON document to `agt-app-check --stdin usage` to decode it with the
+app's typed decoder. Other kinds use the fixture stems in `models.rs`'s
+`FIXTURES` inventory, such as `config-show`, `accounts-list` and `roles-show`.
+Success prints one `OK:` line; decode failures print the fixture name and field
+path and exit 1. Folder checks use the same decoder and error format.
+
 Step 9 measurement on this Command Line Tools-only Apple Silicon Mac (0.17.0,
 CPython 3.13.18+20261026, ad hoc app and throwaway-signed updater):
 
@@ -497,4 +512,5 @@ CPython 3.13.18+20261026, ad hoc app and throwaway-signed updater):
 
 The provisional runtime and aggregate budgets in plan §8 row 17 are confirmed.
 The measurement excludes caches and build tools. `build/app-build-report.json`
-also records all 12 Mach-O architectures and minimum OS versions.
+also records the architecture and minimum OS versions of every Mach-O file
+found in the app.

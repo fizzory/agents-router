@@ -468,6 +468,23 @@ pub struct Installed {
     pub version: String,
     pub foreign: Option<ForeignCli>,
 }
+/// The app and bundle checker install the payload belonging to this exact app.
+pub async fn install_bundle(
+    paths: &InstallPaths,
+    app: &Path,
+    confirm_downgrade: bool,
+) -> Result<Installed> {
+    if app.extension().is_none_or(|ext| ext != "app") || !app.join("Contents").is_dir() {
+        return Err(format!("Missing app bundle: {}", app.display()));
+    }
+    install(
+        paths,
+        app,
+        &app.join("Contents/Resources/runtime"),
+        confirm_downgrade,
+    )
+    .await
+}
 pub async fn install(
     paths: &InstallPaths,
     app: &Path,

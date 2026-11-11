@@ -553,13 +553,30 @@ pub fn decode(kind: CommandKind, bytes: &[u8]) -> Result<Snapshot, String> {
         serde_json::from_slice(bytes).map_err(|e| format!("invalid agt JSON: {e}"))?;
     // Legacy commands have no version. If one is supplied it must still be understood.
     if let Some(version) = value.get("schema_version") {
-        serde_json::from_value::<SchemaVersion>(version.clone()).map_err(|e| e.to_string())?;
+        serde_json::from_value::<SchemaVersion>(version.clone())
+            .map_err(|e| format!("schema_version: {e}"))?;
     }
     macro_rules! parse {
         ($ty:ty, $variant:ident) => {
-            serde_json::from_value::<$ty>(value)
+            serde_path_to_error::deserialize::<_, $ty>(value)
                 .map(Snapshot::$variant)
-                .map_err(|e| format!("invalid {kind:?} JSON: {e}"))
+                .map_err(|e| {
+                    let detail = e.inner().to_string();
+                    let mut path = e.path().to_string();
+                    if path == "." {
+                        path.clear();
+                    }
+                    if let Some(field) = detail
+                        .strip_prefix("missing field `")
+                        .and_then(|s| s.strip_suffix('`'))
+                    {
+                        if !path.is_empty() {
+                            path.push('.');
+                        }
+                        path.push_str(field);
+                    }
+                    format!("invalid {kind:?} JSON: {path}: {detail}")
+                })
         };
     }
     if value.get("error").and_then(Value::as_str) == Some("needs_choice") {
@@ -669,6 +686,17 @@ pub const FIXTURES: &[(&str, CommandKind)] = &[
     ("activity-log.json", CommandKind::ActivityLog),
 ];
 
+/// Stdin names are fixture stems (or filenames), sharing the folder inventory.
+pub fn check_document(name: &str, bytes: &[u8]) -> Result<(), String> {
+    let (file, kind) = FIXTURES
+        .iter()
+        .find(|(file, _)| *file == name || file.strip_suffix(".json") == Some(name))
+        .ok_or_else(|| format!("missing model inventory entry for {name}"))?;
+    decode(*kind, bytes)
+        .map(|_| ())
+        .map_err(|e| format!("{file}: {e}"))
+}
+
 pub fn check_fixtures(folder: &Path) -> Result<usize, String> {
     let mut count = 0;
     for entry in fs::read_dir(folder).map_err(|e| e.to_string())? {
@@ -680,12 +708,7 @@ pub fn check_fixtures(folder: &Path) -> Result<usize, String> {
             .file_name()
             .and_then(|s| s.to_str())
             .ok_or("non-UTF8 fixture name")?;
-        let (_, kind) = FIXTURES
-            .iter()
-            .find(|(file, _)| *file == name)
-            .ok_or_else(|| format!("missing model inventory entry for {name}"))?;
-        decode(*kind, &fs::read(&path).map_err(|e| e.to_string())?)
-            .map_err(|e| format!("{name}: {e}"))?;
+        check_document(name, &fs::read(&path).map_err(|e| e.to_string())?)?;
         count += 1;
     }
     for (name, _) in FIXTURES {

@@ -120,7 +120,7 @@ impl InstallController {
             return;
         }
         self.publish(app, Some("progress"), Some("Installing agt…".into()));
-        match install::install(&self.paths, &self.app, &self.payload, downgrade).await {
+        match install::install_bundle(&self.paths, &self.app, downgrade).await {
             Ok(result) => {
                 if !result.first {
                     if let Err(e) = install::refresh_plugins(&self.paths).await {
