@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-accounts-add"
+description = "Enables the accounts_add command without any pre-configured scope."
+commands.allow = ["accounts_add"]
+
+[[permission]]
+identifier = "deny-accounts-add"
+description = "Denies the accounts_add command without any pre-configured scope."
+commands.deny = ["accounts_add"]

@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "key": "kiro.default_model",
+  "file": "<ROOT>/agt/settings.toml",
+  "level": "user",
+  "changed": false,
+  "previous": {
+    "level": "user",
+    "present": false,
+    "value": null
+  },
+  "revision": "4fc26ecd4ff5a247777518fee9476a090b27fe144cf1cf5a1e4c9015c67741c0"
+}

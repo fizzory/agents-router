@@ -183,7 +183,8 @@ def max_utilization(record: dict[str, Any] | None) -> float | None:
     return max(values) if values else None
 
 
-def account_record(runtime: RuntimeConfig, account: Account, usage: dict[str, Any]) -> dict[str, Any] | None:
+def account_record(runtime: RuntimeConfig, account: Account, usage: dict[str, Any], *,
+                   now: float | None = None) -> dict[str, Any] | None:
     """The account's usage record, merged with every folder that has the same login.
 
     Folders logged in to one account share its limits, so the busiest window and the
@@ -204,7 +205,7 @@ def account_record(runtime: RuntimeConfig, account: Account, usage: dict[str, An
         own = current(account.name)
         return own if own is not None else (records[0] if records else None)
     merged: dict[str, Any] = {"windows": {}, "pools": {}}
-    now = time.time()
+    now = time.time() if now is None else now
 
     def used(window: dict[str, Any]) -> float:
         # A window that has reset since it was recorded counts for nothing, so it never hides a current one.

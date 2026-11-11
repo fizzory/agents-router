@@ -5,7 +5,7 @@ abstract: "Keep agents, skills, MCP servers and instruction files in sync betwee
 authors:
   - alias: "Watcharagorn"
     website: "https://github.com/Watcharagorn"
-repository-code: "https://github.com/Watcharagorn/agents-router"
+repository-code: "https://github.com/fizzory/agents-router"
 license: Apache-2.0
 keywords:
   - mcp

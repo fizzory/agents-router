@@ -293,6 +293,22 @@ Waiting for you
 
 ### Choosing where an item goes
 
+`agt share list --json` is a read-only listing that exits 0 even when items need attention or sharing is off.
+It returns `schema_version: 1`, `enabled`, `folders`, and `items`. Each item has a stable `id` (the kind and
+agt's normalized identity), `kind`, `name`, and a `cells` map keyed by CLI folder label. Each cell carries its
+planner `state`, `note`, `editable`, and a `reason` when editing is unavailable. Agents, skills, MCP servers,
+hooks, plugins and instructions use their own planner decisions; no commands or secret values are included.
+`--repo PATH` lists a listed repo's items; inside a listed repo, that scope is the default. `share status --json`
+keeps its attention exit code, and `share pick --json` still exits 3 when it returns `needs_choice`.
+
+`share kinds add|remove --json` returns JSON when the kind is already on or off
+too: `{kind, enabled, unchanged: true}`. A sync report retains its `written` and
+`failed` arrays; exit 1 can mean a partially applied run, so inspect both arrays.
+
+Sharing writers take the settings lock before reading settings, then `apply.lock` before changing CLI copies.
+Background syncs use the same order without waiting. Backup, settings write and audit entries stay under the
+settings lock, including renamed picks. No path may acquire the settings lock while holding `apply.lock`.
+
 `agt share pick` in a terminal opens a grid of items by CLI: the arrow keys move, Space ticks or unticks a cell, `a` ticks and `n` unticks a whole row, Enter saves, and Esc or `q` quits without saving. The line under the grid names each change before you press Enter ("explorer leaves kiro"). By command:
 
 ```bash
@@ -315,6 +331,10 @@ Turning sharing on also sets up what runs it without you:
 | A catch-up | when agt's MCP server starts in any CLI | |
 
 Each of these syncs only when something moved since the last sync, never waits for another run, and never runs inside agt's workers. Changes inside `skills/synced` don't count, since agt never shares it and Claude Code rewrites it often. A run that changes nothing isn't logged. They all call `~/.agents-router/bin/agt-run`, a small launcher that records which Python and install agt runs from, so they don't depend on `PATH`. `agt setup`, `agt update` and an MCP server start rewrite it when agt moves.
+
+For an app-owned install, `agt-run` calls the app's stable `bin/agt` instead of
+recording a Python version. Hooks and the watcher follow `current` after an update.
+Running jobs and their private hooks keep their physical runtime until they finish.
 
 At a session start, Claude Code gets one line when there's something to say: what arrived in that folder since your last session there, and what waits for you (a conflict, say, with the command that fixes it). Nothing at all otherwise. A session that's already open doesn't load agents or skills that arrive later; that's how every CLI works. The watcher also posts a macOS notification for a new conflict, an item waiting to be deleted, a frozen folder, a write that keeps failing or a plugin waiting for your answer, at most once an hour.
 

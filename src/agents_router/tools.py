@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from agents_router import accounts, health_view, jobs, limits, messages, plans, quota, usage_view
+from agents_router import accounts, health_view, jobs, limits, messages, plans, profiles, quota, usage_view
 from agents_router.config import load_config, session_folder, set_session
 from agents_router.hosts import detect_host
 from agents_router.runtimes import AVAILABLE as RUNTIMES, get_runtime
@@ -485,6 +485,10 @@ def account_report(runtime_name: str, host: str | None = None, *, command: list[
     for account in config.listed_accounts():
         record = accounts.account_record(config, account, usage) or {}
         entry: dict[str, Any] = {"name": account.name, "home": str(account.home), "enabled": account.enabled}
+        primary = account.is_primary or profiles.same_folder(account.home, config.primary)
+        entry["can_toggle"] = not (primary or account.found)
+        entry["toggle_reason"] = ("primary is a reserved name; this is the provider's own login" if primary else
+                                  "discovered is your own Claude profile" if account.found else None)
         if config.is_session(account):
             entry["this_session"] = True  # never takes this session's delegated jobs
         if account.found:

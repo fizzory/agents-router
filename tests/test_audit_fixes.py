@@ -17,7 +17,7 @@ from helpers import TempHome
 
 from agents_router import accounts, cli, jobs, runner, sync, tools
 from agents_router.config import Account, jobs_dir, load_config
-from agents_router.fsutil import make_private_dir, open_private, pid_alive, process_start_time, write_json
+from agents_router.fsutil import make_private_dir, open_private, pid_alive, process_start_time, read_json, write_json
 from agents_router.runtimes.antigravity import AntigravityParser
 from agents_router.runtimes.base import clean_environment
 from agents_router.runtimes.claude import SYNC_PLAN, ClaudeParser, ClaudeRuntime, _project_dir_name
@@ -89,10 +89,16 @@ class OrphanedWorkerTests(TempHome):
         self.write_config(accounts=("a1",), extra="max_jobs_per_account = 1")
         os.environ["FAKE_CLAUDE_SCENARIO"] = "slow"
         job_id = jobs.create_job(runtime="claude", prompt="x", cwd=str(self.project))["job_id"]
-        status = wait_until(lambda: (lambda s: s if s.get("child_pid") else None)(jobs.read_status(job_id)))
-        self.assertTrue(status and status.get("child_pid"), status)
+        # child_pid is published before the fake reads stdin or flushes its init event.
+        # Killing the runner then can make that flush fail with BrokenPipeError.
+        status = wait_until(
+            lambda: (lambda s: s if s.get("child_pid") and s.get("init") else None)(jobs.read_status(job_id)), 60,
+        )
+        self.assertTrue(status and status.get("child_pid") and status.get("init"), status)
         child = int(status["child_pid"])
         self.assertTrue(self.owner_file().exists())
+        self.assertEqual(read_json(self.owner_file()), {"pid": child, "started": status["child_started"], "job_id": job_id})
+        self.assertTrue(pid_alive(child))
 
         os.kill(int(status["runner_pid"]), getattr(signal, "SIGKILL", signal.SIGTERM))  # the runner only
         self.assertTrue(wait_until(lambda: not pid_alive(int(status["runner_pid"])), 10))

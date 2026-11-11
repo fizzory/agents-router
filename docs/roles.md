@@ -62,6 +62,7 @@ Change roles with `agt roles config`, never by hand-editing, so every change is 
 | Command | Does |
 |---|---|
 | `agt roles` / `agt roles show [--json]` | the table, with roles that are off and providers that can't run |
+| `agt roles show --json --discover-models` | explicitly discover model choices, waiting at most 5 seconds total |
 | `agt roles config` (at a terminal) | the grid: roles as rows, accounts as columns. Space ticks, `a`/`n` whole row, `m` picks a model, `e` steps effort, `+`/`-` account order, `s` splits a cell, `o` turns the role under the cursor on or off. Enter saves |
 | `agt roles config <role> --only/--add/--remove <providers>` | a role's providers (a role keeps at least one) |
 | `agt roles config <role> --order <providers>` | an edit or full role's priority |
@@ -79,6 +80,18 @@ Off-plan models stay visible, greyed out. Configured models absent from the offe
 Unpinned providers combine eligible worker accounts' model lists. A model is selectable when any worker's plan allows it.
 Lists load when opened: Claude aliases, Codex's account-local cache, and a guarded Kiro list cached for one hour.
 Antigravity has no model list yet; allowed and configured models remain selectable.
+
+`roles show --json` returns `schema_version: 1` and each role's per-key `sources` (`level`, `file`, `line`).
+Each provider has `choices`: `models` with `model`, `offered`, `allowed`, and a refusal `reason`; `efforts`
+through the account's `max_effort` (null means default); and `catalog.status` (`ready`, `loading`, `unavailable`).
+The default read creates no model catalog and starts no discovery. `--discover-models` explicitly requests it,
+with a five-second total wait; an unfinished lookup has status `loading`. These choices do not run admission precheck.
+
+`roles config --json` keeps the human `undo` text and also returns `undo_from`, `level`, and `if_unchanged`.
+Restore with argument arrays: `roles config --from <undo_from> --<level> --if-unchanged <if_unchanged> --json`.
+The existing settings lock and hash guard refuse restoration after an intervening edit. Errors return
+`{"ok": false, "error": {"code", "message", "exit_code", "needs_user_words", ...}}`: ordinary errors exit 2;
+the user's-words gate exits 3 with `code: "needs_user_words"` and `needs_user_words: true`.
 `e` steps the last entry's effort; `s` appends a copy
 to the role so you can choose another model or effort. `+`/`-` move the account's entries as a block. Ticking an empty
 cell uses that account's most common model and effort in the other roles. Arrow keys (or `h`/`j`/`k`/`l`) scroll the

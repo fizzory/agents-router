@@ -184,7 +184,7 @@ Concurrency: no cap on jobs per account folder by default. `.claude.json` has a 
 
 | Host | Package |
 |---|---|
-| Claude Code | Plugin in this repository with `.claude-plugin/marketplace.json`: the usage skill, `/agents-router:delegate`, the MCP server and the two hooks in `hooks/hooks.json`. Install: `/plugin install agents-router --marketplace Watcharagorn/agents-router` |
+| Claude Code | Plugin in this repository with `.claude-plugin/marketplace.json`: the usage skill, `/agents-router:delegate`, the MCP server and the two hooks in `hooks/hooks.json`. Install: `/plugin install agents-router --marketplace fizzory/agents-router` |
 | Codex | The same plugin manifest (`codex plugin add`), or an MCP server entry |
 | Antigravity | `plugin.json` and `mcp_config.json` at the repository root, next to the shared skill |
 | Cursor and other MCP hosts | MCP server entry, plus rules or skill text where the host supports it |

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-config-unset"
+description = "Enables the config_unset command without any pre-configured scope."
+commands.allow = ["config_unset"]
+
+[[permission]]
+identifier = "deny-config-unset"
+description = "Denies the config_unset command without any pre-configured scope."
+commands.deny = ["config_unset"]

@@ -1,0 +1,668 @@
+{
+  "workspace": null,
+  "entries": [
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "refused",
+      "workspace": null,
+      "family": null,
+      "message": "Example invalid setting",
+      "file": "<ROOT>/project/.agt/settings.local.toml",
+      "line": 2,
+      "id": "2027-01:32"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "sync",
+      "workspace": null,
+      "family": null,
+      "command": "agt share sync",
+      "trigger": "command",
+      "run": "fixture-failure",
+      "items": [
+        "example"
+      ],
+      "changes": [
+        {
+          "item": "agents/example",
+          "labels": [
+            "codex"
+          ],
+          "action": "copy",
+          "path": "<ROOT>/home/.codex/agents/example.toml",
+          "ok": false,
+          "backup": null,
+          "message": "Example write failure"
+        }
+      ],
+      "kept": [],
+      "conflicts": [],
+      "seconds": 0.0,
+      "id": "2027-01:31"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.auto_copy",
+      "old": true,
+      "new": false,
+      "old_present": true,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share undo agents/example --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:30"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "sync",
+      "workspace": null,
+      "family": null,
+      "command": "agt share undo",
+      "trigger": "command",
+      "run": "fixture-backed-undo",
+      "items": [
+        "example"
+      ],
+      "changes": [
+        {
+          "item": "agents/example",
+          "labels": [
+            "codex"
+          ],
+          "action": "update",
+          "path": "<ROOT>/home/.codex/agents/example.toml",
+          "ok": true,
+          "backup": "<ROOT>/agt/state/share/backups/fixture-backed-undo/codex/example.toml"
+        },
+        {
+          "item": "agents/example",
+          "labels": [
+            "claude"
+          ],
+          "action": "update",
+          "path": "<ROOT>/home/.claude/agents/example.md",
+          "ok": true,
+          "backup": "<ROOT>/agt/state/share/backups/fixture-backed-undo/claude/example.md"
+        }
+      ],
+      "kept": [],
+      "conflicts": [],
+      "seconds": 0.0,
+      "id": "2027-01:29"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "sync",
+      "workspace": null,
+      "family": null,
+      "command": "agt share sync",
+      "trigger": "command",
+      "run": "fixture-backed-sync",
+      "items": [
+        "example"
+      ],
+      "changes": [
+        {
+          "item": "agents/example",
+          "labels": [
+            "codex"
+          ],
+          "action": "update",
+          "path": "<ROOT>/home/.codex/agents/example.toml",
+          "ok": true,
+          "backup": "<ROOT>/agt/state/share/backups/fixture-backed-sync/codex/example.toml"
+        }
+      ],
+      "kept": [],
+      "conflicts": [],
+      "seconds": 0.0,
+      "id": "2027-01:28"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "sync",
+      "workspace": null,
+      "family": null,
+      "command": "agt share sync",
+      "trigger": "command",
+      "run": "fixture-run-2",
+      "items": [
+        "example@tools",
+        "notes"
+      ],
+      "changes": [
+        {
+          "item": "mcp/notes",
+          "labels": [
+            "codex"
+          ],
+          "action": "copy",
+          "path": "<ROOT>/home/.codex/config.toml",
+          "ok": true,
+          "backup": null
+        },
+        {
+          "item": "plugins/example@tools",
+          "labels": [
+            "codex"
+          ],
+          "action": "copy",
+          "path": "<ROOT>/home/.codex",
+          "ok": true,
+          "backup": null
+        }
+      ],
+      "kept": [],
+      "conflicts": [],
+      "seconds": 0.0,
+      "id": "2027-01:27"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.mcp",
+      "old": null,
+      "new": true,
+      "old_present": false,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share kinds add mcp --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:26"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.mcp",
+      "old": true,
+      "new": null,
+      "old_present": true,
+      "new_present": false,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share kinds remove mcp --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:25"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "sync",
+      "workspace": null,
+      "family": null,
+      "command": "agt share pick",
+      "trigger": "command",
+      "run": "fixture-run-1",
+      "items": [
+        "example"
+      ],
+      "changes": [
+        {
+          "item": "agents/example",
+          "labels": [
+            "codex"
+          ],
+          "action": "copy",
+          "path": "<ROOT>/home/.codex/agents/example.toml",
+          "ok": true,
+          "backup": null
+        }
+      ],
+      "kept": [],
+      "conflicts": [],
+      "seconds": 0.0,
+      "id": "2027-01:24"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.targets.agents/example.not_in",
+      "old": [
+        "codex"
+      ],
+      "new": null,
+      "old_present": true,
+      "new_present": false,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share pick agents/example --in codex --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:23"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "sync",
+      "workspace": null,
+      "family": null,
+      "command": "agt share pick",
+      "trigger": "command",
+      "run": "fixture-run-0",
+      "items": [],
+      "changes": [],
+      "kept": [],
+      "conflicts": [],
+      "seconds": 0.0,
+      "id": "2027-01:22"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.targets.agents/example.not_in",
+      "old": null,
+      "new": [
+        "codex"
+      ],
+      "old_present": false,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share pick agents/example --not-in codex --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:21"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.plugins",
+      "old": null,
+      "new": true,
+      "old_present": false,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share pick --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:20"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.mcp",
+      "old": null,
+      "new": true,
+      "old_present": false,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share pick --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:19"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.instructions",
+      "old": null,
+      "new": "block",
+      "old_present": false,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share pick --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:18"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.hooks",
+      "old": null,
+      "new": true,
+      "old_present": false,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share pick --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:17"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.watcher",
+      "old": null,
+      "new": false,
+      "old_present": false,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share status --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:16"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.tool_widening",
+      "old": null,
+      "new": "allow-if-shell",
+      "old_present": false,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share status --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:15"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.push_on_save",
+      "old": null,
+      "new": false,
+      "old_present": false,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share status --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:14"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.kinds",
+      "old": null,
+      "new": [
+        "agents",
+        "skills"
+      ],
+      "old_present": false,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share status --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:13"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.folders",
+      "old": null,
+      "new": [
+        {
+          "cli": "claude",
+          "label": "claude",
+          "path": "<ROOT>/home/.claude"
+        },
+        {
+          "cli": "codex",
+          "label": "codex",
+          "path": "<ROOT>/home/.codex"
+        }
+      ],
+      "old_present": false,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share status --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:12"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.enabled",
+      "old": null,
+      "new": true,
+      "old_present": false,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share status --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:11"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "share.auto_copy",
+      "old": null,
+      "new": true,
+      "old_present": false,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt share status --json",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:10"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "roles.reviewer",
+      "old": {
+        "providers": [
+          "claude:work/sonnet:high"
+        ]
+      },
+      "new": {
+        "providers": [
+          "claude:work/opus:high"
+        ]
+      },
+      "command": "agt roles config --set-model claude:work=opus --user",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:9"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "roles.reviewer.providers",
+      "old": null,
+      "new": [
+        "claude:work/sonnet:high"
+      ],
+      "old_present": false,
+      "new_present": true,
+      "by": "hand edit",
+      "id": "2027-01:8"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "max_jobs",
+      "old": 6,
+      "new": null,
+      "old_present": true,
+      "new_present": false,
+      "by": "hand edit",
+      "id": "2027-01:7"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "codex.max_jobs",
+      "old": 4,
+      "new": null,
+      "old_present": true,
+      "new_present": false,
+      "by": "hand edit",
+      "id": "2027-01:6"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "claude.accounts",
+      "old": [
+        {
+          "name": "work",
+          "home": "<ROOT>/home/accounts/work",
+          "enabled": true
+        }
+      ],
+      "new": [
+        {
+          "name": "work",
+          "home": "~/accounts/work"
+        }
+      ],
+      "old_present": true,
+      "new_present": true,
+      "by": "hand edit",
+      "id": "2027-01:5"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "claude.accounts.work.enabled",
+      "old": false,
+      "new": true,
+      "old_present": true,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt accounts enable work --runtime claude",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:4"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": null,
+      "family": null,
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "claude.accounts.work.enabled",
+      "old": true,
+      "new": false,
+      "old_present": true,
+      "new_present": true,
+      "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+      "command": "agt accounts disable work --runtime claude",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:3"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": "<ROOT>/project",
+      "family": "<ROOT>/project",
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "max_depth",
+      "old": 2,
+      "new": null,
+      "old_present": true,
+      "new_present": false,
+      "revision": "e5f1b750368d040f32ccdb95d2d9a81c9bf9e5a4ce982ca4320135bf0edb9733",
+      "command": "agt config unset max_depth",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:2"
+    },
+    {
+      "time": "2027-01-15T08:00:00+0000",
+      "type": "setting",
+      "workspace": "<ROOT>/project",
+      "family": "<ROOT>/project",
+      "file": "<ROOT>/agt/settings.toml",
+      "level": "user",
+      "key": "max_depth",
+      "old": null,
+      "new": 2,
+      "old_present": false,
+      "new_present": true,
+      "revision": "4fc26ecd4ff5a247777518fee9476a090b27fe144cf1cf5a1e4c9015c67741c0",
+      "command": "agt config set max_depth 2",
+      "by": "command",
+      "user_said": null,
+      "id": "2027-01:1"
+    }
+  ],
+  "more": 0,
+  "other_workspaces": 0
+}

@@ -32,19 +32,21 @@ flowchart LR
 
 | | |
 |---|---|
-| **What it is** | A command (`agt`), a plugin for Claude Code, Codex and Antigravity, and an MCP server for any other client |
+| **What it is** | A command (`agt`), a plugin for Claude Code, Codex and Antigravity, an MCP server for any other client, and a [macOS menu bar app](docs/macos-app.md) |
 | **What it isn't** | An API proxy or model router: every subagent is the vendor's own CLI with your own login |
-| **Needs** | Python 3.11 or newer and its one dependency, [rich](https://github.com/Textualize/rich), which draws color for a person at a terminal (git to install) |
+| **Needs** | CLI install: Python 3.11 or newer, [rich](https://github.com/Textualize/rich) for terminal color, and git. The macOS app bundles Python and agt |
 | **Tested live** | Windows, with Claude Code 2.1.299, Codex 0.162.1 and Antigravity 1.4.0 |
 
 ## Install
 
-Paste this into Claude Code, Codex or Antigravity:
+**macOS app:** on an Apple Silicon Mac with macOS 14 or newer, download `Agents-Router-<version>-arm64.dmg` from [GitHub Releases](https://github.com/fizzory/agents-router/releases/latest). See the [app guide](docs/macos-app.md) for approval, installation, terminal PATH, updates and uninstall.
+
+**CLI install:** paste this into Claude Code, Codex or Antigravity:
 
 ```text
-Install and set up Agents Router for me from https://github.com/Watcharagorn/agents-router.
+Install and set up Agents Router for me from https://github.com/fizzory/agents-router.
 If `agt` isn't installed, install it with
-`uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router` (or pipx),
+`uv tool install --managed-python git+https://github.com/fizzory/agents-router` (or pipx),
 asking for any sandbox permission you need. If `agt` is there but has no `agt guide` command
 (older than 0.10), run `agt update` first. Then run `agt guide setup` and follow it: do the
 routine steps yourself, show me the remaining choices together once, apply what I pick, and
@@ -56,16 +58,17 @@ Your agent installs `agt` and puts the plugin in every CLI and Claude Code profi
 
 - **Needs:** git, and [uv](https://docs.astral.sh/uv/getting-started/installation/) (`brew install uv` on a Mac) or pipx.
 - **Not on PyPI:** the PyPI package named `agt` is a different project.
-- **Later:** `agt update` updates `agt` and the plugin everywhere it is.
+- **Later:** `agt update` updates a CLI install and its plugins. For an app install, use **Check for Updates…** in the app; `agt update` refreshes its bundled plugin locally.
 
 <details>
 <summary>Install it yourself in a terminal</summary>
 
 | Step | Command |
 |---|---|
-| 1. Install `agt` | `uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router` (or `pipx install git+https://github.com/Watcharagorn/agents-router`) |
+| 1. Install `agt` | `uv tool install --managed-python git+https://github.com/fizzory/agents-router` (or `pipx install git+https://github.com/fizzory/agents-router`) |
 | 2. Set up every installed CLI and Claude profile | `agt setup` (Enter applies it; `--dry-run` only shows it) |
 | Later: update everything | `agt update` |
+| Inspect the install and competing copies | `agt doctor --verbose` |
 
 - **`agt` not found:** run `uv tool update-shell` (or `pipx ensurepath`) and open a new terminal.
 - **What `agt setup` does:**
@@ -77,9 +80,9 @@ Your agent installs `agt` and puts the plugin in every CLI and Claude Code profi
 
 | Plugin by hand | Command |
 |---|---|
-| Claude Code | `/plugin install agents-router --marketplace Watcharagorn/agents-router` in a session, or `claude plugin install agents-router --marketplace Watcharagorn/agents-router` |
+| Claude Code | `/plugin install agents-router --marketplace fizzory/agents-router` in a session, or `claude plugin install agents-router --marketplace fizzory/agents-router` |
 | Codex | `agt setup --host codex` (the plugin and native relay agents) |
-| Antigravity | `agy plugin install https://github.com/Watcharagorn/agents-router`; `agt setup --host antigravity` adds the native relay agents |
+| Antigravity | `agy plugin install https://github.com/fizzory/agents-router`; `agt setup --host antigravity` adds the native relay agents |
 | Any MCP client | Server command `agt`, argument `mcp` |
 
 Per host details: [docs/hosts.md](docs/hosts.md).
@@ -90,6 +93,7 @@ Per host details: [docs/hosts.md](docs/hosts.md).
 
 | I want to | Do this | Guide |
 |---|---|---|
+| Manage settings and see usage in the menu bar | Open Agents Router.app, then **Settings…** | [macOS app](docs/macos-app.md) |
 | Hand a task to Codex | Ask your session: "have Codex review this branch" | [Codex](docs/codex.md) |
 | Give roles their providers | `agt roles config` | [Roles](docs/roles.md) |
 | Run a subagent from a terminal | `agt run --runtime codex --access read "Review the diff on this branch"` | [Hosts](docs/hosts.md) |
@@ -97,11 +101,18 @@ Per host details: [docs/hosts.md](docs/hosts.md).
 | See what sharing would do | `agt share enable --dry-run` | [Sharing](docs/share.md#turning-it-on) |
 | Turn sharing on | `agt share enable`, then Enter | [Sharing](docs/share.md#turning-it-on) |
 | Check what's in sync | `agt share status` | [Sharing](docs/share.md#everyday-use) |
+| Read sharing cells for an app | `agt share list --json` | [Sharing](docs/share.md#everyday-use) |
+| Read role choices for an app | `agt roles show --json [--discover-models]` | [Roles](docs/roles.md) |
 | Use your other Claude profiles | Nothing to set up: `account=claude-work` | [Claude Code](docs/claude-code.md#2-your-other-profiles-work-with-no-setup) |
 | Add a Claude account | `agt accounts add max-2` | [Claude Code](docs/claude-code.md#3-add-more-accounts) |
+| Check a login without using quota | `agt accounts check primary --json` | [Configuration](docs/configuration.md#account-checks-and-switches) |
+| Validate a new account | `agt accounts add max-2 --check --json` | [Configuration](docs/configuration.md#account-checks-and-switches) |
+| Inspect settings for an app | `agt config show --json` | [Configuration](docs/configuration.md#agt-config) |
+| Revert a logged setting | `agt config revert YYYY-MM:LINE --json` | [Configuration](docs/configuration.md#the-log) |
 | Add a Codex account | `agt accounts add plus-2 --runtime codex` | [Codex](docs/codex.md#extra-accounts) |
 | Re-check Codex usage now | `agt accounts reset primary --runtime codex` | [Codex quota](docs/codex.md#quota) |
 | Test every account | `agt doctor --live --runtime <runtime>` (one tiny job each; uses a little quota) | [Claude Code](docs/claude-code.md#4-check) |
+| See usage and availability | `agt usage` (`--json` for apps; `--refresh` rescans local Codex usage) | [Usage snapshot](docs/configuration.md#usage-snapshot) |
 | Preview delegation rules | `agt rules` | [Delegation rules](docs/delegation.md) |
 
 ## Supported CLIs
@@ -339,7 +350,7 @@ Run `agt guide setup` and follow it. It prints the steps that match the installe
 If `agt` isn't installed yet:
 
 ```bash
-uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router
+uv tool install --managed-python git+https://github.com/fizzory/agents-router
 agt guide setup
 ```
 

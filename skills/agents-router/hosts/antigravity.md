@@ -45,7 +45,7 @@ a duplicate worker while the original job is still running.
 
 ## MCP tools
 
-After `agt setup` or `agy plugin install https://github.com/Watcharagorn/agents-router` from a terminal (or an `agents-router` entry in `~/.gemini/config/mcp_config.json` with command `agt` and argument `mcp`), the `subagent_*` tools are available from the `agents-router` server, and `/delegate` is available as a skill.
+After `agt setup` or `agy plugin install https://github.com/fizzory/agents-router` from a terminal (or an `agents-router` entry in `~/.gemini/config/mcp_config.json` with command `agt` and argument `mcp`), the `subagent_*` tools are available from the `agents-router` server, and `/delegate` is available as a skill.
 
 ## Waiting
 

@@ -39,9 +39,9 @@ def trace(kind="assistant", *, text=None, tool=None, command=None, path=None, co
     return jsonl({"type": kind, "message": {"content": [block]}})
 
 
-def regex_graders():
+def regex_graders(cases=CASES):
     """Read the grader subset; share.frontmatter.parse flattens nested target mappings."""
-    for path in sorted(CASES.glob("*/graders/*.md")):
+    for path in sorted(cases.glob("*/graders/*.md")):
         _, front, body = path.read_text(encoding="utf-8").split("---", 2)
         fields = dict(re.findall(r"^(\w+): ([^\n]+)$", front, re.M))
         if fields["type"] == "regex":
@@ -113,6 +113,28 @@ class SetupJournalTests(unittest.TestCase):
         SANDBOX.make_accounts(self.workspace, home, self.root / "src", every_primary=True,
                               claude_primary=home / ".claude-eval")
         self.assertFalse((home / ".claude").exists())
+
+    def test_jobs_mode_journals_role_preview_and_write(self):
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder).resolve() / "workspace"
+            shutil.copytree(EVALS / "agents-router" / "widen-edit-access" / "files", workspace)
+            root = SANDBOX.build(workspace, "jobs")
+            args = ["roles", "config", "builder", "--add", "kiro",
+                    "--user-said", "add kiro to the builder list", "--json"]
+            for flags in (["--dry-run"], []):
+                result = subprocess.run([sys.executable, str(root / "bin" / "agt"), *args, *flags],
+                                        cwd=workspace, env=self.env, input=b"", capture_output=True, timeout=40)
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                self.assertEqual(json.loads(result.stdout)["dry_run"], bool(flags))
+            rows = [json.loads(line) for line in (root / "records" / "agt-calls.jsonl").read_text().splitlines()]
+            self.assertEqual([row["writes"] for row in rows], [False, True])
+            self.assertEqual(rows[1]["argv"], args)
+            self.assertEqual((rows[1]["kind"], rows[1]["role"], rows[1]["exit_code"]),
+                             ("roles_config", "builder", 0))
+            regex = next(regex for path, _, regex in regex_graders(EVALS / "agents-router")
+                         if path.parents[1].name == "widen-edit-access" and path.name.startswith("02-"))
+            self.assertFalse(regex.search(jsonl(rows[0])))
+            self.assertTrue(regex.search((root / "records" / "agt-calls.jsonl").read_text()))
 
     def test_host_kiro_doctor_reads_chat_help(self):
         result = self.run_agt("doctor", "--runtime", "kiro", "--json")
@@ -429,15 +451,13 @@ class SetupJournalTests(unittest.TestCase):
                             wrapper.kill()
                             wrapper.communicate(timeout=10)
 
-    def test_other_host_calls_and_every_jobs_call_keep_exec(self):
+    def test_other_calls_keep_exec_in_both_modes(self):
         class Executed(Exception):
             pass
-        for mode, commands in (("host", (["guide", "setup"], ["roles", "show"])),
-                               ("jobs", (["setup", "--dry-run", "--json"],
-                                         ["roles", "config", "docs-writer"]))):
+        for mode in ("host", "jobs"):
             if mode == "jobs":
                 SANDBOX.build(self.workspace, mode)
-            for args in commands:
+            for args in (["guide", "setup"], ["roles", "show"]):
                 with self.subTest(mode=mode, args=args):
                     with patch.object(Path, "cwd", return_value=self.workspace), \
                          patch.object(sys, "argv", ["agt", *args]), \
@@ -447,7 +467,7 @@ class SetupJournalTests(unittest.TestCase):
                     self.assertEqual(execute.call_args.args[1][-len(args):], args)
                     self.assertFalse(self.path.exists())
         # Actually run a jobs-mode call too; fixtures still use the original .claude.
-        result = self.run_agt("setup", "--dry-run", "--json")
+        result = self.run_agt("roles", "show", "--json")
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         self.assertFalse(self.path.exists())
         config = json.loads((self.root / "env.json").read_text())
@@ -632,6 +652,50 @@ class SetupRegexGraderTests(unittest.TestCase):
         ):
             with self.subTest(bad=message):
                 self.assertFalse(regex.search(message))
+
+    def test_skipped_roles_message_gives_a_way_to_set_them_up_later(self):
+        regex = next(regex for path, _, regex in regex_graders()
+                     if path.parents[1].name == "setup-skip-roles" and path.name.startswith("04-"))
+        for message in (
+            "Roles: skipped. You can set them up later by asking me.",
+            "Roles: skipped. You can set them up any time by asking me.",
+            "Roles: skipped. You can set them up any time later by asking me.",
+            "You can set roles up later by asking me.",
+            "You can set up roles later by asking.",
+            "Roles can be set up later by asking your agent.",
+            "Roles can be set up later with `orchestrator-setup`.",
+            "You can set roles up later using the orchestrator-setup skill.",
+        ):
+            with self.subTest(good=message):
+                self.assertTrue(regex.search(message))
+        for message in (
+            "Roles: skipped.", "Roles can be set up later.",
+            "Roles: skipped. Ask me about optional extras.",
+            "You can set them up later by asking me.",
+            "Roles: skipped. You cannot set them up later by asking me.",
+        ):
+            with self.subTest(bad=message):
+                self.assertFalse(regex.search(message))
+
+    def test_edit_access_words_grader_requires_a_successful_write_with_the_request(self):
+        _, meta, regex = next(grader for grader in regex_graders(EVALS / "agents-router")
+                             if grader[0].parents[1].name == "widen-edit-access"
+                             and grader[0].name.startswith("02-"))
+        self.assertTrue(meta["journal"])
+        args = ["roles", "config", "builder", "--add", "kiro", "--user-said", "add kiro to the builder list"]
+        good = {"argv": args, "exit_code": 0, "kind": "roles_config", "role": "builder", "writes": True}
+        for argv in (args, [*args[:-2], "--user-said=add kiro to the builder list"]):
+            for dumps in (jsonl, json.dumps):
+                self.assertTrue(regex.search(dumps({**good, "argv": argv})))
+        for bad in (
+            {**good, "argv": args[:-2]},
+            {**good, "argv": [*args[:-1], "Allow Kiro to edit"]},
+            {**good, "exit_code": 3}, {**good, "writes": False},
+            {**good, "kind": "other"}, {**good, "role": "reviewer"},
+        ):
+            with self.subTest(bad=bad):
+                self.assertFalse(regex.search(jsonl(bad)))
+        self.assertFalse(regex.search(trace(tool="Bash", command=shlex.join(["agt", *args]))))
 
     def test_direct_write_patterns_ignore_reading_and_tool_outputs(self):
         regex = self.guard

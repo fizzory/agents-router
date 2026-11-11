@@ -123,11 +123,11 @@ def load(location: Path | None = None, *, user: Settings | None = None) -> Setti
     except FileNotFoundError:
         return Settings()
     except OSError as exc:
-        raise SettingsError(f"{location} can't be read ({exc})") from None
+        raise SettingsError(f"{location} can't be read ({exc})", file=location) from None
     try:
         data = tomllib.loads(text).get("share", {})
     except tomllib.TOMLDecodeError as exc:
-        raise SettingsError(f"{location}: {exc}") from None
+        raise SettingsError(f"{location}: {exc}", file=location, line=getattr(exc, "lineno", None)) from None
     return parse(data, location)
 
 
@@ -137,7 +137,7 @@ def parse(data: Any, location: Path) -> Settings:
     try:
         return _settings(data)
     except (TypeError, ValueError, KeyError) as exc:
-        raise SettingsError(f"{location}: [share] {exc}") from None
+        raise SettingsError(f"{location}: [share] {exc}", file=location) from None
 
 
 def _labels(key: str, value: Any) -> list[str]:
@@ -273,7 +273,7 @@ def _load_project(current, user: Settings | None = None) -> Settings:
     except FileNotFoundError:
         return result
     except (OSError, tomllib.TOMLDecodeError) as exc:
-        raise SettingsError(f"{location}: {exc}") from None
+        raise SettingsError(f"{location}: {exc}", file=location, line=getattr(exc, "lineno", None)) from None
     picks = parse({"targets": data.get("targets", {})}, location)
     result.off, result.not_in, result.only = picks.off, picks.not_in, picks.only
     return result
@@ -294,26 +294,54 @@ def _render_targets(settings: Settings) -> str:
     return "\n".join(lines) + "\n"
 
 
-def save(settings: Settings, location: Path | None = None) -> Path:
+def save(settings: Settings, location: Path | None = None, *, log_changes: bool = True) -> Path:
+    """Save under the settings lock. Callers lock before loading and changing Settings.
+
+    The lock is reentrant so the command's entire read-modify-write and this
+    backup/write/log operation share one transaction. Setup's bulk answers use
+    `log_changes=False`; they are remembered without individual setting entries.
+    """
+    from agents_router import settings_write
+
+    with settings_write.locked():
+        return _save(settings, location, log_changes=log_changes)
+
+
+def _save(settings: Settings, location: Path | None = None, *, log_changes: bool = True) -> Path:
     """Replace the `[share]` tables in the settings file, keeping every other line.
 
     In a repo's scope, only the repo's `[share.targets]` (its picks) are written, to its `.agt/settings.toml`.
     """
 
-    from agents_router import synclog
+    from agents_router import settings_write, synclog, ui
     from agents_router.share import scope
 
     current = scope.current()
-    if location is None and current.project:
-        location = current.settings_file
-        rendered = _render_targets(settings)
-        if not rendered and not location.exists():
-            return location  # no picks, and no file to keep them in
-        written = levels.replace_tables(location, lambda header: header == "share.targets", rendered)
-        synclog.saved(written)
-        return written
-    location = location or path()
-    synclog.notice_file(location, "user", None)
-    written = levels.replace_tables(location, lambda header: header.split(".")[0] == "share", render(settings))
-    synclog.saved(written)
-    return written
+    project = location is None and current.project
+    location = current.settings_file if project else location or path()
+    level = "workspace" if project else "user"
+    workspace = levels.find_workspace(current.root) if project else None
+    before = settings_write.read_text(location)
+    rendered = _render_targets(settings) if project else render(settings)
+    ours = (lambda header: header == "share.targets") if project else (lambda header: header.split(".")[0] == "share")
+    if not rendered and not location.exists():
+        return location
+    # Compare the owned tables before creating a backup or log for a no-op.
+    new_text = levels.replacing_tables(before, ours, rendered)
+    if new_text == before:
+        return location
+    synclog.notice_file(location, level, workspace)
+    backup = settings_write.backup(location, level)
+    levels.write(location, new_text)
+    if log_changes:
+        old = synclog._flat(tomllib.loads(before))
+        new = synclog._flat(tomllib.loads(new_text))
+        for key in sorted(set(old) | set(new)):
+            if old.get(key) != new.get(key) or (key in old) != (key in new):
+                synclog.append({"type": "setting", **synclog.where(workspace), "file": str(location), "level": level,
+                                "key": key, "old": old.get(key), "new": new.get(key),
+                                "old_present": key in old, "new_present": key in new,
+                                "backup": str(backup) if backup else None, "command": "agt " + " ".join(ui.ARGV),
+                                **settings_write.who(None)})
+    synclog.saved(location)
+    return location

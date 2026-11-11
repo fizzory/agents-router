@@ -1,0 +1,25 @@
+{
+  "error": "needs_choice",
+  "ask": "Which CLIs should get it?",
+  "labels": [
+    "claude",
+    "codex"
+  ],
+  "choices": [
+    {
+      "kind": "agents",
+      "name": "example",
+      "cells": {
+        "claude": {
+          "state": "has",
+          "note": ""
+        },
+        "codex": {
+          "state": "copy",
+          "note": ""
+        }
+      }
+    }
+  ],
+  "retry": "agt share pick <item> --in <label> | --not-in <label> | --only <label>[,<label>]"
+}

@@ -1,0 +1,54 @@
+{
+  "enabled": true,
+  "folders": [
+    {
+      "label": "claude",
+      "cli": "claude",
+      "path": "<ROOT>/home/.claude"
+    },
+    {
+      "label": "codex",
+      "cli": "codex",
+      "path": "<ROOT>/home/.codex"
+    }
+  ],
+  "in_sync": 0,
+  "to_write": 0,
+  "conflicts": [
+    "example"
+  ],
+  "waiting": [],
+  "pending_delete": [],
+  "frozen": [],
+  "not_shared": 0,
+  "notes": [],
+  "attention": [
+    {
+      "id": "conflict:agents/example",
+      "kind": "conflict",
+      "item": "agents/example",
+      "who": "choice",
+      "message": "example differs between claude, codex (the copies differ the first time agt sees them)",
+      "fix": [
+        "agt share resolve example"
+      ],
+      "folders": [
+        "claude",
+        "codex"
+      ]
+    }
+  ],
+  "watcher": {
+    "installed": false,
+    "last_run_seconds": null,
+    "last_result": null,
+    "stopped": false,
+    "launcher_problem": null
+  },
+  "instructions": null,
+  "mcp": null,
+  "hooks": null,
+  "plugins": null,
+  "repos": [],
+  "diffs": null
+}

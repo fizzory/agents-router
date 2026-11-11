@@ -1,0 +1,49 @@
+[package]
+name = "agents-router-app"
+version = "0.17.0"
+edition = "2021"
+rust-version = "1.90"
+default-run = "agents-router"
+
+[features]
+default = ["app-check"]
+app-check = []
+ci-selftest = []
+
+[lib]
+name = "agents_router_app"
+
+[[bin]]
+name = "agents-router"
+path = "src/main.rs"
+
+[[bin]]
+name = "agt-app-check"
+path = "src/bin/agt-app-check.rs"
+required-features = ["app-check"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.5", features = ["tray-icon", "macos-private-api"] }
+tauri-nspanel = "=2.1.1"
+tauri-plugin-positioner = { version = "=2.4.0", features = ["tray-icon"] }
+tauri-plugin-single-instance = "=2.5.5"
+tauri-plugin-updater = "=2.14.1"
+tauri-plugin-process = "=2.4.0"
+tauri-plugin-dialog = "=2.8.4"
+tauri-plugin-autostart = "=2.7.0"
+objc2 = "=0.6.5"
+objc2-app-kit = { version = "=0.3.2", features = ["NSWorkspace"] }
+objc2-foundation = { version = "=0.3.2", features = ["NSNotification", "NSOperation", "NSString", "block2"] }
+objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["CAMediaTimingFunction"] }
+block2 = "=0.6.2"
+notify-debouncer-mini = { version = "=0.7.0", features = ["macos_fsevent"] }
+tokio = { version = "=1.54.1", features = ["process", "rt-multi-thread", "macros", "sync", "time"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+serde_path_to_error = "=0.1.16"
+
+[dev-dependencies]
+tauri = { version = "=2.12.5", features = ["test"] }

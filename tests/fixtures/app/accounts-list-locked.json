@@ -1,0 +1,178 @@
+{
+  "runtimes": [
+    {
+      "runtime": "claude",
+      "binary": "claude",
+      "version": "fake-claude 1.0",
+      "primary_setup": "<ROOT>/home/.claude",
+      "failover": "on-limit",
+      "limits": {
+        "usage_ceiling": 0.95,
+        "when_full": "refuse"
+      },
+      "accounts": [
+        {
+          "name": "primary",
+          "home": "<ROOT>/home/.claude",
+          "enabled": true,
+          "can_toggle": false,
+          "toggle_reason": "primary is a reserved name; this is the provider's own login",
+          "takes_unpinned_jobs": true,
+          "auth": {
+            "loggedIn": true,
+            "authMethod": "claude.ai",
+            "subscriptionType": null,
+            "configDirectory": null
+          },
+          "held_back": false,
+          "busy_slots": 0,
+          "running_jobs": 0,
+          "limits": {
+            "max_jobs": null,
+            "max_jobs_from": "default"
+          }
+        },
+        {
+          "name": "work",
+          "home": "<ROOT>/home/accounts/work",
+          "enabled": true,
+          "can_toggle": true,
+          "toggle_reason": null,
+          "takes_unpinned_jobs": true,
+          "auth": {
+            "loggedIn": false,
+            "authMethod": "claude.ai",
+            "subscriptionType": null,
+            "configDirectory": null
+          },
+          "held_back": false,
+          "busy_slots": 0,
+          "running_jobs": 0,
+          "limits": {
+            "max_jobs": null,
+            "max_jobs_from": "default"
+          }
+        },
+        {
+          "name": "claude-lab",
+          "home": "<ROOT>/home/.claude-lab",
+          "enabled": true,
+          "can_toggle": false,
+          "toggle_reason": "discovered is your own Claude profile",
+          "found": true,
+          "setup": "own",
+          "takes_unpinned_jobs": false,
+          "auth": {
+            "loggedIn": false,
+            "authMethod": "claude.ai",
+            "subscriptionType": null,
+            "configDirectory": null
+          },
+          "held_back": false,
+          "busy_slots": 0,
+          "running_jobs": 0,
+          "limits": {
+            "max_jobs": null,
+            "max_jobs_from": "default"
+          }
+        }
+      ]
+    },
+    {
+      "runtime": "codex",
+      "binary": "codex",
+      "version": "fake-codex 1.0",
+      "primary_setup": "<ROOT>/home/.codex",
+      "failover": "on-limit",
+      "limits": {
+        "usage_ceiling": 0.95,
+        "when_full": "refuse",
+        "max_jobs": 4
+      },
+      "accounts": [
+        {
+          "name": "primary",
+          "home": "<ROOT>/home/.codex",
+          "enabled": true,
+          "can_toggle": false,
+          "toggle_reason": "primary is a reserved name; this is the provider's own login",
+          "auth": {
+            "loggedIn": false,
+            "authMethod": null,
+            "detail": "Not logged in"
+          },
+          "held_back": false,
+          "busy_slots": 0,
+          "running_jobs": 0,
+          "limits": {
+            "max_jobs": null,
+            "max_jobs_from": "default"
+          }
+        }
+      ]
+    },
+    {
+      "runtime": "antigravity",
+      "binary": "agy",
+      "version": "fake-agy 1.0",
+      "primary_setup": "<ROOT>/home/.gemini/antigravity-cli",
+      "failover": "on-limit",
+      "limits": {
+        "usage_ceiling": 0.95,
+        "when_full": "refuse"
+      },
+      "accounts": [
+        {
+          "name": "primary",
+          "home": "<ROOT>/home/.gemini/antigravity-cli",
+          "enabled": true,
+          "can_toggle": false,
+          "toggle_reason": "primary is a reserved name; this is the provider's own login",
+          "auth": {
+            "loggedIn": false,
+            "error": "You are not logged into Antigravity"
+          },
+          "held_back": false,
+          "busy_slots": 0,
+          "running_jobs": 0,
+          "limits": {
+            "max_jobs": null,
+            "max_jobs_from": "default"
+          }
+        }
+      ]
+    },
+    {
+      "runtime": "kiro",
+      "binary": "kiro",
+      "version": "fake-kiro 1.0",
+      "primary_setup": "<ROOT>/home/.kiro",
+      "failover": "on-limit",
+      "limits": {
+        "usage_ceiling": 0.95,
+        "when_full": "refuse"
+      },
+      "accounts": [
+        {
+          "name": "primary",
+          "home": "<ROOT>/home/.kiro",
+          "enabled": true,
+          "can_toggle": false,
+          "toggle_reason": "primary is a reserved name; this is the provider's own login",
+          "auth": {
+            "loggedIn": true,
+            "authMethod": "BuilderId",
+            "detail": "{\"accountType\": \"BuilderId\"}"
+          },
+          "held_back": false,
+          "busy_slots": 0,
+          "running_jobs": 0,
+          "limits": {
+            "max_jobs": null,
+            "max_jobs_from": "default"
+          }
+        }
+      ]
+    }
+  ]
+}

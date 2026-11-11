@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "key": "max_depth",
+  "old": 0,
+  "new": 0,
+  "file": "<ROOT>/agt/settings.toml",
+  "level": "user",
+  "applies": "the next job start (running jobs keep theirs)",
+  "changed": true,
+  "previous": {
+    "level": "user",
+    "present": true,
+    "value": 2
+  },
+  "revision": "e5f1b750368d040f32ccdb95d2d9a81c9bf9e5a4ce982ca4320135bf0edb9733",
+  "effective": 0,
+  "overridden_by": {
+    "level": "local",
+    "file": "<ROOT>/project/.agt/settings.local.toml",
+    "value": 0,
+    "fix": "agt config unset max_depth --local"
+  },
+  "still_limited_by": [],
+  "undo": "agt config set max_depth 2 --user",
+  "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+  "excluded_in": null,
+  "triggers": []
+}

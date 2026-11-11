@@ -1,0 +1,8 @@
+{
+  "error": "needs_user_words",
+  "key": "max_depth",
+  "old": 0,
+  "new": 0,
+  "ask": "max_depth goes from 0 to 0, which raises a limit or loosens safety. Ask the user, and pass their own words.",
+  "retry": "agt config set max_depth 3 --user --user-said \"<the user's words>\""
+}

@@ -8,7 +8,7 @@ description: Install, set up, update, repair or uninstall Agents Router (agt) fo
 When `agt` runs here, run `agt guide setup` and follow what it prints: it's the guide for the installed version. If `agt` is missing, install it first (it needs git, and uv or pipx). If `agt` is there but has no `agt guide` command (older than 0.10), run `agt update` first:
 
 ```bash
-uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router
+uv tool install --managed-python git+https://github.com/fizzory/agents-router
 agt guide setup
 ```
 
@@ -20,25 +20,27 @@ If you can't run commands, follow the copy below. It matches the version this sk
 
 # Set up Agents Router (steps for an agent)
 
-You are installing, updating, repairing or removing Agents Router (`agt`) for the person you work with. Do the routine steps yourself. Ask them once, in one message, about the choices. At the end, tell them only what's left for them: logins and reloads. This guide is for agt 0.16.0 or newer; `agt guide setup` prints the copy that matches the installed version.
+You are installing, updating, repairing or removing Agents Router (`agt`) for the person you work with. Do the routine steps yourself. Ask them once, in one message, about the choices. At the end, tell them only what's left for them: logins and reloads. This guide is for agt 0.17.0 or newer; `agt guide setup` prints the copy that matches the installed version.
 
 ## 0. Before you start
 
 - These steps need the network and write to the person's home folder (`~/.local`, `~/.claude*`, `~/.codex`, `~/.agents-router`). In a sandbox (Codex workspace-write, Claude Code's sandbox), ask once for the permission that covers the whole setup.
-- If policy forbids the install, stop and give the person one command to run: `uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router && agt setup`.
+- If policy forbids the install, stop and give the person one command to run: `uv tool install --managed-python git+https://github.com/fizzory/agents-router && agt setup`.
 - Setup needs `git`, and `uv` or `pipx`. If they're missing, point the person to https://docs.astral.sh/uv/getting-started/installation/ (`brew install uv` on a Mac) and stop; don't install them yourself.
 
 ## 1. Install or upgrade
 
 ```bash
 agt --version   # agents-router 0.15.0 or newer: go to step 2
-uv tool install --managed-python git+https://github.com/Watcharagorn/agents-router
-# without uv: pipx install git+https://github.com/Watcharagorn/agents-router
+uv tool install --managed-python git+https://github.com/fizzory/agents-router
+# without uv: pipx install git+https://github.com/fizzory/agents-router
 ```
 
 - **Older than 0.15.0:** run `agt update`, then `agt guide setup` again, because the steps may have changed.
 - **`agt` not on PATH after the install:** call it by its full path for the rest of setup (`~/.local/bin/agt`, or `%USERPROFILE%\.local\bin\agt.exe` on Windows). Then run `uv tool update-shell` (or `pipx ensurepath`) so new terminals find it. The plugin's hooks call `agt` by name, so the person's next sessions need it on PATH.
 - **Windows:** `agt update` prints the package command instead of running it; run that command yourself.
+- **Installed by Agents Router.app:** use Check for Updates… in the app for the app, Python and agt. `agt update` refreshes the shipped plugin and stable launchers locally, with no package download. `agt doctor --verbose` shows ownership, versions and competing copies on PATH. Add `~/.local/bin` to PATH if needed.
+- **macOS app download:** Apple Silicon, macOS 14 or newer. Download `Agents-Router-<version>-arm64.dmg` from https://github.com/fizzory/agents-router/releases/latest. Follow https://github.com/fizzory/agents-router/blob/main/docs/macos-app.md for approval and Move to Applications. The person approves the unsigned app themselves; macOS 15 or newer uses System Settings → Privacy & Security → Open Anyway.
 - **Not on PyPI:** never `pip install agt`; that's a different project.
 
 ## 2. Propose, ask once, apply
@@ -124,6 +126,11 @@ Set one up only when the person says yes; don't interview them.
 | Rules | Ask for their home and try-first models, run `agt rules --show --target claude --home-high "<model>" ...`, then the same with `--install` |
 | Another login | `agt accounts add <name>`; the person completes the browser login |
 
+`agt accounts add <name> --runtime <runtime> --check --json` validates without creating folders or checking auth; the real add validates again. `agt accounts check [name] --runtime <runtime> --json` refreshes cached login state without quota, with a ten-second probe budget. Login and add cache the measured check after a successful login command, rather than treating exit 0 as authentication. `agt accounts login primary` is accepted. `accounts enable|disable <name> --json` switch registered extra accounts with a settings lock, backup and log entry; primary and discovered profiles return a structured refusal without changing settings.
+
+Account listing JSON exposes those locked rows through `can_toggle: false` and
+`toggle_reason`; discovered Claude profiles also have `found: true`.
+
 ## 6. Hand-off: what's left for the person
 
 Give them a numbered list built from `still_needed`:
@@ -142,6 +149,7 @@ Give them a numbered list built from `still_needed`:
 Run `agt doctor`.
 - Exit 0 means all good.
 - It checks logins without model calls and flags a profile whose plugin is older than `agt` (fix: `agt update`).
+- It reports the install source, agt and Python versions, and competing copies on PATH. `--verbose` adds the app/runtime versions and all executable paths; `--json` includes the same information in `install`.
 - Never run `agt doctor --live` or a real job without the person's OK; both use quota.
 
 ## 8. Repair
@@ -168,7 +176,7 @@ Run `agt doctor`.
    ```json
    { "mcpServers": { "agents-router": { "command": "/full/path/to/agt", "args": ["mcp"] } } }
    ```
-2. Copy the whole `skills/agents-router/` folder (with its `hosts/` notes) from https://github.com/Watcharagorn/agents-router into the client's skills. If the client takes only rules text, paste `SKILL.md` and the matching host note.
+2. Copy the whole `skills/agents-router/` folder (with its `hosts/` notes) from https://github.com/fizzory/agents-router into the client's skills. If the client takes only rules text, paste `SKILL.md` and the matching host note.
 3. Reload the client and check that `subagent_accounts` answers.
 
 ## 10. Uninstall
@@ -189,7 +197,7 @@ Ask first, then work in this order. Only setting it up again undoes it.
 5. **Antigravity:** remove the agents-router plugin with `agy plugin` (`agy plugin list` shows it), and delete `~/.gemini/config/plugins/agents-router-relays` (agt's role agents go with it).
    **Role agents elsewhere:** delete each `agt-<role>.md` in a Claude profile's `agents/` folder and each `agt-<role>.toml` in `~/.codex/agents/` whose first lines say `Managed by agt roles` (`grep -l "Managed by agt roles" ~/.claude*/agents/agt-*.md ~/.codex/agents/agt-*.toml` lists them). Keep any without that line: they are the person's own.
 6. **MCP servers added by hand:** `claude mcp remove --scope user agents-router` and `codex mcp remove agents-router`.
-7. **The package:** `uv tool uninstall agents-router` (or `pipx uninstall agents-router`).
+7. **The package:** for an app install, turn off **Open at login** in Settings → General, then choose **Uninstall command line tool…** there. Wait for all jobs to finish first. Quit the app and move Agents Router.app to the Trash. Deleting the app alone leaves its CLI installed. See https://github.com/fizzory/agents-router/blob/main/docs/macos-app.md#uninstall for the remaining app files. For a CLI install, use `uv tool uninstall agents-router` (or `pipx uninstall agents-router`).
 8. **agt's own folders,** after asking:
    - `~/.agents-router` holds jobs, state and the accounts agt made under `homes/`, whose logins go with it;
    - `~/.agt` holds settings.

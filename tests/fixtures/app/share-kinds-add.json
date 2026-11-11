@@ -1,0 +1,37 @@
+{
+  "run": "fixture-run-2",
+  "written": [
+    {
+      "kind": "mcp",
+      "name": "notes",
+      "labels": [
+        "codex"
+      ],
+      "action": "copy",
+      "path": "<ROOT>/home/.codex/config.toml",
+      "message": ""
+    },
+    {
+      "kind": "plugins",
+      "name": "example@tools",
+      "labels": [
+        "codex"
+      ],
+      "action": "copy",
+      "path": "<ROOT>/home/.codex",
+      "message": "installed from tools"
+    }
+  ],
+  "failed": [],
+  "conflicts": [],
+  "waiting": [],
+  "notes": [
+    "MCP servers share between your CLIs' user settings; one with a secret written into it stays where it is.",
+    "claude: agt catches up at each session start (~/.claude/settings.json)."
+  ],
+  "replayed": [],
+  "settings": "<ROOT>/agt/settings.toml",
+  "backups": null,
+  "git_exclude": [],
+  "git_exclude_kept": []
+}

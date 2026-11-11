@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "enabled": true,
+  "folders": [
+    {
+      "label": "claude",
+      "cli": "claude",
+      "path": "<ROOT>/home/.claude"
+    },
+    {
+      "label": "codex",
+      "cli": "codex",
+      "path": "<ROOT>/home/.codex"
+    }
+  ],
+  "items": [
+    {
+      "id": "agents/example",
+      "kind": "agents",
+      "name": "example",
+      "cells": {
+        "claude": {
+          "state": "has",
+          "note": "",
+          "editable": false,
+          "reason": "your original: agt never removes it"
+        },
+        "codex": {
+          "state": "copy",
+          "note": "",
+          "editable": true,
+          "reason": null
+        }
+      }
+    }
+  ]
+}

@@ -446,8 +446,8 @@ class WorkerPool(TempHome):
                 patch("agents_router.role_agents.archived", return_value=[]):
             payload = roles_cli._table_json(self.loaded)
         providers = payload["roles"][0]["providers"]
-        self.assertEqual(set(payload), {"roles", "files"})
-        self.assertEqual(set(providers[0]), {"provider", "entry", "model", "effort", "usable", "reason"})
+        self.assertEqual(set(payload), {"schema_version", "roles", "files"})
+        self.assertEqual(set(providers[0]), {"provider", "entry", "model", "effort", "usable", "reason", "choices"})
         self.assertTrue(providers[0]["usable"])
         self.assertIsNone(providers[0]["reason"])
         self.assertFalse(providers[1]["usable"])

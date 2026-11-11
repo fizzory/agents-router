@@ -261,6 +261,31 @@ def unlock(handle: BinaryIO) -> None:
         handle.close()
 
 
+def lock_busy(path: Path) -> bool:
+    """Probe an existing lock without creating, truncating or writing any file.
+
+    An inaccessible lock is conservatively busy. Unlike try_lock this is safe
+    for reports and filesystem watchers, including empty and vanished files.
+    """
+
+    try:
+        handle = path.open("r+b" if os.name == "nt" else "rb")
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    try:
+        if os.name == "nt":
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:  # pragma: no cover
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return True
+    unlock(handle)
+    return False
+
+
 # Links -----------------------------------------------------------------------
 
 
@@ -626,6 +651,10 @@ def spawn_detached(argv: list[str], log_path: Path, env: dict[str, str] | None =
 def python_executable() -> str:
     """The interpreter to use for background runners (pythonw-safe)."""
 
+    from agents_router import bundle
+
+    if install := bundle.detect():
+        return str(install.python)  # never pin current: an update may switch it mid-job
     executable = Path(sys.executable)
     if executable.name.lower() == "pythonw.exe":
         candidate = executable.with_name("python.exe")

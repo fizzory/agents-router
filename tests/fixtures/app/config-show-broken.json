@@ -1,0 +1,6155 @@
+{
+  "schema_version": 1,
+  "workspace": "<ROOT>/project",
+  "files": [
+    {
+      "level": "user",
+      "file": "<ROOT>/agt/settings.toml",
+      "exists": false
+    },
+    {
+      "level": "workspace",
+      "file": "<ROOT>/project/.agt/settings.toml",
+      "exists": false
+    },
+    {
+      "level": "local",
+      "file": "<ROOT>/project/.agt/settings.local.toml",
+      "exists": false
+    }
+  ],
+  "error": "<ROOT>/agt/settings.toml: Invalid value (at line 2, column 11)",
+  "notes": [
+    "Antigravity workers have no parent channel; set `max_jobs_per_account = 1` under [antigravity] in <ROOT>/agt/settings.toml to get it."
+  ],
+  "settings": [
+    {
+      "key": "max_jobs",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time across every CLI.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "max_depth",
+      "value": 1,
+      "shown": "1",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "How deep workers may start workers of their own.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 0,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "job_retention_days",
+      "value": 7,
+      "shown": "7",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Days agt keeps finished jobs' records.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "subagents.prefer_roles",
+      "value": true,
+      "shown": "true",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Prefer installed agt role agents for subagent work in Claude Code.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next subagent call or session start",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.primary",
+      "value": "<ROOT>/home/.claude",
+      "shown": "<ROOT>/home/.claude",
+      "source": "environment (CLAUDE_CONFIG_DIR)",
+      "file": null,
+      "line": null,
+      "description": "The CLI folder of your main account.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.binary",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The CLI to run, when it isn't found on PATH.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.accounts",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The only accounts this workspace's jobs use, by name (yours, not the team's).",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "names",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.include_primary",
+      "value": false,
+      "shown": "false",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Unpinned jobs may also use your main account.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.failover",
+      "value": "on-limit",
+      "shown": "on-limit",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Move a job to another account when one hits a usage limit.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "off",
+        "on-limit"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.max_jobs",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time on this CLI.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.max_jobs_per_account",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time on one account.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.usage_ceiling",
+      "value": 0.95,
+      "shown": "0.95",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Accounts at or above this share of a usage window get no new jobs.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "float",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.when_full",
+      "value": "refuse",
+      "shown": "refuse",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "When every account is full: refuse the job, or queue it.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "refuse",
+        "queue"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.plan",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Your main account's plan, which sets its caps.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.primary_max_jobs",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time on your main account.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.primary_max_effort",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The highest effort a job on your main account may use.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "minimum": null,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.primary_models",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The only models a job on your main account may use.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "names",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.max_jobs_by_room",
+      "value": [],
+      "shown": "none",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time by how much of the usage window is left.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": "by hand, under [claude] in a settings file",
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "fixed",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": false,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.edit_permission_mode",
+      "value": "auto",
+      "shown": "auto",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The permission mode of edit jobs.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.default_model",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The model a job uses when it names none.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.connectors",
+      "value": "account",
+      "shown": "account",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Give workers the account's own claude.ai connectors, or none.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "account",
+        "off"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.cooldown_minutes",
+      "value": 60,
+      "shown": "60",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Minutes an account rests after a usage limit.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.capacity_retries",
+      "value": 3,
+      "shown": "3",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Retries when the service is out of capacity.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 0,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.capacity_retry_seconds",
+      "value": 30,
+      "shown": "30",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The first wait before a capacity retry; it doubles each time.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.circuit_breaker",
+      "value": true,
+      "shown": "true",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Rest unhealthy accounts before trying them again.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.circuit_failure_threshold",
+      "value": 2,
+      "shown": "2",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Health failures before an account or model rests.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.circuit_failure_window_seconds",
+      "value": 300,
+      "shown": "300",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Seconds in which health failures count together.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.circuit_open_seconds",
+      "value": 60,
+      "shown": "60",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The first rest after health failures, in seconds.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.circuit_max_open_seconds",
+      "value": 900,
+      "shown": "900",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The longest rest after health failures, in seconds.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.order",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The Claude profiles unpinned jobs try, first to last (unset: agt's own accounts, then your other profiles by name).",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "names",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "claude.ignore",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Claude profiles (names or folders) agt leaves alone.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "names",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.primary",
+      "value": "<ROOT>/home/.codex",
+      "shown": "<ROOT>/home/.codex",
+      "source": "environment (CODEX_HOME)",
+      "file": null,
+      "line": null,
+      "description": "The CLI folder of your main account.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.binary",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The CLI to run, when it isn't found on PATH.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.accounts",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The only accounts this workspace's jobs use, by name (yours, not the team's).",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "names",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.include_primary",
+      "value": false,
+      "shown": "false",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Unpinned jobs may also use your main account.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.failover",
+      "value": "on-limit",
+      "shown": "on-limit",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Move a job to another account when one hits a usage limit.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "off",
+        "on-limit"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.max_jobs",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time on this CLI.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.max_jobs_per_account",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time on one account.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.usage_ceiling",
+      "value": 0.95,
+      "shown": "0.95",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Accounts at or above this share of a usage window get no new jobs.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "float",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.when_full",
+      "value": "refuse",
+      "shown": "refuse",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "When every account is full: refuse the job, or queue it.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "refuse",
+        "queue"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.plan",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Your main account's plan, which sets its caps.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.primary_max_jobs",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time on your main account.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.primary_max_effort",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The highest effort a job on your main account may use.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "minimum": null,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.primary_models",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The only models a job on your main account may use.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "names",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.max_jobs_by_room",
+      "value": [],
+      "shown": "none",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time by how much of the usage window is left.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": "by hand, under [codex] in a settings file",
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "fixed",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": false,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.edit_permission_mode",
+      "value": "auto",
+      "shown": "auto",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The permission mode of edit jobs.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.default_model",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The model a job uses when it names none.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.connectors",
+      "value": "account",
+      "shown": "account",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Give workers the account's own claude.ai connectors, or none.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "account",
+        "off"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.cooldown_minutes",
+      "value": 60,
+      "shown": "60",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Minutes an account rests after a usage limit.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.capacity_retries",
+      "value": 3,
+      "shown": "3",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Retries when the service is out of capacity.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 0,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.capacity_retry_seconds",
+      "value": 30,
+      "shown": "30",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The first wait before a capacity retry; it doubles each time.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.circuit_breaker",
+      "value": true,
+      "shown": "true",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Rest unhealthy accounts before trying them again.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.circuit_failure_threshold",
+      "value": 2,
+      "shown": "2",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Health failures before an account or model rests.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.circuit_failure_window_seconds",
+      "value": 300,
+      "shown": "300",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Seconds in which health failures count together.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.circuit_open_seconds",
+      "value": 60,
+      "shown": "60",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The first rest after health failures, in seconds.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.circuit_max_open_seconds",
+      "value": 900,
+      "shown": "900",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The longest rest after health failures, in seconds.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.share_parent_mcp",
+      "value": true,
+      "shown": "true",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Give workers started from Claude Code its MCP servers.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.network_access",
+      "value": true,
+      "shown": "true",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Network inside the sandbox for edit jobs.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.web_search",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Codex's web search for jobs (unset: Codex's default).",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "disabled",
+        "cached",
+        "indexed",
+        "live"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.windows_sandbox",
+      "value": "unelevated",
+      "shown": "unelevated",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The sandbox on Windows.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "unelevated",
+        "elevated",
+        "off"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "codex.reasoning_summary",
+      "value": "detailed",
+      "shown": "detailed",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The reasoning summary jobs ask for.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "detailed",
+        "concise",
+        "auto",
+        "none",
+        "off"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.primary",
+      "value": "<ROOT>/home/.gemini/antigravity-cli",
+      "shown": "<ROOT>/home/.gemini/antigravity-cli",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The CLI folder of your main account.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.binary",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The CLI to run, when it isn't found on PATH.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.accounts",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The only accounts this workspace's jobs use, by name (yours, not the team's).",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "names",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.include_primary",
+      "value": true,
+      "shown": "true",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Unpinned jobs may also use your main account.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.failover",
+      "value": "on-limit",
+      "shown": "on-limit",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Move a job to another account when one hits a usage limit.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "off",
+        "on-limit"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.max_jobs",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time on this CLI.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.max_jobs_per_account",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time on one account.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.usage_ceiling",
+      "value": 0.95,
+      "shown": "0.95",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Accounts at or above this share of a usage window get no new jobs.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "float",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.when_full",
+      "value": "refuse",
+      "shown": "refuse",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "When every account is full: refuse the job, or queue it.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "refuse",
+        "queue"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.plan",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Your main account's plan, which sets its caps.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.primary_max_jobs",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time on your main account.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.primary_max_effort",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The highest effort a job on your main account may use.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "minimum": null,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.primary_models",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The only models a job on your main account may use.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "names",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.max_jobs_by_room",
+      "value": [],
+      "shown": "none",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time by how much of the usage window is left.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": "by hand, under [antigravity] in a settings file",
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "fixed",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": false,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.edit_permission_mode",
+      "value": "accept-edits",
+      "shown": "accept-edits",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The permission mode of edit jobs.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.default_model",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The model a job uses when it names none.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.connectors",
+      "value": "account",
+      "shown": "account",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Give workers the account's own claude.ai connectors, or none.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "account",
+        "off"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.cooldown_minutes",
+      "value": 60,
+      "shown": "60",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Minutes an account rests after a usage limit.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.capacity_retries",
+      "value": 3,
+      "shown": "3",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Retries when the service is out of capacity.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 0,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.capacity_retry_seconds",
+      "value": 30,
+      "shown": "30",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The first wait before a capacity retry; it doubles each time.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.circuit_breaker",
+      "value": true,
+      "shown": "true",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Rest unhealthy accounts before trying them again.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.circuit_failure_threshold",
+      "value": 2,
+      "shown": "2",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Health failures before an account or model rests.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.circuit_failure_window_seconds",
+      "value": 300,
+      "shown": "300",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Seconds in which health failures count together.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.circuit_open_seconds",
+      "value": 60,
+      "shown": "60",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The first rest after health failures, in seconds.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.circuit_max_open_seconds",
+      "value": 900,
+      "shown": "900",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The longest rest after health failures, in seconds.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.share_parent_mcp",
+      "value": true,
+      "shown": "true",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Give workers started from Claude Code its MCP servers.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.reviewer",
+      "value": "agy",
+      "shown": "agy",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Who reviews read and edit jobs' tool calls.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "agy",
+        "claude",
+        "off"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.reviewer_model",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The reviewer's model.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.reviewer_account",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The Claude account of reviewer = \"claude\".",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "antigravity.sandbox",
+      "value": true,
+      "shown": "true",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Run edit jobs with agy --sandbox.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.primary",
+      "value": "<ROOT>/home/.kiro",
+      "shown": "<ROOT>/home/.kiro",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The CLI folder of your main account.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.binary",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The CLI to run, when it isn't found on PATH.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.accounts",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The only accounts this workspace's jobs use, by name (yours, not the team's).",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "names",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.include_primary",
+      "value": false,
+      "shown": "false",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Unpinned jobs may also use your main account.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.failover",
+      "value": "on-limit",
+      "shown": "on-limit",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Move a job to another account when one hits a usage limit.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "off",
+        "on-limit"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.max_jobs",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time on this CLI.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.max_jobs_per_account",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time on one account.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.usage_ceiling",
+      "value": 0.95,
+      "shown": "0.95",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Accounts at or above this share of a usage window get no new jobs.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "float",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.when_full",
+      "value": "refuse",
+      "shown": "refuse",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "When every account is full: refuse the job, or queue it.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "refuse",
+        "queue"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.plan",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Your main account's plan, which sets its caps.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.primary_max_jobs",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time on your main account.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.primary_max_effort",
+      "value": null,
+      "shown": "no cap",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The highest effort a job on your main account may use.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "minimum": null,
+      "cap": true,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.primary_models",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The only models a job on your main account may use.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "names",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.max_jobs_by_room",
+      "value": [],
+      "shown": "none",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Jobs at a time by how much of the usage window is left.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": "by hand, under [kiro] in a settings file",
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "fixed",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": false,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.edit_permission_mode",
+      "value": "auto",
+      "shown": "auto",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The permission mode of edit jobs.",
+      "needs_user_words": true,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.default_model",
+      "value": null,
+      "shown": "unset",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The model a job uses when it names none.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "text",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.connectors",
+      "value": "account",
+      "shown": "account",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Give workers the account's own claude.ai connectors, or none.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "account",
+        "off"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.cooldown_minutes",
+      "value": 60,
+      "shown": "60",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Minutes an account rests after a usage limit.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.capacity_retries",
+      "value": 3,
+      "shown": "3",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Retries when the service is out of capacity.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 0,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.capacity_retry_seconds",
+      "value": 30,
+      "shown": "30",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The first wait before a capacity retry; it doubles each time.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.circuit_breaker",
+      "value": true,
+      "shown": "true",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Rest unhealthy accounts before trying them again.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.circuit_failure_threshold",
+      "value": 2,
+      "shown": "2",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Health failures before an account or model rests.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.circuit_failure_window_seconds",
+      "value": 300,
+      "shown": "300",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Seconds in which health failures count together.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.circuit_open_seconds",
+      "value": 60,
+      "shown": "60",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The first rest after health failures, in seconds.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.circuit_max_open_seconds",
+      "value": 900,
+      "shown": "900",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The longest rest after health failures, in seconds.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "int",
+      "choices": [],
+      "minimum": 1,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "kiro.engine",
+      "value": "auto",
+      "shown": "auto",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The Kiro agent engine jobs name (auto: chat.agentEngine, else V3 on kiro-cli 3.0 or later, else V2).",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": null,
+      "applies": "the next job start (running jobs keep theirs)",
+      "kind": "choice",
+      "choices": [
+        "auto",
+        "v2",
+        "v3"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "share.enabled",
+      "value": false,
+      "shown": "false",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Whether agt shares agents and skills between your CLIs.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": "agt share enable / agt share disable",
+      "applies": "the next sync (agt share sync)",
+      "kind": "fixed",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": false,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "share.kinds",
+      "value": [
+        "agents",
+        "skills"
+      ],
+      "shown": "agents, skills",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The kinds agt shares.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": "agt share kinds add|remove <kind>",
+      "applies": "the next sync (agt share sync)",
+      "kind": "fixed",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": false,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "share.auto_copy",
+      "value": true,
+      "shown": "on",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "New items go to every CLI on their own (on), wait for you (off), or a list of kinds.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next sync (agt share sync)",
+      "kind": "auto_copy",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "share.tool_widening",
+      "value": "allow-if-shell",
+      "shown": "allow-if-shell",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "What a copy's tools become where they can't be kept exactly.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next sync (agt share sync)",
+      "kind": "choice",
+      "choices": [
+        "allow-if-shell",
+        "skip"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "share.instructions",
+      "value": "off",
+      "shown": "off",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Share each CLI's instruction file: off, block (agt's marked block) or whole.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next sync (agt share sync)",
+      "kind": "choice",
+      "choices": [
+        "off",
+        "block",
+        "whole"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "share.worktrees",
+      "value": "auto",
+      "shown": "auto",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "A listed repo's worktrees share by themselves (auto), or by `agt share repo add .`.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next sync (agt share sync)",
+      "kind": "choice",
+      "choices": [
+        "auto",
+        "command"
+      ],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "share.mcp",
+      "value": false,
+      "shown": "false",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Share your user MCP servers between your CLIs (one with a secret written into it, or set up for one CLI, stays put).",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next sync (agt share sync)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "share.hooks",
+      "value": false,
+      "shown": "false",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "List your hooks for sharing; each copy runs only after you approve it for that CLI.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the next sync (agt share sync)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "share.plugins",
+      "value": false,
+      "shown": "false",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Install your plugins in your other Claude Code and Codex folders, where they fit.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": "agt share kinds add|remove plugins (it shows what it would install first)",
+      "applies": "the next sync (agt share sync)",
+      "kind": "fixed",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": false,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "share.watcher",
+      "value": true,
+      "shown": "true",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "The background watcher (macOS): a sync every minute and when a shared folder changes.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "once (agt updates the watcher and its hook entries now)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "share.push_on_save",
+      "value": true,
+      "shown": "true",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "A save in Claude Code inside a shared folder spreads within seconds.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "once (agt updates the watcher and its hook entries now)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "share.notify",
+      "value": true,
+      "shown": "true",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "macOS notifications for conflicts and other urgent items, at most once an hour.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "the watcher's next run",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
+      "key": "share.codex_session",
+      "value": false,
+      "shown": "false",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "agt's session-start entry in Codex's hooks.json (Codex asks you to trust it in /hooks).",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "once (agt updates the watcher and its hook entries now)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    }
+  ]
+}

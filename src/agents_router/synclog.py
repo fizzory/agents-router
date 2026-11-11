@@ -114,13 +114,29 @@ def entries() -> Iterator[dict[str, Any]]:
             lines = path.read_text(encoding="utf-8").splitlines()
         except OSError:
             continue
-        for line in reversed(lines):
+        for number, line in reversed(list(enumerate(lines, 1))):
             try:
                 entry = json.loads(line)
             except ValueError:
                 continue
             if isinstance(entry, dict):
-                yield entry
+                yield {**entry, "id": f"{path.stem}:{number}"}
+
+
+def get_entry(identifier: str) -> dict[str, Any]:
+    """Resolve a stable month/line id inside agt's own log."""
+
+    match = re.fullmatch(r"(\d{4}-\d{2}):([1-9]\d*)", identifier)
+    if match is None:
+        raise ValueError("a log entry id takes YYYY-MM:LINE, from agt log --json")
+    path = folder() / (match[1] + ".jsonl")
+    try:
+        entry = json.loads(path.read_text(encoding="utf-8").splitlines()[int(match[2]) - 1])
+    except (OSError, IndexError, ValueError):
+        raise ValueError(f"no agt log entry {identifier}") from None
+    if not isinstance(entry, dict):
+        raise ValueError(f"no agt log entry {identifier}")
+    return entry
 
 
 # What agt has seen of each settings file -----------------------------------------
@@ -238,7 +254,8 @@ def notice_file(location: Path, level: str, workspace: levels.Workspace | None) 
             for key in sorted(set(old) | set(new)):
                 if old.get(key) != new.get(key):
                     append({"type": "setting", **where(workspace if level != "user" else None), "file": str(location),
-                            "level": level, "key": key, "old": old.get(key), "new": new.get(key), **origin})
+                            "level": level, "key": key, "old": old.get(key), "new": new.get(key),
+                            "old_present": key in old, "new_present": key in new, **origin})
             if level == "user":
                 _turn_offs(old, new, origin)
     if found is None:
@@ -273,14 +290,16 @@ def saved(location: Path) -> None:
     _keep_seen(data)
 
 
-def refused(message: str, workspace: levels.Workspace | None) -> None:
+def refused(error: levels.SettingsError | str, workspace: levels.Workspace | None) -> None:
     """A settings value agt won't use, logged once (until the message changes)."""
 
+    message = str(error)
     data = _seen()
     known = list(data.get("refused") or [])
     if message in known:
         return
-    append({"type": "refused", **where(workspace), "message": message})
+    append({"type": "refused", **where(workspace), "message": message,
+            "file": getattr(error, "file", None), "line": getattr(error, "line", None)})
     data["refused"] = (known + [message])[-KEEP_REFUSED:]
     _keep_seen(data)
 

@@ -32,7 +32,7 @@ Source: [plugins](https://antigravity.google/docs/plugins/).
 
 This repository's root `plugin.json` and `mcp_config.json` provide the main
 plugin, MCP server and shared skill. `setup.py` installs it with
-`agy plugin install https://github.com/Watcharagorn/agents-router` and updates it by
+`agy plugin install https://github.com/fizzory/agents-router` and updates it by
 running that command again. `docs/hosts.md` describes this route;
 `docs/gemini.md` primarily describes the worker runtime.
 

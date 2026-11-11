@@ -1,0 +1,24 @@
+{
+  "run": "fixture-backed-sync",
+  "written": [
+    {
+      "kind": "agents",
+      "name": "example",
+      "labels": [
+        "codex"
+      ],
+      "action": "update",
+      "path": "<ROOT>/home/.codex/agents/example.toml",
+      "message": ""
+    }
+  ],
+  "failed": [],
+  "conflicts": [],
+  "waiting": [],
+  "notes": [],
+  "replayed": [],
+  "settings": null,
+  "backups": "<ROOT>/agt/state/share/backups/fixture-backed-sync",
+  "git_exclude": [],
+  "git_exclude_kept": []
+}

@@ -11,7 +11,7 @@ A user asked their Claude Code agent to "integrate this repo into my setup". The
 Claude Code docs, "Install and manage plugins" and "Plugin commands reference":
 
 - Plugins can be installed from a shell with no session. `claude plugin marketplace add <owner/repo>` and `claude plugin install <plugin>@<marketplace>` both exist, and `claude plugin list` shows the result. The docs describe this as the route for setup scripts.
-- One command can do both steps: `claude plugin install agents-router --marketplace Watcharagorn/agents-router`. It needs Claude Code 2.1.292 or later. In a session the same flag works from 2.1.275, but the session form opens a details panel and asks for a scope, so an agent cannot finish it.
+- One command can do both steps: `claude plugin install agents-router --marketplace fizzory/agents-router`. It needs Claude Code 2.1.292 or later. In a session the same flag works from 2.1.275, but the session form opens a details panel and asks for a scope, so an agent cannot finish it.
 - The default scope is user. Plugins installed from a shell load the next time Claude Code starts, or after `/reload-plugins` in an open session.
 - `/plugin` does not run in `claude -p`; Claude replies that it is not available. So a worker or sandbox running `claude -p` can never run `/plugin install`. This matches the sandbox test.
 - Marketplaces added from the shell are added without a confirmation step. Organisation policy checks still apply.
@@ -74,7 +74,7 @@ Everyone shares the login step. Every project in the list leaves CLI login to th
 
 In order of value:
 
-1. Put the shell commands in the README and in `docs/hosts.md`, above or beside the slash command. For Claude Code: `claude plugin install agents-router --marketplace Watcharagorn/agents-router` (2.1.292+) or the two-step form for older versions: `claude plugin marketplace add Watcharagorn/agents-router` then `claude plugin install agents-router@agents-router`. Add `claude plugin list` as the check and a note that a running session needs `/reload-plugins` or a restart. The Codex and Antigravity commands are already terminal commands; keep them.
+1. Put the shell commands in the README and in `docs/hosts.md`, above or beside the slash command. For Claude Code: `claude plugin install agents-router --marketplace fizzory/agents-router` (2.1.292+) or the two-step form for older versions: `claude plugin marketplace add fizzory/agents-router` then `claude plugin install agents-router@agents-router`. Add `claude plugin list` as the check and a note that a running session needs `/reload-plugins` or a restart. The Codex and Antigravity commands are already terminal commands; keep them.
 2. Add an "Install with your agent" README section with a short copy-paste prompt. It should name the exact commands, so the auto-mode classifier sees the user asking for those exact actions. The prompt should say: install `agt` with pipx, run `agt setup`, register extra accounts, run `agt doctor`, and stop and tell me when a browser login is needed.
 3. Add `agt setup` (or `agt install-plugin`). It detects which of `claude`, `codex` and `agy` are on PATH, runs the matching plugin commands for each, falls back to `claude mcp add` / `codex mcp add` / `agy` equivalents when the plugin route fails, imports existing account folders (for example `~/.claude-*`), runs `agt doctor`, and prints a list of what is left for the user (logins). It should print each command before running it, support `--dry-run` and `--host`, and stay idempotent. Reasons to prefer a script over a prompt: it works the same in every host, and the classifier evaluates one command, not a chain.
 4. Add `AGENTS.md` (read by Codex and others) and a `CLAUDE.md` pointer, and an `llms-install.md` for Cline-style agents, all short and pointing to the same steps. Do not rely on llms.txt alone; no evidence any of the CLIs fetches it on its own.
@@ -102,7 +102,7 @@ The user must also stay in control of one thing: `--dangerously-skip-permissions
 ## Gaps and things to test
 
 - Run `claude plugin marketplace add` and `claude plugin install` from an auto-mode session and a manual session on a clean profile. Record the outcome and the exact classifier message if blocked.
-- Check that `claude plugin install agents-router --marketplace Watcharagorn/agents-router` works on 2.1.292+ and that the two-step form works on older versions.
+- Check that `claude plugin install agents-router --marketplace fizzory/agents-router` works on 2.1.292+ and that the two-step form works on older versions.
 - Check whether Codex's plugin commands and `agy plugin install` are accepted by their own sandboxes when run by a Codex or Antigravity agent.
 - The summaries of the nine third-party READMEs came from a fetch tool that paraphrases. Re-read any claim you intend to quote.
 

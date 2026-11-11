@@ -1,0 +1,13 @@
+{
+  "run": "fixture-run-0",
+  "written": [],
+  "failed": [],
+  "conflicts": [],
+  "waiting": [],
+  "notes": [],
+  "replayed": [],
+  "settings": "<ROOT>/agt/settings.toml",
+  "backups": null,
+  "git_exclude": [],
+  "git_exclude_kept": []
+}

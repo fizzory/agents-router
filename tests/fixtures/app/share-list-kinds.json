@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "enabled": true,
+  "folders": [
+    {
+      "label": "claude",
+      "cli": "claude",
+      "path": "<ROOT>/home/.claude"
+    },
+    {
+      "label": "codex",
+      "cli": "codex",
+      "path": "<ROOT>/home/.codex"
+    }
+  ],
+  "items": [
+    {
+      "id": "agents/example",
+      "kind": "agents",
+      "name": "example",
+      "cells": {
+        "claude": {
+          "state": "has",
+          "note": "",
+          "editable": false,
+          "reason": "your original: agt never removes it"
+        },
+        "codex": {
+          "state": "copy",
+          "note": "",
+          "editable": true,
+          "reason": null
+        }
+      }
+    },
+    {
+      "id": "hooks/pretooluse-echo",
+      "kind": "hooks",
+      "name": "pretooluse-echo",
+      "cells": {
+        "claude": {
+          "state": "has",
+          "note": "your original: agt never removes it",
+          "editable": false,
+          "reason": "your original: agt never removes it"
+        },
+        "codex": {
+          "state": "wait",
+          "note": "",
+          "editable": true,
+          "reason": null
+        }
+      }
+    },
+    {
+      "id": "instructions/instructions",
+      "kind": "instructions",
+      "name": "instructions",
+      "cells": {
+        "claude": {
+          "state": "unadopted",
+          "note": "",
+          "editable": false,
+          "reason": "instruction files use share adopt and resolve, not per-item picks"
+        },
+        "codex": {
+          "state": "missing",
+          "note": "",
+          "editable": false,
+          "reason": "instruction files use share adopt and resolve, not per-item picks"
+        }
+      }
+    },
+    {
+      "id": "mcp/notes",
+      "kind": "mcp",
+      "name": "notes",
+      "cells": {
+        "claude": {
+          "state": "has",
+          "note": "your original: agt never removes it",
+          "editable": false,
+          "reason": "your original: agt never removes it"
+        },
+        "codex": {
+          "state": "copy",
+          "note": "missing from codex",
+          "editable": true,
+          "reason": null
+        }
+      }
+    },
+    {
+      "id": "mcp/private",
+      "kind": "mcp",
+      "name": "private",
+      "cells": {
+        "claude": {
+          "state": "has",
+          "note": "a literal secret: API_KEY holds a literal value",
+          "editable": false,
+          "reason": "a literal secret: API_KEY holds a literal value"
+        },
+        "codex": {
+          "state": "blocked",
+          "note": "a literal secret: API_KEY holds a literal value",
+          "editable": false,
+          "reason": "a literal secret: API_KEY holds a literal value"
+        }
+      }
+    },
+    {
+      "id": "plugins/example@tools",
+      "kind": "plugins",
+      "name": "example",
+      "cells": {
+        "claude": {
+          "state": "has",
+          "note": "your original: agt never removes it",
+          "editable": false,
+          "reason": "your original: agt never removes it"
+        },
+        "codex": {
+          "state": "copy",
+          "note": "",
+          "editable": true,
+          "reason": null
+        }
+      }
+    }
+  ]
+}

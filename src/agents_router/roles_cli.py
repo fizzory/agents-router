@@ -55,6 +55,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     actions = parser.add_subparsers(dest="roles_action")
     show = actions.add_parser("show", help="The roles table (the same as `agt roles`).")
     show.add_argument("--json", action="store_true")
+    show.add_argument("--discover-models", action="store_true",
+                      help="Explicitly discover model choices; wait at most 5 seconds in total.")
     propose = actions.add_parser("propose", help="A role table from your CLIs, accounts and quota; writes nothing.")
     propose.add_argument("--rebalance", action="store_true", help="Move providers by the quota left, not a fresh table.")
     propose.add_argument("--json", action="store_true", help="The proposal as the file `agt roles config --from` reads.")
@@ -89,13 +91,25 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     change.add_argument("--user-said", metavar="WORDS",
                         help="From an agent: the user's own words, for a change that widens a role's access or turns a "
                              "role on or off.")
-    change.add_argument("--if-unchanged", metavar="HASH", help=argparse.SUPPRESS)  # in the undo command
+    change.add_argument("--if-unchanged", metavar="HASH", help="Restore only if the file still has this hash (from JSON undo fields).")
 
 
 def command(args: argparse.Namespace) -> int:
+    try:
+        return _command_args(args)
+    except (ValueError, RuntimeError, OSError) as exc:
+        if not getattr(args, "json", False) or args.roles_action != "config":
+            raise
+        print(json.dumps({"ok": False, "error": {"code": "invalid_request", "message": str(exc),
+                          "exit_code": 2, "needs_user_words": False,
+                          "file": getattr(exc, "file", None), "line": getattr(exc, "line", None)}}, indent=2))
+        return 2
+
+
+def _command_args(args: argparse.Namespace) -> int:
     action = args.roles_action or "show"
     if action == "show":
-        return _show(getattr(args, "json", False))
+        return _show(getattr(args, "json", False), discover=getattr(args, "discover_models", False))
     if action == "propose":
         return _propose(args)
     edit = _edit_from_args(args)
@@ -775,8 +789,9 @@ def _write(args: argparse.Namespace, edit: Edit) -> int:
         "lines": lines, "file": str(location), "level": level, "dry_run": args.dry_run,
         "needs_user_words": needs}
     if needs and not args.dry_run:
-        refusal = {"error": "needs_user_words", "role": _order_names(change.names)[0], "reasons": widens,
-                   "ask": ask, "retry": retry}
+        refusal = {"ok": False, "error": {"code": "needs_user_words", "needs_user_words": True,
+                   "exit_code": settings_write.NEEDS_WORDS, "message": ask,
+                   "role": _order_names(change.names)[0], "reasons": widens, "ask": ask, "retry": retry}}
         if args.json:
             print(json.dumps(refusal, indent=2, ensure_ascii=False))
         else:
@@ -877,7 +892,8 @@ def _commit(edit: Edit, change: Change, lines: list[str], who: dict[str, Any], w
             in_effect = ", ".join(map(str, role.providers)) if role.enabled else "off"
     return {"changes": {name: {"old": change.before.get(name), "new": change.after.get(name)} for name in change.names},
             "lines": lines, "file": str(location), "level": level, "overridden_by": overridden or None,
-            "in_effect": in_effect, "backup": str(backup) if backup else None, "undo": undo, "excluded_in": excluded}
+            "in_effect": in_effect, "backup": str(backup) if backup else None, "undo": undo,
+            "undo_from": str(undo_file), "if_unchanged": _hash(change.new_text), "excluded_in": excluded}
 
 
 def _print_saved(args: argparse.Namespace, edit: Edit, report: dict[str, Any]) -> int:
@@ -980,27 +996,77 @@ def _model_choices(loaded: config.Config, catalog, choices):
     return menu
 
 
-def _table_json(loaded: config.Config) -> dict[str, Any]:
+def _json_catalog(loaded: config.Config, discover: bool):
+    """A snapshot is inert. Only an explicit request starts bounded discovery."""
+    if not discover:
+        return None
+    from agents_router.model_catalog import ModelCatalog
+    from agents_router.runtimes.base import ModelDiscoveryIO
+
+    deadline = time.monotonic() + 5.0
+    def run(*args, **kwargs):
+        import subprocess
+        kwargs["timeout"] = min(kwargs.get("timeout", 5), max(.001, deadline - time.monotonic()))
+        return subprocess.run(*args, **kwargs)
+
+    catalog = ModelCatalog(io=ModelDiscoveryIO(run=run))
+    entries = {provider.entry(): provider for role in loaded.roles.values() for provider in role.providers}
+    for provider in entries.values():
+        _model_snapshot(catalog, loaded.runtime(provider.runtime),
+                        _model_accounts(loaded.runtime(provider.runtime), provider), request=True)
+    while time.monotonic() < deadline:
+        snapshots = [_model_snapshot(catalog, loaded.runtime(p.runtime),
+                                    _model_accounts(loaded.runtime(p.runtime), p)) for p in entries.values()]
+        if not any(snapshot.status == "loading" for snapshot in snapshots):
+            break
+        time.sleep(min(.02, max(0, deadline - time.monotonic())))
+    catalog.poll()
+    return catalog
+
+
+def _provider_choices(loaded: config.Config, provider: roles.Provider, catalog) -> dict[str, Any]:
+    from agents_router.model_catalog import Snapshot
+
+    runtime = loaded.runtime(provider.runtime)
+    accounts = _model_accounts(runtime, provider)
+    snapshot = _model_snapshot(catalog, runtime, accounts) if catalog else Snapshot("unavailable")
+    models, efforts = _choices(loaded, catalog)(provider)
+    rows = []
+    for model in models:
+        allowed = _model_allowed(runtime, accounts, model)
+        rows.append({"model": model, "offered": model in snapshot.models,
+                     "allowed": allowed, "reason": None if allowed else
+                     "not in this account's plan" if accounts else "no enabled worker accounts"})
+    return {"models": rows, "efforts": efforts, "catalog": {"status": snapshot.status}}
+
+
+def _table_json(loaded: config.Config, *, discover: bool = False) -> dict[str, Any]:
     from agents_router import role_agents
 
     workspace = levels.find_workspace()
+    catalog = _json_catalog(loaded, discover)
     rows = []
     for role in roles.ordered(loaded.roles):
         providers = []
         for provider in role.providers:
             problem = show_problem(loaded, provider)
             providers.append({"provider": str(provider), "entry": provider.entry(), "model": provider.model,
-                              "effort": provider.effort, "usable": problem is None, "reason": problem})
+                              "effort": provider.effort, "usable": problem is None, "reason": problem,
+                              "choices": _provider_choices(loaded, provider, catalog)})
         mine = role_agents.here(role.name, loaded)
         rows.append({"name": role.name, "access": role.access, "enabled": role.enabled, "base": role.base,
                      "use_when": role.use_when, "level": role.level(), "providers": providers,
+                     "sources": {key: {"level": layer.level, "file": str(layer.path),
+                                        "line": levels.line_of(layer.text, f"roles.{role.name}", key)}
+                                 for key, layer in role.sources.items()},
                      **({"prompt_file": role.prompt_file} if role.prompt_file else {}),
                      "when_to_call": (mine or {}).get("when_to_call") or role.use_when,
                      "rules_chars": (mine or {}).get("rules_chars", 0),
                      "rules_state": (mine or {}).get("state"),
                      "agent_files": role_agents.agent_files(role.name, loaded),
                      "archived": [str(path) for path in role_agents.archived(role.name)]})
-    return {"roles": rows, "files": {level: str(path) for level, path in settings_write.files(workspace).items()}}
+    return {"schema_version": 1, "roles": rows,
+            "files": {level: str(path) for level, path in settings_write.files(workspace).items()}}
 
 
 def _table_lines(loaded: config.Config) -> list[ui.Line]:
@@ -1058,10 +1124,10 @@ def _agent_notes(found: list[roles.Role]) -> list[str]:
     return out
 
 
-def _show(as_json: bool) -> int:
+def _show(as_json: bool, *, discover: bool = False) -> int:
     loaded = _loaded()
     if as_json:
-        print(json.dumps(_table_json(loaded), indent=2, ensure_ascii=False))
+        print(json.dumps(_table_json(loaded, discover=discover), indent=2, ensure_ascii=False))
         return 0
     ui.out(*_table_lines(loaded))
     return 0

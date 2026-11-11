@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-show-setting-menu"
+description = "Enables the show_setting_menu command without any pre-configured scope."
+commands.allow = ["show_setting_menu"]
+
+[[permission]]
+identifier = "deny-show-setting-menu"
+description = "Denies the show_setting_menu command without any pre-configured scope."
+commands.deny = ["show_setting_menu"]

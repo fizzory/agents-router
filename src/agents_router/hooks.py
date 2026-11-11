@@ -348,8 +348,12 @@ def shell_command(parts: list[str]) -> dict[str, Any]:
 def worker_inbox_hook(job_id: str, home: Path) -> dict[str, Any]:
     """The PostToolUse hook group a Claude worker gets for its inbox."""
 
+    from agents_router import bundle
+    from agents_router.fsutil import python_executable
+
     shim = Path(__file__).resolve().with_name("hook_shim.py")
-    entry = shell_command([sys.executable, str(shim), "--home", str(home), "hook", "inbox", job_id])
+    entry = shell_command([python_executable(), *(["-I"] if bundle.detect() else []),
+                           str(shim), "--home", str(home), "hook", "inbox", job_id])
     entry["timeout"] = 15
     return {"hooks": [entry]}  # no matcher: every tool
 
@@ -357,7 +361,9 @@ def worker_inbox_hook(job_id: str, home: Path) -> dict[str, Any]:
 def worker_read_hook() -> dict[str, Any]:
     """The synchronous shell guard installed only in Claude read workers."""
 
+    from agents_router.fsutil import python_executable
+
     script = Path(__file__).resolve().with_name("claude_read_hook.py")
-    entry = shell_command([sys.executable, "-I", str(script)])
+    entry = shell_command([python_executable(), "-I", str(script)])
     entry.update(timeout=15, onFailure="block")
     return {"matcher": "Bash|PowerShell", "hooks": [entry]}

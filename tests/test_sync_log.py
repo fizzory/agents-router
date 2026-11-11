@@ -87,7 +87,11 @@ class HandEditTests(ItemBase):
         self.assertEqual(len(logged("setting")), 1)  # noticed once
         self.share("pick", "dana", "--not-in", "kiro")  # agt saves the file again
         self.share("sync")
-        self.assertEqual(len(logged("setting")), 1)
+        # Explicit picks now log a setting entry, per the app contract.
+        self.assertEqual([(entry["key"], entry["old"], entry["new"], entry["by"], entry["level"])
+                          for entry in logged("setting")],
+                         [("share.targets.agents/dana.not_in", None, ["kiro"], "command", "user"),
+                          ("share.tool_widening", "allow-if-shell", "skip", "hand edit", "user")])
 
     def test_a_turn_off_by_hand_keeps_the_copies_and_lists_each_one(self):
         self.enable()

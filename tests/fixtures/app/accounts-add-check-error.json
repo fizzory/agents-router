@@ -1,0 +1,9 @@
+{
+  "ok": false,
+  "error": {
+    "account": "work",
+    "runtime": "claude",
+    "message": "claude account 'work' already exists.",
+    "exit_code": 1
+  }
+}

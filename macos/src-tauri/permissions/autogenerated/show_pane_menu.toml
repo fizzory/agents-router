@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-show-pane-menu"
+description = "Enables the show_pane_menu command without any pre-configured scope."
+commands.allow = ["show_pane_menu"]
+
+[[permission]]
+identifier = "deny-show-pane-menu"
+description = "Denies the show_pane_menu command without any pre-configured scope."
+commands.deny = ["show_pane_menu"]

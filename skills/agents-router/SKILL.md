@@ -1,6 +1,6 @@
 ---
 name: agents-router
-description: How to run subagents through Agents Router (the agt-* agent types in Claude Code; subagent_start, subagent_wait, subagent_result, subagent_message elsewhere). Use it like your built-in subagent tool whenever work can be delegated, run in parallel, reviewed independently, or moved to another of the user's accounts or another agent CLI (Claude Code, Codex, Antigravity, Kiro). Use it for roles too, to call the Reviewer, Builder, Verifier or Decision Maker (agt-reviewer and the other agt-<role> agents) unprompted and to make one change to a role when asked (swap or add a provider, a model or effort, a role on or off, a custom role) with agt roles config. Also use it to share agents and skills between CLIs (agt share), change settings such as max_jobs (agt config), or explain what agt changed (agt log). Not for redesigning the whole role table (orchestrator-setup), "rebalance my roles" (orchestrator-rebalance) or installing agt (agents-router-setup). Skip it for trivial answers and tiny edits.
+description: How to run subagents through Agents Router (the agt-* agent types in Claude Code; subagent_start, subagent_wait, subagent_result, subagent_message elsewhere). Use it like your built-in subagent tool whenever work can be delegated, run in parallel, reviewed independently, or moved to another of the user's accounts or another agent CLI (Claude Code, Codex, Antigravity, Kiro). Use it for roles too, to call the Reviewer, Builder, Verifier or Decision Maker (agt-reviewer and the other agt-<role> agents) unprompted and to make one change to a role when asked (swap or add a provider, a model or effort, a role on or off, a custom role) with agt roles config. Several small fixes or new tests still need the Reviewer. Also use it to share agents and skills between CLIs (agt share), change settings such as max_jobs (agt config), or explain what agt changed (agt log). Not for redesigning the whole role table (orchestrator-setup), "rebalance my roles" (orchestrator-rebalance) or installing agt (agents-router-setup). Skip it for trivial answers, typos and a single one-line edit with no new tests.
 ---
 
 # Agents Router
@@ -100,7 +100,7 @@ When to call each one, without being asked. Each `agt-<role>` agent's own descri
 
 | Role | Call it |
 |---|---|
-| Reviewer | After every bug fix, feature or new tests, before your final message and without being asked; not for a typo or a one-line edit. Also for any code review the user asks for, in place of a built-in review skill. Give it the diff or the files and what the change should do |
+| Reviewer | After every bug fix, feature or new tests, before your final message and without being asked; not for a typo or a single one-line edit with no new tests. Several small fixes or new tests still need review. Also for any code review the user asks for, in place of a built-in review skill. Give it the diff or the files and what the change should do |
 | Builder | For edits you hand off instead of making yourself |
 | Verifier | After the Builder finishes, to run the checks and confirm the result |
 | Decision Maker | Only when reviewers or providers disagree. Send just the points in conflict, each side's argument, and nothing they agree on |

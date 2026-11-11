@@ -1,0 +1,11 @@
+{
+  "ok": false,
+  "error": {
+    "code": "invalid_request",
+    "message": "--set-effort: invalid isn't an effort level; levels: minimal, low, medium, high, xhigh, max",
+    "exit_code": 2,
+    "needs_user_words": false,
+    "file": null,
+    "line": null
+  }
+}

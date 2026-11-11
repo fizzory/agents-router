@@ -2,6 +2,12 @@
 
 Agents Router keeps its jobs, state and account folders under `~/.agents-router/` (or `AGT_HOME`), and your settings in `settings.toml` files: one for you, and one or two per workspace. `agt config` shows and changes them, `agt accounts add` writes your account entries, and editing the files by hand is fine too.
 
+## macOS app
+
+The [menu bar app](macos-app.md) reads the same settings and usage records. Right-click its icon and choose **Settings…**. General and Roles have a scope menu: **User**, or **Choose Folder…** for a workspace's **Workspace** and **Local** levels. Values under **File only** have an **Open file** button. Accounts, Sharing and Activity have their own panes.
+
+**Open at login** is in General. Turn it off before deleting the app. The app's CLI runtime lives under `~/Library/Application Support/Agents Router/`; its terminal entry is `~/.local/bin/agt`. App updates use **Check for Updates…**. See the [app guide](macos-app.md#uninstall) before removing it: deleting the app leaves its CLI, settings and job records behind.
+
 ## Settings files
 
 | Level | File | Committed | Holds |
@@ -42,6 +48,11 @@ agt config unset codex.max_jobs         # back to the next level, or the default
 
 `show` lists each key with its value and its source: the default, an environment variable (`CLAUDE_CONFIG_DIR` for `claude.primary`, say), or a file and its line. `--json` adds each key's description and whether an agent needs the user's words to change it.
 
+For apps, `show --json` has `schema_version: 1`. Each row adds `kind`, `choices`, `minimum`, `cap`, `editable`, `accepted_levels` and `still_limited_by`. Fixed keys have `editable: false` and a `changed_by` command. `levels` holds each available level's `present`, `value`, `file`, `line` and `revision`, all from the same bytes read. An absent file has revision `missing`; an empty file has its own SHA-256 revision. A worktree reading the main checkout's local file names that file.
+
+`set|unset --json` return `ok`, the edited file's `revision`, and `previous: {level, present, value}`. `previous` describes that level even when another level masks it. Undo sets that value if it was present, or unsets the key otherwise, at the same level. Pass `--if-unchanged REVISION` to refuse the write if the file changed since. Unsetting an absent key returns `ok: true`, `changed: false` and the current revision. Validation errors exit 2 with `{"ok": false, "error": {"key", "message"}}`. The exit-3 `needs_user_words` refusal below keeps its existing shape.
+
+Names lists take comma-separated names; `[]` sets an explicit empty list.
 `set` and `unset` change one line of one file. Comments and every other line stay as they are, and the old file is backed up to `~/.agents-router/state/backups/settings/`. Each prints the old and new value, the file, what still limits the value or overrides it here, and the command that undoes it:
 
 ```text
@@ -66,6 +77,64 @@ Typed by you in a terminal, the change just applies: the command is your words. 
 
 `max_jobs_by_room` and the `[[<runtime>.pools]]` and account tables are edited by hand (`agt accounts` handles accounts).
 
+## Usage snapshot
+
+`agt usage` shows one line per account: its canonical name, availability, and
+each known usage window's percent used and reset time. Blocked accounts show
+`back HH:MM`. Figures older than 30 minutes are marked `stale`; a window whose
+reset has passed is marked `reset` instead. Kiro and Antigravity have no usage windows.
+
+Plain `agt usage`, including `--json`, reads local records only. It starts no
+provider commands and creates, changes or deletes no state. `--refresh` first
+rescans local Codex rollout files and updates Codex's usage cache. Neither form
+makes a model request. Login state comes from agt's cached checks; an absent,
+expired or invalidated check means `unknown`. Currently only Claude has a persisted
+login-check cache, so the other providers can report blockers but otherwise stay `unknown`.
+
+The JSON contract has `schema_version: 1`, `agt_version`, `generated_at` (epoch
+seconds), and `providers`. Each provider has `runtime`, `label` and `accounts`.
+Each account has `name`, `enabled`, `availability`, `reason`, `until` (epoch or
+null), `running_jobs`, `busy_slots` (occupied account execution leases), `capacity`
+(the account's concurrent-job cap, or null for unlimited), `unhealthy_models`,
+and `windows`. Each window carries `name`, `label`, `used_percent`, `resets_at`,
+`observed_at`, `stale` and `reset`. Shared logins share usage and cooldowns;
+each window keeps its source observation time.
+
+Availability uses this precedence: `off`, `logged_out`, `unhealthy`, `cooling`,
+`recovering`, `busy`, `ok`, `unknown`. Model-only health circuits appear in
+`unhealthy_models` with `model`, `reason`, `until` and `availability`. A malformed
+account record becomes `unknown` with a `problem` note; other accounts remain readable.
+
+Global `jobs` totals report `active`, `queued`, `starting`, `running`, `unassigned`,
+`removed_accounts` and `surviving_workers`. These include jobs outside the current
+workspace, removed accounts and occupied leases left by surviving workers.
+`uninstall_blockers` lists one entry per active job or unattributed occupied lease,
+with `kind`, `job_id`, `runtime` and `account` (unknown identities are null).
+`job_id` is a string or null: an occupied lease can precede job preparation.
+An empty list means nothing currently blocks uninstall. A caller must recheck
+under the admission lock immediately before uninstalling; this snapshot is not a reservation.
+
+Regenerate the app fixture with `PYTHONPATH=src:tests python3 tests/generate_usage_fixture.py`.
+
+## Account checks and switches
+
+`accounts list --json` supplies `can_toggle` and nullable `toggle_reason` on each
+account. Primary logins and discovered Claude profiles cannot be toggled; a
+discovered profile also has `found: true`. Use these fields for locked controls.
+
+```bash
+agt accounts check primary --json                 # this runtime's primary login; Claude by default
+agt accounts check --runtime codex --json         # every account on one runtime
+agt accounts add spare --runtime codex --check --json
+agt accounts disable spare --runtime codex --json
+agt accounts enable spare --runtime codex --json
+agt accounts login primary                       # the person completes the interactive login
+```
+
+`check` uses the runtime's existing quota-free auth probe, with a ten-second total probe budget. It caches the measured result for ten minutes; `usage` only reads that cache and never runs the check. Its JSON has `schema_version`, `runtime` and `accounts`; each result has `account`, `logged_in` (true, false or null), `checked_at` (Unix seconds) and nullable `error`. A timeout or missing CLI is unknown. A completed check exits 0 even when the account is logged out or unknown. After a login exits 0, agt runs the same check: the login's exit code alone never marks an account authenticated. Adding an account also records the check, including with `--no-login`.
+
+`add --check` validates the name, runtime and folder without creating folders, saving settings or probing auth. Success has `ok`, `account`, `runtime` and `home`. It reserves nothing; a real add validates again. `enable|disable --json` return `{"ok": true, "account": "spare", "enabled": false}` (true when enabled). The primary account and discovered Claude profiles cannot be switched. Refusals return `{"ok": false, "error": {"account", "runtime", "message", "exit_code"}}`, keep their exit code and leave settings, backups and log untouched. Account switches and config writes share one settings lock, back up the old file and log the change.
+
 ## The log
 
 agt writes one line for each thing it changes to `~/.agents-router/state/log/<year>-<month>.jsonl`:
@@ -82,7 +151,10 @@ agt log                           # this workspace's entries and your user level
 agt log --all                     # every workspace
 agt log --item reviewer --since 7d
 agt log --key codex.max_jobs --json
+agt config revert 2026-11:12 --json # restore a setting by its log entry id
 ```
+
+`log --json` gives each entry an `id` (`YYYY-MM:LINE`, stable while that log month is retained). `config revert ID` restores the entry's old setting at its original level, only when that level's present/value still matches the logged new value. It compares under the settings lock, then uses the file's revision guard for the write. Other levels may mask the setting; they do not change the comparison. Run it in the entry's workspace for workspace or local settings. The normal validation and user-words rules apply. Refused settings entries carry `file` and nullable `line` from the settings error.
 
 `--since` takes `30m`, `12h`, `7d`, `2w`, `today`, `yesterday` or a date such as `2026-10-01`. In a workspace, the list ends with how many entries other workspaces have.
 
@@ -475,6 +547,8 @@ Job records and generated files contain your prompts, results and MCP server set
 |---|---|
 | `AGT_HOME` | Use a different root folder (`agt --home <folder>` sets it for one command). Without `AGT_CONFIG_DIR`, your user settings move with it, to `<AGT_HOME>/settings.toml` |
 | `AGT_CONFIG_DIR` | The folder of your user `settings.toml` (default `~/.agt`) |
+| `AGT_APP_SUPPORT` | The app's runtime and installer folder (default `~/Library/Application Support/Agents Router`) |
+| `AGT_BIN_DIR` | The folder for the app's public `agt` link (default `~/.local/bin`) |
 | `AGT_DEPTH` | Set by Agents Router in workers; used to refuse nested delegation |
 | `AGT_LAUNCHCTL`, `AGT_OSASCRIPT` | A JSON list to run instead of `launchctl` or `osascript` (the tests use fakes). Without them, agt never uses the real ones for an agt home in a temp folder |
 | `CLAUDE_CONFIG_DIR` | Default for `[claude] primary` when the config doesn't set it |

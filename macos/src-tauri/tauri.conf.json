@@ -1,0 +1,76 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Agents Router",
+  "version": "0.17.0",
+  "identifier": "io.github.watcharagorn.agents-router",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "popover",
+        "title": "Agents Router",
+        "url": "popover.html",
+        "visible": false,
+        "width": 360,
+        "height": 80,
+        "decorations": false,
+        "transparent": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "windowEffects": {
+          "effects": [
+            "popover"
+          ],
+          "state": "active"
+        }
+      },
+      {
+        "label": "settings",
+        "title": "General",
+        "url": "settings.html",
+        "visible": false,
+        "width": 640,
+        "height": 420,
+        "minWidth": 560,
+        "minHeight": 340,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'",
+      "capabilities": [
+        "popover",
+        "settings"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "icon": [
+      "icons/icon.icns",
+      "icons/icon.png"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "14.0",
+      "signingIdentity": "-"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRBNzBGOTNBNTBEMzkyRDYKUldUV2t0TlFPdmx3U3ZOOWE4ZURKWlZvb2hwckViQkpkK3J0SWVnUEVNbEQyYXpGTU9qQUN2MWYK",
+      "endpoints": [
+        "https://github.com/fizzory/agents-router/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "ok": false,
+  "error": {
+    "account": "primary",
+    "runtime": "claude",
+    "message": "'primary' is claude's own login; agt can't switch it on or off. Choose a named extra account instead. See: agt accounts list",
+    "exit_code": 2
+  }
+}

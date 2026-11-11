@@ -29,7 +29,7 @@ import subprocess
 import time
 from typing import Any, Callable, Iterator
 
-from agents_router import health, levels, limits, quota, synclog
+from agents_router import bundle, health, levels, limits, quota, synclog
 from agents_router.config import jobs_dir, load_config, session_folder, set_session, state_dir
 from agents_router.fsutil import (
     file_lock,
@@ -141,7 +141,7 @@ def create_job(*, _codex_usage_refreshed: bool = False, **kwargs: Any) -> dict[s
         try:
             config = load_config(cwd=kwargs.get("cwd"))
         except levels.SettingsError as exc:
-            synclog.refused(str(exc), levels.find_workspace(kwargs.get("cwd")))
+            synclog.refused(exc, levels.find_workspace(kwargs.get("cwd")))
             raise
         usage_view.refresh_codex(config, pinned=kwargs.get("account"))
     with file_lock(state_dir() / "admission.lock", timeout=30):
@@ -174,7 +174,7 @@ def _create_job(
     try:
         config = load_config(cwd=cwd)
     except levels.SettingsError as exc:
-        synclog.refused(str(exc), workspace)
+        synclog.refused(exc, workspace)
         raise
     synclog.notice(workspace)
     host = host or detect_host()
@@ -275,6 +275,7 @@ def _create_job(
 
         model = model or runtime_config.default_model
         pool = quota.pool_for(runtime_config, model)
+        install = bundle.detect()
         spec = JobSpec(
             job_id=job_id,
             runtime=runtime,
@@ -295,6 +296,7 @@ def _create_job(
             depth=depth + 1,
             created=time.time(),
             rules=rules,
+            install_runtime=str(install.runtime) if install else None,
             _doctor_live=_doctor_live,
         )
         folder = job_dir(spec.job_id)
@@ -318,6 +320,8 @@ def _create_job(
             # The runner rewrites "warnings"; this key survives, and summarize() shows it with them.
             "limit_notes": list(admission.warnings) if admission else [],
         }
+        if spec.install_runtime:
+            status["install_runtime"] = spec.install_runtime
         if group:
             status["group"] = group
         if admission and admission.queue_reason:
@@ -326,7 +330,8 @@ def _create_job(
         if start:
             try:
                 pid = spawn_detached(
-                    [python_executable(), "-m", "agents_router", "_runner", spec.job_id],
+                    [str(install.python) if install else python_executable(),
+                     *(["-I"] if install else []), "-m", "agents_router", "_runner", spec.job_id],
                     folder / "runner.log",
                     env=_runner_env(),
                 )
@@ -351,6 +356,9 @@ def _create_job(
 
 def _runner_env() -> dict[str, str]:
     env = dict(os.environ)
+    if bundle.detect():
+        env.pop("PYTHONPATH", None)
+        return env
     package_root = str(Path(__file__).resolve().parents[1])
     existing = env.get("PYTHONPATH")
     env["PYTHONPATH"] = package_root + (os.pathsep + existing if existing else "")

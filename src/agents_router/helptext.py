@@ -28,8 +28,8 @@ ROOT = {
     "sections": [
         ("Get started", [
             ("setup", "Install the plugin in Claude Code, Codex and Antigravity; register account folders"),
-            ("doctor", "Check binaries, logins and shared setup"),
-            ("update", "Reinstall agt and update the plugin in every host that has it"),
+            ("doctor", "Check the install, PATH, binaries, logins and shared setup"),
+            ("update", "Refresh agt and installed plugins; app installs use the app's updater"),
             ("guide", "The steps an agent follows to install, set up, repair or remove agt"),
         ]),
         ("Run tasks in another CLI", [
@@ -48,8 +48,9 @@ ROOT = {
             ("share", ["Keep them the same across Claude Code, Codex, Antigravity and Kiro ", ui.muted("(agt share --help)")]),
         ]),
         ("Accounts and settings", [
-            ("accounts", "List, add, log in, sync, reset or remove accounts (Codex reset checks live usage)"),
-            ("config", "See and change agt's settings (show, set, unset)"),
+            ("usage", "Show cached usage windows and account availability; --refresh rescans Codex"),
+            ("accounts", "List, check, add, log in, enable, disable, sync, reset or remove accounts (Codex reset checks live usage)"),
+            ("config", "See and change agt's settings (show, set, unset, revert)"),
             ("roles", "See and change roles: which providers each role uses (show, propose, config)"),
             ("rules", "Show, install or remove the optional delegation rules"),
             ("log", "What agt changed and why, newest first"),
@@ -67,11 +68,12 @@ ROOT = {
         ('agt start --runtime codex "review the diff"', "Start it in Codex and keep working"),
         ("agt share status", "What's in sync, and what waits for you"),
         ("agt doctor --runtime codex", "Check Codex's binary and logins"),
+        ("agt doctor --verbose", "Show install versions and every agt on PATH"),
     ],
     "footer": [
         [ui.bold("Exit codes"), "  0 done   1 waits for you, or failed   2 wrong command or value   3 needs your choice"],
         [ui.muted("Your CLIs run these, not you:"), " mcp, hook"],
-        [ui.muted("Docs:"), " https://github.com/Watcharagorn/agents-router"],
+        [ui.muted("Docs:"), " https://github.com/fizzory/agents-router"],
     ],
 }
 
@@ -87,6 +89,7 @@ SHARE = {
         ]),
         ("See where things stand", [
             ("status", "What's in sync, what differs and what waits for you; writes nothing"),
+            ("list", "Read-only item and CLI cells with editability; --json exits 0"),
             ("plugins", "Plugins another CLI could install; plugins apply installs the ones you pick"),
             ("settings", "Every share setting, where it comes from and the command that changes it"),
         ]),

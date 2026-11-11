@@ -1,0 +1,15 @@
+{
+  "ok": false,
+  "error": {
+    "code": "needs_user_words",
+    "needs_user_words": true,
+    "exit_code": 3,
+    "message": "reviewer would be turned off. Ask the user, and pass their own words.",
+    "role": "reviewer",
+    "reasons": [
+      "reviewer would be turned off"
+    ],
+    "ask": "reviewer would be turned off. Ask the user, and pass their own words.",
+    "retry": "agt roles config --disable reviewer --user --user-said \"<the user's words>\""
+  }
+}

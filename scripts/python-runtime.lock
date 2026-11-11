@@ -1,0 +1,48 @@
+# Python: Astral python-build-standalone release 20261026 (GitHub asset digest).
+# Dependencies: PyPI universal wheels; regenerate deliberately, then verify by download.
+# All downloads, build tools and caches stay below build/.
+
+[python]
+version = "3.13.18"
+url = "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.13.18%2B20261026-aarch64-apple-darwin-install_only_stripped.tar.gz"
+sha256 = "8392b6ea51d94391befb2c31ebe75463f045d0b69dfcf5e1bb3234e1f5fa3405"
+
+[[runtime]]
+name = "rich"
+version = "15.0.0"
+sha256 = "33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb"
+
+[[runtime]]
+name = "rich-argparse"
+version = "1.8.0"
+sha256 = "d2a3ce7854654e2253c578763ab0a32f05016f23a55fadba7b9a91b6c0e92142"
+
+[[runtime]]
+name = "markdown-it-py"
+version = "4.2.0"
+sha256 = "9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a"
+
+[[runtime]]
+name = "mdurl"
+version = "0.1.2"
+sha256 = "84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8"
+
+[[runtime]]
+name = "pygments"
+version = "2.21.0"
+sha256 = "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9"
+
+[[build]]
+name = "setuptools"
+version = "84.2.1"
+sha256 = "ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2"
+
+[[build]]
+name = "wheel"
+version = "0.48.0"
+sha256 = "3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab"
+
+[[build]]
+name = "packaging"
+version = "26.3"
+sha256 = "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c"

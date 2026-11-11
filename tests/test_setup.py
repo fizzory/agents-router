@@ -77,7 +77,7 @@ class PluginInstallTests(SetupBase):
         self.assertEqual(self.plugins(self.claude_dir), {"agents-router@agents-router": True})
         changing = [c["argv"] for c in self.calls() if c["kind"] == "claude" and "list" not in c["argv"] and "auth" not in c["argv"]]
         self.assertEqual(changing, [
-            ["plugin", "marketplace", "add", "Watcharagorn/agents-router"],
+            ["plugin", "marketplace", "add", "fizzory/agents-router"],
             ["plugin", "install", "agents-router@agents-router"],
         ])
         self.assertTrue(all(c["folder"] == str(self.claude_dir) for c in self.calls()))
@@ -116,7 +116,7 @@ class PluginInstallTests(SetupBase):
     def test_antigravity_installs_from_the_repository_url(self):
         code, out = self.run_cli("--host", "antigravity")
         self.assertEqual(code, 0, out)
-        self.assertIn("agy plugin install https://github.com/Watcharagorn/agents-router", out)
+        self.assertIn("agy plugin install https://github.com/fizzory/agents-router", out)
         self.assertEqual(self.plugins(self.agy_dir), {"agents-router": True})
         code, out = self.run_cli("--host", "antigravity")
         self.assertIn("already installed", out)
@@ -126,9 +126,9 @@ class PluginInstallTests(SetupBase):
         code, out = self.run_cli("--dry-run", "--account", f"max-2={self.root / 'acct'}")
         self.assertEqual(code, 0, out)
         self.assertIn("dry run", out)
-        for text in ("claude plugin marketplace add Watcharagorn/agents-router",
+        for text in ("claude plugin marketplace add fizzory/agents-router",
                      "codex plugin add agents-router@agents-router",
-                     "agy plugin install https://github.com/Watcharagorn/agents-router",
+                     "agy plugin install https://github.com/fizzory/agents-router",
                      "would register and sync"):
             self.assertIn(text, out)
         for folder in (self.claude_dir, self.codex_dir, self.agy_dir):
@@ -167,7 +167,7 @@ class SettingsRouteTests(SetupBase):
         self.assertEqual(data["hooks"], {"x": []})
         self.assertEqual(data["enabledPlugins"], {"other@market": True, "agents-router@agents-router": True})
         self.assertEqual(data["extraKnownMarketplaces"]["agents-router"],
-                         {"source": {"source": "github", "repo": "Watcharagorn/agents-router"}})
+                         {"source": {"source": "github", "repo": "fizzory/agents-router"}})
         self.assertIn("market", data["extraKnownMarketplaces"])
         backups = list(self.claude_dir.glob("settings.json.agents-router-backup-*"))
         self.assertEqual(len(backups), 1)
@@ -398,7 +398,7 @@ class UpdateTests(SetupBase):
         self.log.unlink()
         code, out = self.run_update("--dry-run")
         self.assertIn("would run `python -c print('reinstalled')`", out.replace(Path(sys.executable).stem, "python"))
-        self.assertRegex(out, r"\+  Antigravity  agy plugin install https://github.com/Watcharagorn/agents-router\n")
+        self.assertRegex(out, r"\+  Antigravity  agy plugin install https://github.com/fizzory/agents-router\n")
         self.assertTrue(all("list" in c["argv"] for c in self.calls()))
         code, out = self.run_update("--no-package", "--host", "antigravity")
         self.assertEqual(code, 0, out)
@@ -409,7 +409,7 @@ class UpdateTests(SetupBase):
         code, out = self.run_update(info=("unknown", None))
         self.assertEqual(code, 1)
         self.assertIn("couldn't tell how the package was installed", out)
-        self.assertIn("pipx install --force git+https://github.com/Watcharagorn/agents-router", out)
+        self.assertIn("pipx install --force git+https://github.com/fizzory/agents-router", out)
         self.assertIn("  Plugin   no host has it yet; `agt setup` installs it\n", out)
 
     def test_settings_route_needs_a_restart(self):
@@ -421,7 +421,7 @@ class UpdateTests(SetupBase):
         self.assertIn("Restart Claude Code", out)
 
     def test_detect_install(self):
-        url = "git+https://github.com/Watcharagorn/agents-router"
+        url = "git+https://github.com/fizzory/agents-router"
         method, argv = setup.detect_install("/home/u/.local/pipx/venvs/agents-router", "/x/site-packages", None, None, "py")
         self.assertEqual((method, argv[1:]), ("pipx", ["install", "--force", url]))
         method, argv = setup.detect_install("/home/u/.local/share/uv/tools/agents-router", "/x", None, None, "py")
@@ -447,7 +447,7 @@ class UpdateTests(SetupBase):
         self.assertEqual(setup.detect_install(str(pipx), "/x", None, None, "py")[0], "pip")
         (uv / "uv-receipt.toml").write_text('[tool]\nrequirements = [{ name = "agents-router" }]\n', encoding="utf-8")
         (pipx / "pipx_metadata.json").write_text("{}", encoding="utf-8")
-        url = "git+https://github.com/Watcharagorn/agents-router"
+        url = "git+https://github.com/fizzory/agents-router"
         method, argv = setup.detect_install(str(uv), "/x", None, None, "py")
         self.assertEqual((method, argv[1:]), ("uv", ["tool", "install", "--force", "--compile-bytecode", url]))
         method, argv = setup.detect_install(str(pipx), "/x", None, None, "py")
@@ -1216,7 +1216,7 @@ class PluginSourceTests(SetupBase):
     """AGT_PLUGIN_SOURCE: a local clone instead of GitHub, for live checks in a sandbox."""
 
     def test_github_by_default_and_a_local_clone_when_set(self):
-        self.assertEqual(setup.plugin_source(), "Watcharagorn/agents-router")
+        self.assertEqual(setup.plugin_source(), "fizzory/agents-router")
         with patch.dict(os.environ, {"AGT_PLUGIN_SOURCE": str(REPO_ROOT)}):
             self.assertEqual(setup.plugin_source(), str(REPO_ROOT))
             code, out = self.run_cli("--host", "claude", "--host", "antigravity", "--share", "off", "--yes")

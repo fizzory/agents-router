@@ -1,0 +1,31 @@
+{
+  "changes": {
+    "reviewer": {
+      "old": {
+        "providers": [
+          "claude:work/sonnet:high"
+        ]
+      },
+      "new": {
+        "providers": [
+          "claude:work/opus:high"
+        ]
+      }
+    }
+  },
+  "lines": [
+    "model     claude:work → opus in reviewer"
+  ],
+  "file": "<ROOT>/agt/settings.toml",
+  "level": "user",
+  "dry_run": false,
+  "needs_user_words": false,
+  "overridden_by": null,
+  "in_effect": "claude:work/opus:high",
+  "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
+  "undo": "agt roles config --from <ROOT>/agt/state/backups/settings/<UNDO>.json --user --if-unchanged 7896db640a27",
+  "undo_from": "<ROOT>/agt/state/backups/settings/<UNDO>.json",
+  "if_unchanged": "7896db640a27",
+  "excluded_in": null,
+  "agents": []
+}

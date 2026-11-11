@@ -1,0 +1,36 @@
+{
+  "run": "fixture-backed-undo",
+  "written": [
+    {
+      "kind": "agents",
+      "name": "example",
+      "labels": [
+        "codex"
+      ],
+      "action": "update",
+      "path": "<ROOT>/home/.codex/agents/example.toml",
+      "message": "put back"
+    },
+    {
+      "kind": "agents",
+      "name": "example",
+      "labels": [
+        "claude"
+      ],
+      "action": "update",
+      "path": "<ROOT>/home/.claude/agents/example.md",
+      "message": ""
+    }
+  ],
+  "failed": [],
+  "conflicts": [],
+  "waiting": [],
+  "notes": [
+    "`agt share undo example` again puts back what this undo replaced."
+  ],
+  "replayed": [],
+  "settings": null,
+  "backups": "<ROOT>/agt/state/share/backups/fixture-backed-undo",
+  "git_exclude": [],
+  "git_exclude_kept": []
+}

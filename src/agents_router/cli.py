@@ -12,10 +12,9 @@ import time
 from typing import Any
 
 from agents_router import __version__, accounts, config_cli, roles_cli, health, health_view, helptext, jobs, levels, plans, rules, setup, sync, synclog, tools, ui
-from agents_router.config import NAME_RE, Account, homes_dir, load_config, save_accounts, user_settings_path
+from agents_router.config import NAME_RE, Account, load_config, save_accounts, user_settings_path
 from agents_router.entry import HOOK_ACTIONS
 from agents_router.hosts import HOST_LABELS
-from agents_router.fsutil import make_private_dir
 from agents_router.runtimes import AVAILABLE as RUNTIMES, get_runtime
 from agents_router.runtimes.base import ACCESS_LEVELS, JobSpec
 from agents_router.share import commands as share_commands
@@ -76,7 +75,11 @@ def _start(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def cmd_accounts(args: argparse.Namespace) -> int:
-    config = load_config()
+    if args.action in ("check", "add", "enable", "disable") or args.check:
+        from agents_router import account_commands
+
+        return account_commands.command(args)
+    config = load_config(cached_only=args.action == "login")
     action = args.action or "list"
 
     if action == "list":
@@ -126,34 +129,9 @@ def cmd_accounts(args: argparse.Namespace) -> int:
         print(f"{args.runtime} account '{args.name}': " + (" and ".join(cleared) + " cleared" if cleared else "nothing to clear"))
         return 0
 
-    if not args.name or not NAME_RE.match(args.name) or args.name == "primary":
+    if not args.name or not NAME_RE.match(args.name) or (args.name == "primary" and action != "login"):
         print("Give the account a short name: letters, digits, dot, dash or underscore ('primary' is reserved).")
         return 2
-
-    if action == "add":
-        if runtime_config.find(args.name):
-            print(f"{args.runtime} account '{args.name}' already exists.")
-            return 1
-        home = Path(args.home).expanduser().resolve() if args.home else homes_dir() / args.runtime / args.name
-        try:
-            status, account = setup.register_account(config, args.runtime, args.name, home)
-        except ValueError as exc:
-            print(exc)
-            return 1
-        if status == "exists":
-            print(f"That folder already belongs to {args.runtime} account '{account.name}'.")
-            return 1
-        make_private_dir(home)
-        save_accounts(config)
-        print(f"Added {args.runtime} account '{args.name}' with folder {home}")
-        if getattr(runtime, "add_note", None):
-            print(runtime.add_note)
-        report = runtime.prepare(runtime_config, account, _probe_spec(args.runtime))
-        _print_setup(report)
-        if args.no_login:
-            print(f"Log in later with: agt accounts login {args.name} --runtime {args.runtime}")
-            return 0
-        return _login(runtime_config, runtime, account)
 
     account = runtime_config.find(args.name)
     if account is None:
@@ -161,12 +139,7 @@ def cmd_accounts(args: argparse.Namespace) -> int:
         return 1
 
     if action == "login":
-        code = _login(runtime_config, runtime, account)
-        if args.runtime == "claude":
-            from agents_router import profiles
-
-            profiles.forget(account.home)
-        return code
+        return _login(runtime_config, runtime, account)
     if account.found and action in ("sync", "enable", "disable"):
         print(f"'{args.name}' is one of your own Claude profiles ({ui.short_path(str(account.home))}): agt runs it "
               "with its own setup and keeps nothing to sync or switch. `agt accounts remove "
@@ -179,11 +152,6 @@ def cmd_accounts(args: argparse.Namespace) -> int:
         runtime_config.accounts = [item for item in runtime_config.accounts if item.name != args.name]
         save_accounts(config)
         print(f"Removed '{args.name}' from the config. Its folder was left as is: {account.home}")
-        return 0
-    if action in ("enable", "disable"):
-        account.enabled = action == "enable"
-        save_accounts(config)
-        print(f"{args.name}: {'enabled' if account.enabled else 'disabled'}")
         return 0
     print(f"Unknown action: {action}")
     return 2
@@ -234,7 +202,13 @@ def _login(runtime_config, runtime, account: Account) -> int:
     if hasattr(runtime, "login_instructions"):
         print(runtime.login_instructions(account))
     cwd = runtime.login_cwd(account) if hasattr(runtime, "login_cwd") else None
-    return subprocess.call(argv, env=env, cwd=cwd)
+    code = subprocess.call(argv, env=env, cwd=cwd)
+    if code == 0:
+        from agents_router import account_check
+
+        result = account_check.check(runtime_config, account)["logged_in"]
+        print("Login check: " + ("logged in" if result is True else "logged out" if result is False else "unknown"))
+    return code
 
 
 # Setup -----------------------------------------------------------------------
@@ -436,6 +410,9 @@ def _kiro_engine(config: Any, report: dict[str, Any], command: list[str]) -> tup
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
+    from agents_router import bundle
+
+    install = bundle.diagnostics()
     config = load_config()
     named = getattr(args, "runtime", None)
     names = [named] if named else _runtimes_set_up(config)
@@ -466,7 +443,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             problems.append(engine_problem)
     if getattr(args, "json", False):
         found = [{"problem": what, "fix": ui.plain(fix)} for what, fix in problems]
-        _print({**reports[names[0]], "problems": found} if named else {"runtimes": list(reports.values()), "problems": found})
+        _print({**reports[names[0]], "problems": found, "install": install} if named else
+               {"runtimes": list(reports.values()), "problems": found, "install": install})
         return 1 if problems else 0
     notes = list(config.notes)
     notes += [f"{found}. Two installs both register an MCP server and hooks; remove the old one."
@@ -496,6 +474,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     count = len(problems)
     lines: list[ui.Line] = [[ui.bold("agt doctor"), f"  {_and(names)}, ",
                              ui.error(f"{count} problem{'s' if count != 1 else ''}") if count else ui.ok("✓ all good")], ""]
+    lines += bundle.doctor_lines(install, verbose=getattr(args, "verbose", False)) + [""]
     width = max(len(HOST_LABELS.get(name, name)) for name in names + ["Sharing"]) + 3
     accounts_lines = ui.columns([_account_rows(entry) for name in names for entry in reports[name].get("accounts", [])],
                                 indent=4, gap=3)
@@ -876,19 +855,24 @@ def build_parser() -> argparse.ArgumentParser:
     roles_cli.add_parser(sub)
     synclog.add_parser(sub)
 
+    usage = sub.add_parser("usage", help="Show cached usage windows and account availability; writes nothing.")
+    usage.add_argument("--json", action="store_true", help="Print the versioned usage snapshot as JSON.")
+    usage.add_argument("--refresh", action="store_true", help="First refresh Codex usage from local rollout files.")
+
     mcp_parser = sub.add_parser("mcp", help="Run the MCP server on stdio.")
     mcp_parser.add_argument("--worker", help=argparse.SUPPRESS)
 
-    accounts_parser = sub.add_parser("accounts", help="List, add, log in, sync, reset or remove accounts.")
+    accounts_parser = sub.add_parser("accounts", help="List, check, add, log in, enable, disable, sync, reset or remove accounts.")
     accounts_parser.add_argument(
-        "action", nargs="?", choices=("list", "add", "login", "sync", "remove", "enable", "disable", "reset"),
-        help="reset clears an account's usage-limit cooldown and health.",
+        "action", nargs="?", choices=("list", "add", "login", "sync", "remove", "enable", "disable", "reset", "check"),
+        help="check measures login state without quota (10 seconds total); reset clears cooldown and health.",
     )
     accounts_parser.add_argument("name", nargs="?")
     accounts_parser.add_argument("--runtime", choices=RUNTIMES, help="Claude unless you name one; list shows every runtime.")
-    accounts_parser.add_argument("--json", action="store_true", help="With list: the report as JSON.")
+    accounts_parser.add_argument("--json", action="store_true", help="With list, check, add --check, enable and disable: the report as JSON.")
     accounts_parser.add_argument("--home", help="Folder for this account (default ~/.agents-router/homes/<runtime>/<name>).")
     accounts_parser.add_argument("--no-login", action="store_true")
+    accounts_parser.add_argument("--check", action="store_true", help="With add: validate only; create no folders and run no login checks.")
     accounts_parser.add_argument("--cwd", default=os.getcwd(), help="Project used to resolve local MCP servers for sync.")
 
     setup_parser = sub.add_parser(
@@ -923,10 +907,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     update_parser = sub.add_parser(
-        "update", help="Reinstall agt from the source you installed it from, and update the plugin in every host that has it.",
+        "update", help="Refresh agt and installed plugins; app installs use the app's updater.",
         description="Reinstalls the agt package with the tool that installed it (pipx, uv or pip), from the same "
         "source (GitHub, or the folder or archive you installed from), and updates "
-        "the agents-router plugin through each host's own terminal commands.",
+        "the agents-router plugin through each host's own terminal commands. "
+        "App installs refresh bundled plugins and launchers offline; use Check for Updates… in the app for new versions.",
     )
     update_parser.add_argument("--host", action="append", choices=("claude", "codex", "antigravity", "auto"),
                                help="Host to update; repeat for several (default auto: every host that has the plugin).")
@@ -938,9 +923,10 @@ def build_parser() -> argparse.ArgumentParser:
                            "`agt guide setup` is the one to follow after installing agt.")
     guide.add_argument("name", nargs="?", choices=sorted(GUIDES), help="The guide (no name: the list).")
 
-    doctor = sub.add_parser("doctor", help="Check binaries, logins and shared setup.")
+    doctor = sub.add_parser("doctor", help="Check the install, PATH, binaries, logins and shared setup.")
     doctor.add_argument("--runtime", choices=RUNTIMES, help="Check only this runtime (default: every one installed).")
     doctor.add_argument("--json", action="store_true", help="The report as JSON.")
+    doctor.add_argument("--verbose", action="store_true", help="Include all install versions, paths and agt entries on PATH.")
     doctor.add_argument("--live", action="store_true", help="Run one tiny job per account (uses a little quota).")
     doctor.add_argument("--model", help="Model for --live jobs (default: haiku for claude, the CLI's default otherwise).")
     doctor.add_argument("--cwd", default=os.getcwd())
@@ -1056,6 +1042,10 @@ def main(argv: list[str] | None = None) -> int:
             from agents_router.runner import main as run_job
 
             return run_job(args.job_id)
+        if args.command == "usage":
+            from agents_router.usage_snapshot import command
+
+            return command(args)
         handlers = {
             "rules": rules.command,
             "share": share_commands.command,

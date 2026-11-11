@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-setup-roles"
+description = "Enables the setup_roles command without any pre-configured scope."
+commands.allow = ["setup_roles"]
+
+[[permission]]
+identifier = "deny-setup-roles"
+description = "Denies the setup_roles command without any pre-configured scope."
+commands.deny = ["setup_roles"]

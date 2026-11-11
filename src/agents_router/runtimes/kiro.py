@@ -436,12 +436,12 @@ class KiroRuntime:
     def account_env(self, config: RuntimeConfig, account: Account) -> dict[str, str]:
         return clean_environment()  # KIRO_API_KEY, when you set it, passes through as it is
 
-    def _run_quiet(self, config: RuntimeConfig, args: list[str]) -> tuple[int, str]:
+    def _run_quiet(self, config: RuntimeConfig, args: list[str], *, timeout: float = 60) -> tuple[int, str]:
         command = self.find_binary(config)
         if not command:
             return 127, "kiro-cli not found"
         try:
-            return _run_quiet(command, args)
+            return _run_quiet(command, args, timeout=timeout)
         except (OSError, subprocess.TimeoutExpired) as exc:
             return 1, f"{type(exc).__name__}: {exc}"
 
@@ -449,10 +449,10 @@ class KiroRuntime:
         code, output = self._run_quiet(config, ["--version"])
         return output.strip().splitlines()[0] if code == 0 and output.strip() else None
 
-    def auth_status(self, config: RuntimeConfig, account: Account) -> dict[str, Any]:
+    def auth_status(self, config: RuntimeConfig, account: Account, *, timeout: float = 60) -> dict[str, Any]:
         """`kiro-cli whoami --format json`: read-only, makes no model request."""
 
-        code, output = self._run_quiet(config, ["whoami", "--format", "json"])
+        code, output = self._run_quiet(config, ["whoami", "--format", "json"], timeout=timeout)
         try:
             data, outside_json = _json_parts(output)
         except ValueError:

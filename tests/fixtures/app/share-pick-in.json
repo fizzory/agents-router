@@ -1,0 +1,24 @@
+{
+  "run": "fixture-run-1",
+  "written": [
+    {
+      "kind": "agents",
+      "name": "example",
+      "labels": [
+        "codex"
+      ],
+      "action": "copy",
+      "path": "<ROOT>/home/.codex/agents/example.toml",
+      "message": ""
+    }
+  ],
+  "failed": [],
+  "conflicts": [],
+  "waiting": [],
+  "notes": [],
+  "replayed": [],
+  "settings": "<ROOT>/agt/settings.toml",
+  "backups": null,
+  "git_exclude": [],
+  "git_exclude_kept": []
+}
