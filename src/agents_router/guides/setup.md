@@ -20,6 +20,7 @@ uv tool install --managed-python git+https://github.com/fizzory/agents-router
 - **`agt` not on PATH after the install:** call it by its full path for the rest of setup (`~/.local/bin/agt`, or `%USERPROFILE%\.local\bin\agt.exe` on Windows). Then run `uv tool update-shell` (or `pipx ensurepath`) so new terminals find it. The plugin's hooks call `agt` by name, so the person's next sessions need it on PATH.
 - **Windows:** `agt update` prints the package command instead of running it; run that command yourself.
 - **Installed by Agents Router.app:** use Check for Updates… in the app for the app, Python and agt. `agt update` refreshes the shipped plugin and stable launchers locally, with no package download. `agt doctor --verbose` shows ownership, versions and competing copies on PATH. Add `~/.local/bin` to PATH if needed.
+- **macOS app download:** Apple Silicon, macOS 14 or newer. Download `Agents-Router-<version>-arm64.dmg` from https://github.com/fizzory/agents-router/releases/latest. Follow https://github.com/fizzory/agents-router/blob/main/docs/macos-app.md for approval and Move to Applications. The person approves the unsigned app themselves; macOS 15 or newer uses System Settings → Privacy & Security → Open Anyway.
 - **Not on PyPI:** never `pip install agt`; that's a different project.
 
 ## 2. Propose, ask once, apply
@@ -176,7 +177,7 @@ Ask first, then work in this order. Only setting it up again undoes it.
 5. **Antigravity:** remove the agents-router plugin with `agy plugin` (`agy plugin list` shows it), and delete `~/.gemini/config/plugins/agents-router-relays` (agt's role agents go with it).
    **Role agents elsewhere:** delete each `agt-<role>.md` in a Claude profile's `agents/` folder and each `agt-<role>.toml` in `~/.codex/agents/` whose first lines say `Managed by agt roles` (`grep -l "Managed by agt roles" ~/.claude*/agents/agt-*.md ~/.codex/agents/agt-*.toml` lists them). Keep any without that line: they are the person's own.
 6. **MCP servers added by hand:** `claude mcp remove --scope user agents-router` and `codex mcp remove agents-router`.
-7. **The package:** `uv tool uninstall agents-router` (or `pipx uninstall agents-router`).
+7. **The package:** for an app install, turn off **Open at login** in Settings → General, then choose **Uninstall command line tool…** there. Wait for all jobs to finish first. Quit the app and move Agents Router.app to the Trash. Deleting the app alone leaves its CLI installed. See https://github.com/fizzory/agents-router/blob/main/docs/macos-app.md#uninstall for the remaining app files. For a CLI install, use `uv tool uninstall agents-router` (or `pipx uninstall agents-router`).
 8. **agt's own folders,** after asking:
    - `~/.agents-router` holds jobs, state and the accounts agt made under `homes/`, whose logins go with it;
    - `~/.agt` holds settings.

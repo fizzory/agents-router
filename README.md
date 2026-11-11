@@ -32,14 +32,16 @@ flowchart LR
 
 | | |
 |---|---|
-| **What it is** | A command (`agt`), a plugin for Claude Code, Codex and Antigravity, and an MCP server for any other client |
+| **What it is** | A command (`agt`), a plugin for Claude Code, Codex and Antigravity, an MCP server for any other client, and a [macOS menu bar app](docs/macos-app.md) |
 | **What it isn't** | An API proxy or model router: every subagent is the vendor's own CLI with your own login |
-| **Needs** | Python 3.11 or newer and its one dependency, [rich](https://github.com/Textualize/rich), which draws color for a person at a terminal (git to install) |
+| **Needs** | CLI install: Python 3.11 or newer, [rich](https://github.com/Textualize/rich) for terminal color, and git. The macOS app bundles Python and agt |
 | **Tested live** | Windows, with Claude Code 2.1.299, Codex 0.162.1 and Antigravity 1.4.0 |
 
 ## Install
 
-Paste this into Claude Code, Codex or Antigravity:
+**macOS app:** on an Apple Silicon Mac with macOS 14 or newer, download `Agents-Router-<version>-arm64.dmg` from [GitHub Releases](https://github.com/fizzory/agents-router/releases/latest). See the [app guide](docs/macos-app.md) for approval, installation, terminal PATH, updates and uninstall.
+
+**CLI install:** paste this into Claude Code, Codex or Antigravity:
 
 ```text
 Install and set up Agents Router for me from https://github.com/fizzory/agents-router.
@@ -56,7 +58,7 @@ Your agent installs `agt` and puts the plugin in every CLI and Claude Code profi
 
 - **Needs:** git, and [uv](https://docs.astral.sh/uv/getting-started/installation/) (`brew install uv` on a Mac) or pipx.
 - **Not on PyPI:** the PyPI package named `agt` is a different project.
-- **Later:** `agt update` updates `agt` and the plugin everywhere it is.
+- **Later:** `agt update` updates a CLI install and its plugins. For an app install, use **Check for Updates…** in the app; `agt update` refreshes its bundled plugin locally.
 
 <details>
 <summary>Install it yourself in a terminal</summary>
@@ -91,6 +93,7 @@ Per host details: [docs/hosts.md](docs/hosts.md).
 
 | I want to | Do this | Guide |
 |---|---|---|
+| Manage settings and see usage in the menu bar | Open Agents Router.app, then **Settings…** | [macOS app](docs/macos-app.md) |
 | Hand a task to Codex | Ask your session: "have Codex review this branch" | [Codex](docs/codex.md) |
 | Give roles their providers | `agt roles config` | [Roles](docs/roles.md) |
 | Run a subagent from a terminal | `agt run --runtime codex --access read "Review the diff on this branch"` | [Hosts](docs/hosts.md) |

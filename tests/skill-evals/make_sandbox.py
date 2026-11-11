@@ -13,8 +13,8 @@ those files are kept.
 
 Host mode uses a named Claude profile, `home/.claude-eval`, with no `home/.claude`:
 Claude Code's eval Bash sandbox blocks role-agent writes in a folder named `.claude`.
-Its env.json opts the wrapper into a compact setup/roles call journal for graders, whose
-LLM trace view omits middle events. Jobs mode keeps its original primary folders and exec path.
+Both modes opt the wrapper into a compact setup/roles call journal for graders, whose
+LLM trace view omits middle events. Other commands still exec agt directly.
 
 The accounts a case's roles name (`[roles.*] providers` in its user and workspace settings) are made
 the way agt finds them on a real machine, logged in to the fake CLIs:

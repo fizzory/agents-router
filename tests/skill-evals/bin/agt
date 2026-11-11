@@ -7,8 +7,8 @@ drops the variables of the session running it, sets the sandbox's HOME, AGT_HOME
 CODEX_HOME and fake CLIs for agt alone, and runs agt's copied code. With no sandbox it refuses (exit 2),
 so it can never reach the real ~/.agt, ~/.claude* or ~/.codex.
 
-Only env.json's explicit host mode journals setup and roles-config calls: full trace regex
-graders can see all events, but LLM trace graders see only the ends. The journal holds argv
+Both sandbox modes journal setup and roles-config calls: full trace regex graders can see
+all events, but LLM trace graders see only the ends. The journal holds argv
 and computed proposal/order facts, never full output. All other calls still exec agt directly.
 """
 
@@ -248,7 +248,7 @@ def main() -> int:
     python = spec["python"]
     argv = sys.argv[1:]
     command = [python, "-c", "import sys; from agents_router.entry import main; sys.exit(main())", *argv]
-    if spec.get("mode") == "host":
+    if spec.get("mode") in {"host", "jobs"}:
         args = effective_argv(argv, spec["src"])
         if args[:1] == ["setup"] or args[:2] == ["roles", "config"]:
             return run_journaled(root, command, env, argv, args)

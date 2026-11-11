@@ -2,6 +2,12 @@
 
 Agents Router keeps its jobs, state and account folders under `~/.agents-router/` (or `AGT_HOME`), and your settings in `settings.toml` files: one for you, and one or two per workspace. `agt config` shows and changes them, `agt accounts add` writes your account entries, and editing the files by hand is fine too.
 
+## macOS app
+
+The [menu bar app](macos-app.md) reads the same settings and usage records. Right-click its icon and choose **Settings…**. General and Roles have a scope menu: **User**, or **Choose Folder…** for a workspace's **Workspace** and **Local** levels. Values under **File only** have an **Open file** button. Accounts, Sharing and Activity have their own panes.
+
+**Open at login** is in General. Turn it off before deleting the app. The app's CLI runtime lives under `~/Library/Application Support/Agents Router/`; its terminal entry is `~/.local/bin/agt`. App updates use **Check for Updates…**. See the [app guide](macos-app.md#uninstall) before removing it: deleting the app leaves its CLI, settings and job records behind.
+
 ## Settings files
 
 | Level | File | Committed | Holds |
@@ -539,6 +545,8 @@ Job records and generated files contain your prompts, results and MCP server set
 |---|---|
 | `AGT_HOME` | Use a different root folder (`agt --home <folder>` sets it for one command). Without `AGT_CONFIG_DIR`, your user settings move with it, to `<AGT_HOME>/settings.toml` |
 | `AGT_CONFIG_DIR` | The folder of your user `settings.toml` (default `~/.agt`) |
+| `AGT_APP_SUPPORT` | The app's runtime and installer folder (default `~/Library/Application Support/Agents Router`) |
+| `AGT_BIN_DIR` | The folder for the app's public `agt` link (default `~/.local/bin`) |
 | `AGT_DEPTH` | Set by Agents Router in workers; used to refuse nested delegation |
 | `AGT_LAUNCHCTL`, `AGT_OSASCRIPT` | A JSON list to run instead of `launchctl` or `osascript` (the tests use fakes). Without them, agt never uses the real ones for an agt home in a temp folder |
 | `CLAUDE_CONFIG_DIR` | Default for `[claude] primary` when the config doesn't set it |
