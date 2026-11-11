@@ -99,13 +99,24 @@ class MessageTests(TempHome):
         names = [tool["name"] for tool in json.loads(stdout.getvalue().decode().splitlines()[0])["result"]["tools"]]
         self.assertEqual(names, ["message_parent", "ask_parent", "check_parent_messages"])
 
-        with patch.object(tools, "PING_SECONDS", 0.3):
+        reply_received = threading.Event()
+
+        class ReplyStream(io.BytesIO):
+            def write(self, data):
+                written = super().write(data)
+                if json.loads(data).get("id") == 2:
+                    reply_received.set()
+                return written
+
+        with patch.object(tools, "WAIT_PING_SECONDS", 0.3):
             stdin = io.BytesIO((json.dumps({
                 "jsonrpc": "2.0", "id": 2, "method": "tools/call",
                 "params": {"name": "subagent_wait", "arguments": {"job_ids": [job], "timeout_seconds": 30}, "_meta": {"progressToken": "p1"}},
             }) + "\n").encode())
-            stdout = io.BytesIO()
+            stdout = ReplyStream()
             mcp_server.serve(stdin, stdout)
+            # EOF only joins request handlers for five seconds; wait for the reply itself.
+            self.assertTrue(reply_received.wait(60), "MCP reply id=2 did not arrive")
         lines = [json.loads(line) for line in stdout.getvalue().decode().splitlines()]
         self.assertTrue(any(line.get("method") == "notifications/progress" for line in lines))
         final = next(line for line in lines if line.get("id") == 2)
