@@ -326,13 +326,13 @@ pub async fn isolated(root: &Path) -> Result<()> {
             && found.version == "0.16",
         "foreign CLI touched or misidentified",
     )?;
-    install::replace_foreign(&paths, &found)?;
-    install::restore_cli(&paths)?;
+    install::replace_foreign(&paths, &found).await?;
+    install::restore_cli(&paths).await?;
     require(
         fs::read_link(paths.public()).map_err(err)? == foreign,
         "explicit restore failed",
     )?;
-    install::replace_foreign(&paths, &found)?;
+    install::replace_foreign(&paths, &found).await?;
     require(install::owns_public(&paths), "replace failed")?;
     println!("OK: foreign uv agt left untouched; explicit Replace saves its previous target");
     let pinned = paths.support.join("runtimes/0.15.0");

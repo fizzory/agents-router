@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     cmp::Ordering,
-    fs::{self, File, OpenOptions},
+    fs::{self, File, OpenOptions, TryLockError},
     io,
     os::unix::fs::{symlink, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{process::Command, time::timeout};
 
@@ -178,7 +178,7 @@ fn version_cmp(a: &str, b: &str) -> Ordering {
         (a, b) => a.cmp(&b),
     }
 }
-fn lock(path: &Path) -> Result<File> {
+async fn lock(path: &Path) -> Result<File> {
     fs::create_dir_all(path.parent().ok_or("Lock has no parent")?).map_err(err)?;
     let f = OpenOptions::new()
         .create(true)
@@ -188,9 +188,21 @@ fn lock(path: &Path) -> Result<File> {
         .mode(0o600)
         .open(path)
         .map_err(err)?;
-    f.try_lock()
-        .map_err(|_| "Another agt operation is in progress. Try again.".to_owned())?;
-    Ok(f)
+    // A forked child can briefly retain a released lock until exec. Give it
+    // time to close the inherited descriptor without blocking an async worker.
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        if Instant::now() >= deadline {
+            return Err("Another agt operation is in progress. Try again.".into());
+        }
+        match f.try_lock() {
+            Ok(()) => return Ok(f),
+            Err(TryLockError::WouldBlock) => (),
+            Err(e) => return Err(err(e)),
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        tokio::time::sleep(Duration::from_millis(10).min(remaining)).await;
+    }
 }
 fn atomic_bytes(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
     fs::create_dir_all(path.parent().ok_or("No parent")?).map_err(err)?;
@@ -516,7 +528,7 @@ async fn install_inner(
     if !valid_location(app, paths) {
         return Err("Move Agents Router to Applications to continue.".into());
     }
-    let _lock = lock(&paths.support.join("install.lock"))?;
+    let _lock = lock(&paths.support.join("install.lock")).await?;
     let first = paths.current().is_none();
     let m = manifest(payload).map_err(|e| install_error(&e, first, None))?;
     if paths
@@ -582,8 +594,8 @@ async fn install_inner(
         foreign: foreign_cli(paths),
     })
 }
-pub fn replace_foreign(paths: &InstallPaths, expected: &ForeignCli) -> Result<()> {
-    let _lock = lock(&paths.support.join("install.lock"))?;
+pub async fn replace_foreign(paths: &InstallPaths, expected: &ForeignCli) -> Result<()> {
+    let _lock = lock(&paths.support.join("install.lock")).await?;
     if foreign_cli(paths).as_ref().map(|f| &f.target) != Some(&expected.target) {
         return Err("agt changed elsewhere. Check again before replacing it.".into());
     }
@@ -603,8 +615,8 @@ pub fn replace_foreign(paths: &InstallPaths, expected: &ForeignCli) -> Result<()
     }
     Ok(())
 }
-pub fn restore_cli(paths: &InstallPaths) -> Result<()> {
-    let _lock = lock(&paths.support.join("install.lock"))?;
+pub async fn restore_cli(paths: &InstallPaths) -> Result<()> {
+    let _lock = lock(&paths.support.join("install.lock")).await?;
     let mut r = record(paths);
     let foreign = r
         .foreign
@@ -641,7 +653,7 @@ pub async fn usage(paths: &InstallPaths) -> Result<Value> {
 async fn admission(paths: &InstallPaths) -> Result<File> {
     let start = tokio::time::Instant::now();
     loop {
-        match lock(&paths.agt_home.join("state/admission.lock")) {
+        match lock(&paths.agt_home.join("state/admission.lock")).await {
             Ok(f) => return Ok(f),
             Err(e) if start.elapsed() >= Duration::from_secs(5) => return Err(e),
             Err(_) => tokio::time::sleep(Duration::from_millis(25)).await,
@@ -649,7 +661,7 @@ async fn admission(paths: &InstallPaths) -> Result<File> {
     }
 }
 pub async fn uninstall(paths: &InstallPaths) -> Result<()> {
-    let _install = lock(&paths.support.join("install.lock"))?;
+    let _install = lock(&paths.support.join("install.lock")).await?;
     let _admission = admission(paths).await?;
     // Never trust the UI's cached count. Plain usage does not take admission.lock.
     let current = paths.current().ok_or("agt wasn't installed by this app")?;
@@ -694,7 +706,7 @@ pub async fn uninstall(paths: &InstallPaths) -> Result<()> {
     Ok(())
 }
 pub async fn cleanup(paths: &InstallPaths) -> Result<Vec<PathBuf>> {
-    let _install = lock(&paths.support.join("install.lock"))?;
+    let _install = lock(&paths.support.join("install.lock")).await?;
     let _admission = admission(paths).await?;
     let report = usage(paths).await?;
     let mut keep: Vec<PathBuf> = paths
@@ -790,7 +802,7 @@ pub async fn refresh_plugins(paths: &InstallPaths) -> Result<()> {
     if record(paths).previous.is_none() {
         return Ok(());
     }
-    let _lock = lock(&paths.support.join("install.lock"))?;
+    let _lock = lock(&paths.support.join("install.lock")).await?;
     let version = paths.version().ok_or("No installed runtime")?;
     let marker = paths.support.join("updated").join(&version);
     if marker.is_file() {
@@ -897,6 +909,49 @@ mod tests {
             3
         );
         fs::remove_dir_all(root).unwrap();
+    }
+    #[tokio::test]
+    async fn lock_retries_until_contending_descriptor_is_released() {
+        let root = crate::terminal::tests::Scratch::new("lock-retry");
+        let path = root.0.join("install.lock");
+        let held = File::create(&path).unwrap();
+        held.try_lock().unwrap();
+        let start = Instant::now();
+        let release = async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            held.unlock().unwrap();
+        };
+        // Both futures run on one worker: the retry must yield for release.
+        let (_, acquired) = timeout(Duration::from_secs(3), async {
+            tokio::join!(release, lock(&path))
+        })
+        .await
+        .expect("lock retry hung");
+        let acquired = acquired.expect("lock was not acquired after release");
+        assert!(start.elapsed() >= Duration::from_millis(100));
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(matches!(held.try_lock(), Err(TryLockError::WouldBlock)));
+        drop(acquired);
+    }
+    #[tokio::test]
+    async fn lock_keeps_real_contention_busy_after_one_second() {
+        let root = crate::terminal::tests::Scratch::new("lock-busy");
+        let path = root.0.join("install.lock");
+        let held = File::create(&path).unwrap();
+        held.try_lock().unwrap();
+        let start = Instant::now();
+        let error = timeout(Duration::from_secs(3), lock(&path))
+            .await
+            .expect("lock contention hung")
+            .unwrap_err();
+        assert_eq!(error, "Another agt operation is in progress. Try again.");
+        assert!(start.elapsed() >= Duration::from_secs(1));
+        assert!(start.elapsed() < Duration::from_secs(2));
+        held.unlock().unwrap();
+        timeout(Duration::from_secs(2), lock(&path))
+            .await
+            .expect("lock retry hung after contention")
+            .expect("failed lock attempt kept the lock");
     }
     #[test]
     fn versions_and_disk_error() {
