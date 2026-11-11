@@ -215,7 +215,8 @@ pub async fn install_action(
         }
         ("downgrade", Some("downgrade")) => state.perform_install(&app, true).await,
         ("replace", Some("replace")) => {
-            install::replace_foreign(&state.paths, s.foreign.as_ref().ok_or("No CLI to replace")?)?;
+            install::replace_foreign(&state.paths, s.foreign.as_ref().ok_or("No CLI to replace")?)
+                .await?;
             state.after_install(&app).await;
         }
         ("keep", Some("replace")) => state.after_install(&app).await,
@@ -241,7 +242,7 @@ pub async fn install_action(
             app::request_usage(&app, false, "uninstalled");
         }
         ("restore", None) => {
-            install::restore_cli(&state.paths)?;
+            install::restore_cli(&state.paths).await?;
             state.publish(&app, None, None);
         }
         ("move", Some("move")) => {
