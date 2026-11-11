@@ -233,6 +233,8 @@ def _parse(key: Key, text: str) -> Any:
             raise ValueError(f"{key.name} takes {', '.join(key.choices)}, not {text!r}")
         return word
     if key.kind == "names":
+        if word == "[]":
+            return []
         names = [item.strip() for item in word.split(",") if item.strip()]
         if not names:
             raise ValueError(f"{key.name} takes one name or more, separated by commas")
@@ -460,7 +462,7 @@ def _argument(key: Key, value: Any) -> str:
     """A value as `agt config set` takes it on the command line."""
 
     if isinstance(value, list):
-        text = ",".join(str(item) for item in value)
+        text = ",".join(str(item) for item in value) if value else "[]"
     elif key.kind == "auto_copy" or isinstance(value, bool):
         text = _text(key, value)
     else:

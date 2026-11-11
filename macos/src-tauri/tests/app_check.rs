@@ -68,6 +68,23 @@ fn stdin_mode_reports_success_and_decode_failure_exit_codes() {
 }
 
 #[test]
+fn stdin_usage_accepts_an_occupied_lease_without_a_job_id() {
+    let mut usage: serde_json::Value =
+        serde_json::from_slice(include_bytes!("../../../tests/fixtures/app/usage.json")).unwrap();
+    usage["uninstall_blockers"] = serde_json::json!([{
+        "kind": "occupied_lease", "job_id": null,
+        "runtime": "claude", "account": "claude-work"
+    }]);
+    let result = stdin(&serde_json::to_vec(&usage).unwrap());
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.stdout).starts_with("OK: decoded usage"));
+}
+
+#[test]
 fn app_mode_requires_explicit_destinations_and_an_existing_bundle() {
     let root = Scratch::new();
     for name in ["AGT_APP_SUPPORT", "AGT_BIN_DIR", "AGT_HOME"] {

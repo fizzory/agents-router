@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -209,6 +210,17 @@ class CircuitBreakerTests(ConfigBase):
 
 
 class SetTests(ConfigBase):
+    def test_set_accepts_an_explicit_empty_names_list(self):
+        self.user_file.write_text('[claude]\nprimary_models = ["opus"]\n', encoding="utf-8")
+        code, report = self.json("config", "set", "claude.primary_models", "[]", "--user", terminal=True)
+        self.assertEqual(code, 0, report)
+        self.assertEqual(report["previous"]["value"], ["opus"])
+        self.assertEqual(tomllib.loads(self.text(self.user_file))["claude"]["primary_models"], [])
+        code, report = self.json("config", "set", "claude.primary_models", "sonnet", "--user", terminal=True)
+        self.assertEqual(code, 0, report)
+        self.assertEqual(report["previous"]["value"], [])
+        self.assertEqual(report["undo"], "agt config set claude.primary_models '[]' --user")
+
     def test_set_writes_the_workspace_file_keeps_comments_and_saves_a_backup(self):
         self.team_file.write_text("# the team's\n[codex]\nmax_jobs = 2  # two at most\ncooldown_minutes = 9\n",
                                   encoding="utf-8")

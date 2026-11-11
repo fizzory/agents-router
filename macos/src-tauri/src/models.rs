@@ -108,7 +108,7 @@ pub struct JobTotals {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UninstallBlocker {
     pub kind: String,
-    pub job_id: String,
+    pub job_id: Option<String>,
     pub runtime: Option<String>,
     pub account: Option<String>,
 }
@@ -742,6 +742,23 @@ mod tests {
         }
         value["install"]["source"] = "unknown-owner".into();
         assert!(decode(CommandKind::Usage, &serde_json::to_vec(&value).unwrap()).is_err());
+    }
+    #[test]
+    fn usage_decodes_an_occupied_lease_without_a_job_id() {
+        let mut value: Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/app/usage.json"))
+                .unwrap();
+        value["uninstall_blockers"] = serde_json::json!([{
+            "kind": "occupied_lease", "job_id": null,
+            "runtime": "claude", "account": "claude-work"
+        }]);
+        let usage: Usage = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(usage.uninstall_blockers[0].kind, "occupied_lease");
+        assert_eq!(
+            serde_json::to_value(&usage.uninstall_blockers[0]).unwrap()["job_id"],
+            Value::Null
+        );
+        assert!(decode(CommandKind::Usage, &serde_json::to_vec(&value).unwrap()).is_ok());
     }
     #[test]
     fn schema_range_is_enforced_by_models_and_decoder() {

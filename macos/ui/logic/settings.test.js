@@ -64,9 +64,9 @@ test('field commits one step on Enter then blur; typing stays in the focused fie
   dispatchEdit('undo', {activeElement:{matches:()=>true},editField:action=>edits.push(action),history:{undo:()=>assert.fail('field undo reached settings history')}});
   assert.deepEqual(edits,['undo']);
 });
-function harness() {
+function harness(initialValue = null) {
   const calls = [], navigation = [], messages = [];
-  let revision = 'r0', value = null, active = 0, peak = 0;
+  let revision = 'r0', value = initialValue, active = 0, peak = 0;
   const mutate = async (args, remove) => {
     calls.push({ ...args, remove }); active++; peak = Math.max(peak, active); await Promise.resolve(); active--;
     if (args.revision !== revision) return { ok: false, error: { message: 'settings.toml changed since it was read' } };
@@ -95,6 +95,17 @@ test('undo switches pane and scope before mutation; changed revision refuses wit
   assert.equal(result.ok,false); assert.equal(h.calls.length,2); assert.equal(h.calls[1].revision,'r1');
   assert.deepEqual(h.navigation[0],{pane:'general',level:'local',workspace:'/project',key:'max_jobs'});
   assert.equal(h.messages[0].message,'Changed elsewhere. Showing current value.'); assert.equal(h.history.undoSteps.length,1);
+});
+test('undo restores an explicit empty names list and redo restores the edited names', async () => {
+  const h = harness([]), target = {pane:'general',workspace:null,level:'user'};
+  await h.history.commit({key:'claude.primary_models',value:'opus,sonnet',level:'user',revision:'r0'},target);
+  await h.history.undo();
+  assert.equal(h.calls[1].remove,false);
+  assert.equal(h.calls[1].value,'[]');
+  assert.equal(h.calls[1].revision,'r1');
+  await h.history.redo();
+  assert.equal(h.calls[2].value,'opus,sonnet');
+  assert.equal(h.calls[2].revision,'r2');
 });
 test('a later deliberate edit cannot authorize undo across an outside revision change', async () => {
   const h=harness(), target={pane:'general',workspace:null,level:'user'};

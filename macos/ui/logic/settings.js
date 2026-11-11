@@ -12,7 +12,7 @@ export function labelFor(key) {
 export const paneFor = (row) => row.key.startsWith('share.') ? 'sharing' : 'general';
 export const displayValue = (value) => value == null ? '' : Array.isArray(value) ? value.join(', ') : typeof value === 'object' ? JSON.stringify(value) : String(value);
 export function cliValue(value) {
-  return Array.isArray(value) ? value.join(',') : String(value);
+  return Array.isArray(value) ? value.length ? value.join(',') : '[]' : String(value);
 }
 export function rowState(row, level, document = {}) {
   const accepted = row.accepted_levels || Object.keys(LEVELS);

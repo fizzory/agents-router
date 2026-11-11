@@ -255,7 +255,7 @@ def _account(runtime: RuntimeConfig, account: Account, usage: dict, problems: di
 
 
 def snapshot(config: Config, *, now: float | None = None) -> dict:
-    """Schema v1: usage and availability, global jobs and uninstall blockers."""
+    """Schema v1: usage, jobs and blockers; an unidentified lease has job_id=None."""
 
     now = time.time() if now is None else now
     active = _jobs(now)
@@ -357,7 +357,7 @@ def command(args) -> int:
     import json
     from agents_router.config import load_config
 
-    config = load_config()
+    config = load_config(cached_only=True)
     if args.refresh:
         usage_view.refresh_codex(config, live=False)
     report = snapshot(config)

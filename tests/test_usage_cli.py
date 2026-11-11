@@ -270,6 +270,42 @@ class UsageTests(TempHome):
             self.assertTrue(all(a["availability"] == "unknown" for p in report["providers"] for a in p["accounts"]))
             self.assertEqual(listing(missing), before)
 
+    def test_plain_cli_with_workspace_discovered_profile_never_probes_or_writes(self):
+        user = self.root / "user"
+        folder = user / ".claude-work"
+        folder.mkdir(parents=True)
+        (folder / ".claude.json").write_text(
+            json.dumps({"oauthAccount": {"accountUuid": "fake-login"}}), encoding="utf-8")
+        self.write_config(accounts=())
+        settings = self.project / ".agt" / "settings.toml"
+        settings.parent.mkdir()
+        settings.write_text('[claude]\naccounts = ["claude-work"]\n', encoding="utf-8")
+        previous_cwd = os.getcwd()
+        os.chdir(self.project)
+        self.addCleanup(os.chdir, previous_cwd)
+        with patch.dict(os.environ, {"HOME": str(user), "USERPROFILE": str(user)}):
+            for args in (["usage"], ["usage", "--json"]):
+                with self.subTest(args=args):
+                    (self.home / "state" / "claude-profiles.json").unlink(missing_ok=True)
+                    before = listing(self.root)
+                    with patch("agents_router.runtimes.claude.ClaudeRuntime.auth_status",
+                               return_value={"loggedIn": True}) as auth, \
+                            patch("subprocess.run", side_effect=AssertionError("usage started a subprocess")) as run, \
+                            patch("subprocess.Popen", side_effect=AssertionError("usage started a worker")) as popen, \
+                            contextlib.redirect_stdout(io.StringIO()) as stream:
+                        self.assertEqual(cli.main(args), 0)
+                    auth.assert_not_called()
+                    run.assert_not_called()
+                    popen.assert_not_called()
+                    self.assertEqual(listing(self.root), before)
+                    if "--json" in args:
+                        account = next(a for p in json.loads(stream.getvalue())["providers"]
+                                       if p["runtime"] == "claude" for a in p["accounts"]
+                                       if a["name"] == "claude-work")
+                        self.assertEqual(account["availability"], "unknown")
+                    else:
+                        self.assertIn("Claude Code claude-work unknown", stream.getvalue())
+
     def test_populated_home_real_cli_entrypoint_is_read_only(self):
         self.write_config(accounts=("claude-work", "claude-other"))
         self.circuit(claim={"job": "expired", "generation": 0, "deadline": self.now - 1})

@@ -52,6 +52,7 @@ For apps, `show --json` has `schema_version: 1`. Each row adds `kind`, `choices`
 
 `set|unset --json` return `ok`, the edited file's `revision`, and `previous: {level, present, value}`. `previous` describes that level even when another level masks it. Undo sets that value if it was present, or unsets the key otherwise, at the same level. Pass `--if-unchanged REVISION` to refuse the write if the file changed since. Unsetting an absent key returns `ok: true`, `changed: false` and the current revision. Validation errors exit 2 with `{"ok": false, "error": {"key", "message"}}`. The exit-3 `needs_user_words` refusal below keeps its existing shape.
 
+Names lists take comma-separated names; `[]` sets an explicit empty list.
 `set` and `unset` change one line of one file. Comments and every other line stay as they are, and the old file is backed up to `~/.agents-router/state/backups/settings/`. Each prints the old and new value, the file, what still limits the value or overrides it here, and the command that undoes it:
 
 ```text
@@ -109,6 +110,7 @@ Global `jobs` totals report `active`, `queued`, `starting`, `running`, `unassign
 workspace, removed accounts and occupied leases left by surviving workers.
 `uninstall_blockers` lists one entry per active job or unattributed occupied lease,
 with `kind`, `job_id`, `runtime` and `account` (unknown identities are null).
+`job_id` is a string or null: an occupied lease can precede job preparation.
 An empty list means nothing currently blocks uninstall. A caller must recheck
 under the admission lock immediately before uninstalling; this snapshot is not a reservation.
 
