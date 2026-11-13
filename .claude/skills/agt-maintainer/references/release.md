@@ -19,6 +19,15 @@
      | `tests/skill-evals/<skill>/` | `<skill>` |
 
      Each case's `tags` start with its skill's name, and every case also has `release-gate`. Several `--tag` flags select every case that has any one of them, so never add `--tag release-gate` beside them: it selects all 25 cases.
+   - **Clean export.** When the checkout holds build output (`macos/src-tauri/target`, `build/`), `claude plugin eval .` refuses it, and every case fails at $0, which looks like a skill failure. Run the load check and the graded run from a clean export, then use the same eval command:
+
+     ```bash
+     C=$(mktemp -d)
+     git ls-files -co --exclude-standard -z | grep -zvE '^(\.mentor|\.kiro)/' | rsync -a --from0 --files-from=- ./ "$C/"
+     cd "$C"
+     ```
+
+   - **Delegates.** Never move or delete build folders in a checkout a delegate is working in.
    - First check that every case loads. This runs no model and costs nothing:
 
      ```bash
@@ -26,7 +35,7 @@
      ```
 
      A case that fails to load is printed with `✗` and the reason; "No eval cases found matching" with no `✗` line means all loaded.
-   - Then the graded run, one `--tag` per touched skill (here two). This is the eval test: real model runs on the person's subscription quota, three runs per case. Ask once before the first run (a plan approval that names it counts). It belongs to every release that touches a skill with cases: never shape a plan's scope, or escalate a question, to avoid it:
+   - Then the graded run, one `--tag` per touched skill (here two). This is the eval test: real model runs on the person's subscription quota, three runs per case. Ask once before the first run (a plan approval that names it counts). Give a figure: cases × 3 runs × the per-case cost from the last run (or a `--runs 1` sample), plus one fix-and-rerun of a failing tag. Also say whether this session's own 5-hour window has room: the eval draws on the same subscription. It belongs to every release that touches a skill with cases: never shape a plan's scope, or escalate a question, to avoid it:
 
      ```bash
      PATH=".agt-eval/bin:<folder with a python3 ≥ 3.11, e.g. /opt/homebrew/bin>:$PATH" claude plugin eval . --eval-dir tests/skill-evals --tag agents-router --tag orchestrator-rebalance \
@@ -51,7 +60,7 @@
      4. Confirm the run loaded the skill from the checkout under test: grep the trace for `Base directory for this skill:`.
      5. A failed write under a workspace folder named `.claude` comes from the eval sandbox (EPERM in the trace), not the skill.
      6. Before the next graded run, replay a changed `regex` grader over the kept traces and final messages offline; it costs nothing.
-   - While you edit a skill, a quicker loop is `--runs 1 -j 4` with that skill's `--tag`. It's advice only: the gate keeps three runs per case.
+   - While you edit a skill, a quicker loop is `--runs 1 -j 4` with that skill's `--tag`. It's advice only: the gate keeps three runs per case. `--case` keeps only the last flag; one case per invocation.
    - Advice only, never a gate: the with/without benchmark (drop `--ablation none`) and trigger tuning with skill-creator against `tests/skill-evals/<skill>/triggers.json`. Both use quota and vary from run to run, so they also stay out of the unit tests.
 4. **Raise the version** in `.claude-plugin/plugin.json`, `pyproject.toml` and `src/agents_router/__init__.py` together:
    - a patch for fixes;
@@ -67,4 +76,10 @@
    ```
 
    End the body with the attribution footer the session gives you.
-7. **After the merge:** first run `agt update --dry-run`, which prints where agt reinstalls from. It should name the remote (`git+https://…`). If it names a local checkout that holds uncommitted work, stop and ask the person. Then run `agt update` (it reinstalls from the recorded source and updates the plugin in every profile). Then tell the person to type `/reload-plugins`, or start new sessions, in each profile.
+7. **After any merge, whoever merged** (you, `/mentor:merge`, or the person), first run `agt update --dry-run`, which prints where agt reinstalls from. It should name the remote (`git+https://…`). If it names a local checkout that holds uncommitted work, stop and ask the person. Then run `agt update` (it reinstalls from the recorded source and updates the plugin in every profile). Then tell the person to type `/reload-plugins`, or start new sessions, in each profile.
+8. **macOS app release**, when the merged change ships the app:
+   - **Merge vs. release.** A merge to `main` only uploads a workflow-run artifact. A GitHub release needs a strict `vX.Y.Z` tag on `main` after the three version files in step 4 agree and the app versions match. Tagging and publishing happen only when the person asks (`macos/README.md`, "Release build").
+   - **Precondition.** The `release` environment exists and holds `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Check at that scope with `gh api repos/<owner>/<repo>/environments/release/secrets --jq '.secrets[].name'`; `gh secret list` without `--env release` shows none of those environment secrets. Creating them is the person's step. Re-run the check after they say it's done, and again if a later change moves the scope.
+   - **Check the draft.** After `draft-release`, the draft has four assets (`.dmg`, `.app.tar.gz`, `.sig`, `latest.json`), and `latest.json` names the version and the matching tag URL.
+   - **Publish.** `gh release edit vX.Y.Z --draft=false --latest` runs only on the person's explicit word: every installed app follows `latest.json`. Then confirm that `https://github.com/fizzory/agents-router/releases/latest/download/latest.json` redirects (302).
+   - **Close-out.** Until publication, the message after a merge names tag, secrets and publish as the remaining work.

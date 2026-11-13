@@ -1,6 +1,6 @@
 ---
 name: agt-maintainer
-description: How to maintain the Agents Router (agt) repository. Covers changing its code, plugin files (agents, skills, commands, hooks), docs or tests; fixing a bug or adding a feature; running the tests; a live check in the sandbox; reviewing a change; and preparing a release or pull request. Use it whenever you work inside this repository.
+description: How to maintain the Agents Router (agt) repository, including the macOS menu bar app under macos/ and its GitHub release. Covers changing its code, plugin files (agents, skills, commands, hooks), docs or tests; fixing a bug or adding a feature; running the tests; a live check in the sandbox; reviewing a change; and preparing a release or pull request. Use it whenever you work inside this repository.
 ---
 
 # Maintaining Agents Router
@@ -17,6 +17,8 @@ This is the procedure. The facts it relies on, such as the layout, the rules for
 
 - Python 3.11+ and the standard library only. The one exception is `ui.py`, which loads rich inside functions for a person at a terminal. Agents, pipes, tests and hooks get its plain renderer.
 - A new test module imports `tests/helpers.py`. Tests never call the real `claude`, `codex`, `agy` or `kiro-cli`, and never touch the real `~/.claude*`, `~/.codex`, `~/.gemini` or `~/.agents-router`. Teach the fake CLIs (`tests/fake_*.py`) what you need instead.
+- A test never asserts on a fixed sleep or a fixed elapsed time. It waits, with a generous deadline, for the state it depends on: a file, a lock, a message or a status. Prove a timing fix by running the test repeatedly, idle and under CPU load. Slower CI runners expose every fixed wait.
+- Changing any `agt … --json` output the app decodes is a contract change. Regenerate the producer fixtures (`tests/generate_usage_fixture.py`, `tests/generate_settings_fixtures.py`, `tests/generate_settings_inventory.py`). Decode real output, including in-flight, null and empty states, with `agt-app-check --stdin <kind>`. The whole-diff review covers both sides.
 - Docs keep their style: short sentences, tables for lookups, no hedging, no "simply".
 
 Which docs move with which change:
@@ -29,6 +31,7 @@ Which docs move with which change:
 | Sharing | `docs/share.md` |
 | Delegation behavior | `skills/agents-router/SKILL.md`, `commands/delegate.md`, `agents/agt-*.md` |
 | Roles: the agents-router Roles section, setup's role step, `skills/orchestrator-*` | The cases in `tests/skill-evals/<skill>/` and its `triggers.json`; the skill gate in [references/release.md](references/release.md) |
+| The macOS app (`macos/`) | `macos/README.md`, the source for its contracts and commands; don't copy them here. |
 
 ## 3. Test
 
@@ -41,6 +44,8 @@ python3 -m unittest test_setup test_guide             # one or a few modules
 - **The full run.** Start it in the background with its output in a log (`python3 -m unittest discover -s tests -t tests > "$TMPDIR/agt-suite.log" 2>&1`), then read only `grep -E '^(ERROR|FAIL):|^Ran |^OK|^FAILED' "$TMPDIR/agt-suite.log"`. Never pipe it through `tail -N`: that cuts the `ERROR:` header and the test's name. Any tester brief says the same.
 - **Known failure:** `test_help.test_other_commands_keep_argparse_help` fails on Python 3.15, whose argparse changed. Any other failure blocks.
 - **Unsure a failure is yours?** Run the same module on a clean tree with `git stash`, the test, then `git stash pop`.
+- **A failure a rerun clears** is unexplained, not green. Before calling it flaky, rerunning or merging past it, answer: can the product hit this timing window? Presume a failure in code the change added is a product race until shown otherwise. Fix the product, then the test.
+- **macOS app:** the commands in `macos/README.md`. Every cargo call uses `CARGO_HOME=$PWD/build/cargo-home` (set from the repository root) and `--locked`. Run `cargo test --locked` in `macos/src-tauri` and `node --test macos/ui/logic`. Installing a toolchain (Rust, or tauri-cli through `scripts/prepare_app_tools.sh`) needs the person's yes.
 
 ## 4. A change the plugin ships
 
@@ -88,7 +93,8 @@ In short:
 2. Raise the version.
 3. Commit with the subject `Agents Router X.Y.Z: <what changed for the person>`.
 4. Push the branch and open a pull request.
-5. After the merge, run `agt update` and tell the person to `/reload-plugins`.
+5. After any merge, whoever merged (you, `/mentor:merge`, or the person), run `agt update --dry-run`, then `agt update`, and tell the person to `/reload-plugins`.
+6. When the app changed: tag, check the draft, publish on the person's word ([release.md](references/release.md) step 8). A merge alone ships no installer.
 
 Commit or push only when the person asks.
 
