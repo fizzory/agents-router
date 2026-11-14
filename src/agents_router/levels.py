@@ -13,10 +13,16 @@ The workspace is found from a folder without running git:
   checkout's root, both included, else the root. It never looks above the
   root, so a worktree, submodule or nested clone never uses an outer repo's;
 - outside git: the nearest folder with `.agt/` at or above it, else the folder;
-- your home folder is never a workspace (its `.agt/` is the user level).
+- your home folder is never a workspace (its `.agt/` is the user level), and
+  neither is a folder `$AGT_EXCLUDE_HOMES` lists. The app's test build sets it
+  to its private HOME and your own, so your `~/.agt/` stays out of its reach.
+  A listed folder matches as the same folder on disk, so another spelling of
+  it (`/users/me` on a case-insensitive volume) is excluded too. On a
+  filesystem that reports inode 0 it matches by its path alone.
 
 A linked worktree without its own `settings.local.toml` reads the main
-checkout's, so your account picks follow you.
+checkout's, so your account picks follow you, unless the main checkout is a
+folder `$AGT_EXCLUDE_HOMES` lists.
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ from typing import Any, Callable
 from agents_router import fsutil
 
 LEVELS = ("user", "workspace", "local")
+EXCLUDE_HOMES = "AGT_EXCLUDE_HOMES"  # more folders that, like your home folder, are never a workspace
 MISSING = object()  # read_value: the file doesn't set the key
 HEADER_RE = re.compile(r"^\s*\[\[?\s*([A-Za-z0-9_.\-\"' ]+?)\s*\]\]?\s*(?:#.*)?$")  # not a nested array's line
 
@@ -56,6 +63,7 @@ class Workspace:
     root: Path
     checkout: Path | None = None  # the git checkout it's in
     main: Path | None = None  # for a linked worktree: the main checkout
+    main_excluded: bool = False  # that main checkout is a folder $AGT_EXCLUDE_HOMES lists
 
     @property
     def folder(self) -> Path:
@@ -80,8 +88,8 @@ class Workspace:
     def local_fallback(self) -> Path | None:
         """The main checkout's `settings.local.toml`, for a worktree that has none of its own."""
 
-        if self.main is None or self.checkout is None:
-            return None
+        if self.main is None or self.checkout is None or self.main_excluded:
+            return None  # never a settings file from a listed home
         return self.main / self.root.relative_to(self.checkout) / ".agt" / "settings.local.toml"
 
 
@@ -113,23 +121,71 @@ def _main_checkout(checkout: Path) -> Path | None:
     return common.parent if common.name == ".git" else None
 
 
+def _identity(folder: Path) -> tuple[int, int] | None:
+    """The folder on disk as (device, inode), or None when it can't be read."""
+
+    try:
+        found = os.stat(folder)
+    except (OSError, ValueError):
+        return None
+    return found.st_dev, found.st_ino
+
+
+def _trusted(found: tuple[int, int] | None) -> bool:
+    """Whether (device, inode) names one folder. Some filesystems (FAT, some network
+    and FUSE mounts) report 0 for many folders, so a pair with a 0 in it is unknown."""
+
+    return found is not None and 0 not in found
+
+
+class Homes:
+    """Your home folder and those `$AGT_EXCLUDE_HOMES` lists: none of them is ever a workspace.
+
+    Your home folder matches by its resolved path, as it always has. A listed
+    folder also matches as the same folder on disk: `Path.resolve()` keeps the
+    spelling it's given, so on a case-insensitive volume `/users/me` names
+    `/Users/me`. A folder that can't be read, or whose filesystem has no
+    trustworthy inodes, matches by its path alone.
+    """
+
+    def __init__(self) -> None:
+        self.home = Path.home().resolve()
+        self.listed: set[Path] = set()
+        for entry in os.environ.get(EXCLUDE_HOMES, "").split(os.pathsep):
+            if entry and os.path.isabs(entry):  # an empty or relative entry would name the current folder
+                self.listed.add(Path(entry).resolve())
+        # Only trusted pairs: a folder whose own pair is unknown then can't match one either.
+        self.disk = {found for found in map(_identity, self.listed) if _trusted(found)}
+
+    def lists(self, folder: Path) -> bool:
+        """Whether `folder` is one `$AGT_EXCLUDE_HOMES` lists, under any spelling."""
+
+        if not self.listed:
+            return False
+        return folder in self.listed or (bool(self.disk) and _identity(folder) in self.disk)
+
+    def __contains__(self, folder: Path) -> bool:
+        return folder == self.home or self.lists(folder)
+
+
 def find_workspace(cwd: Path | str | None = None) -> Workspace | None:
     """The workspace `cwd` is in, or None in your home folder."""
 
     start = Path(cwd or os.getcwd()).resolve()
-    home = Path.home().resolve()
+    excluded = Homes()
     checkout = next((folder for folder in (start, *start.parents) if os.path.lexists(folder / ".git")), None)
     chain = []  # the folders that may hold the workspace's .agt/
     for folder in (start, *start.parents):
-        if checkout is None and folder == home:
+        if checkout is None and folder in excluded:
             break
         chain.append(folder)
         if folder == checkout:
             break
-    root = next((folder for folder in chain if folder != home and (folder / ".agt").is_dir()), checkout or start)
-    if root == home:
+    root = next((folder for folder in chain if folder not in excluded and (folder / ".agt").is_dir()), checkout or start)
+    if root in excluded:
         return None
-    return Workspace(root, checkout, _main_checkout(checkout) if checkout is not None else None)
+    main = _main_checkout(checkout) if checkout is not None else None
+    return Workspace(root, checkout, main, main is not None and excluded.lists(main))
 
 
 def parse(level: str, path: Path, text: str, raw: bytes | None = None) -> Layer:

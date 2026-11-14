@@ -1,6 +1,7 @@
 //! Fixed-purpose first-launch and Settings actions around the installer.
 use crate::{
     app::{self, AppState},
+    app_paths::AppPaths,
     install::{self, InstallPaths},
     native,
 };
@@ -25,14 +26,16 @@ pub struct InstallController {
     status: Mutex<InstallStatus>,
     operation: tokio::sync::Mutex<()>,
     first: Mutex<bool>,
+    /// A test build's chosen folders, carried through Move to Applications.
+    relaunch: Vec<String>,
 }
 impl InstallController {
     #[cfg(debug_assertions)]
     pub async fn settled(&self) {
         let _guard = self.operation.lock().await;
     }
-    pub fn new() -> Result<Self, String> {
-        let paths = InstallPaths::discover()?;
+    pub fn new(app_paths: &AppPaths) -> Result<Self, String> {
+        let paths = InstallPaths::from_app(app_paths)?;
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let app = exe
             .ancestors()
@@ -53,6 +56,7 @@ impl InstallController {
             paths,
             app,
             payload,
+            relaunch: app_paths.relaunch_args(),
         })
     }
     pub fn pending(&self) -> bool {
@@ -182,9 +186,12 @@ pub fn start(app: &tauri::AppHandle) {
         let version = install::manifest(&c.payload)
             .ok()
             .map(|m| m.runtime_version);
+        // A test build relaunched with other folders rewrites its launcher.
+        let stale = c.paths.isolated.is_some() && !install::launcher_current(&c.paths);
         if !install::valid_location(&c.app, &c.paths)
             || version.is_none()
             || c.paths.version() != version
+            || stale
         {
             c.perform_install(&app, false).await;
         } else if *c.first.lock().unwrap() {
@@ -246,7 +253,7 @@ pub async fn install_action(
             state.publish(&app, None, None);
         }
         ("move", Some("move")) => {
-            let args = install::move_application(&state.app, &state.paths)?;
+            let args = install::move_application(&state.app, &state.paths, &state.relaunch)?;
             let out = tokio::process::Command::new(&args[0])
                 .args(&args[1..])
                 .output()

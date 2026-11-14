@@ -1,4 +1,5 @@
 pub mod app;
+pub mod app_paths;
 pub mod client;
 pub mod glyph;
 pub mod install;

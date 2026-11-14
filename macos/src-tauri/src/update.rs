@@ -3,6 +3,15 @@ use serde::Serialize;
 
 pub const DAY: u64 = 24 * 60 * 60;
 pub const RELEASES: &str = "https://github.com/fizzory/agents-router/releases/latest";
+/// Only scripts/build_app.py's release overlay sets this identifier; the base
+/// config builds "Agents Router Test.app" with `<RELEASE_IDENTIFIER>.test`.
+pub const RELEASE_IDENTIFIER: &str = "io.github.watcharagorn.agents-router";
+
+/// Test builds never check or install from the production feed. The debug
+/// updater rehearsal installs through its own localhost path, not this gate.
+pub fn checks_feed(identifier: &str) -> bool {
+    identifier == RELEASE_IDENTIFIER
+}
 
 #[derive(Default, Debug)]
 pub struct Schedule {
@@ -57,6 +66,18 @@ impl Dialog {
                 (label.into(), action.into()),
             ],
             default: action.into(),
+            busy: false,
+        }
+    }
+    pub fn test_build() -> Self {
+        Self {
+            title: "Test builds don't update.".into(),
+            detail: String::new(),
+            buttons: vec![
+                ("Open Releases Page".into(), "releases".into()),
+                ("OK".into(), "close".into()),
+            ],
+            default: "close".into(),
             busy: false,
         }
     }
@@ -219,6 +240,30 @@ mod tests {
         )
         .dialog
         .is_none());
+    }
+    #[test]
+    fn only_the_release_identifier_checks_the_production_feed() {
+        assert!(checks_feed("io.github.watcharagorn.agents-router"));
+        for identifier in [
+            "io.github.watcharagorn.agents-router.test",
+            "io.github.watcharagorn.agents-router.test.update-42",
+            "io.github.watcharagorn.agents-router.share",
+            "",
+        ] {
+            assert!(!checks_feed(identifier), "{identifier}");
+        }
+        let d = Dialog::test_build();
+        assert_eq!(d.title, "Test builds don't update.");
+        assert!(d.detail.is_empty());
+        assert_eq!(
+            d.buttons,
+            vec![
+                ("Open Releases Page".to_string(), "releases".to_string()),
+                ("OK".to_string(), "close".to_string()),
+            ]
+        );
+        assert_eq!(d.default, "close");
+        assert!(!d.busy);
     }
     #[test]
     fn download_and_install_failures_have_separate_retry_dialogs() {

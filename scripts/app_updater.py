@@ -1,4 +1,4 @@
-"""Release-only updater metadata and configuration checks (standard library)."""
+"""Release identity, updater metadata and configuration checks (standard library)."""
 import base64
 import binascii
 from datetime import datetime, timezone
@@ -6,6 +6,12 @@ import json
 from urllib.parse import quote
 import re
 
+# Only build_app.py's release overlay names the app "Agents Router"; the base
+# Tauri config builds "Agents Router Test.app" so test bundles are easy to find.
+RELEASE_NAME = "Agents Router"
+RELEASE_IDENTIFIER = "io.github.watcharagorn.agents-router"
+TEST_NAME = "Agents Router Test"
+TEST_IDENTIFIER = RELEASE_IDENTIFIER + ".test"
 PLACEHOLDER = "AGT_UPDATER_PUBLIC_KEY_REQUIRED_BEFORE_RELEASE"
 ENDPOINT = "https://github.com/fizzory/agents-router/releases/latest/download/latest.json"
 

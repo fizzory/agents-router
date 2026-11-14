@@ -5,33 +5,41 @@ Build first with cargo-tauri build --debug --bundles app -- --locked.
 Requires a macOS desktop session; never runs the real agt or an agent CLI.
 """
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
 import tempfile
 
+from app_env import scratch_env
+
 ROOT = Path(__file__).resolve().parents[1]
-BINARY = ROOT / "macos/src-tauri/target/debug/bundle/macos/Agents Router.app/Contents/MacOS/agents-router"
+BINARY = ROOT / "macos/src-tauri/target/debug/bundle/macos/Agents Router Test.app/Contents/MacOS/agents-router"
 LOG = ROOT / "build/app-native-self-test.log"
+
+
+def child_env(scratch, calls, base=None):
+    """The app's environment: every agt folder in `scratch`, none from the caller."""
+    home = scratch / "home"
+    # Not home/.agents-router: a test build refuses the release's agt home.
+    agt_home = home / "agt-home"
+    return scratch_env({"HOME": home, "CFFIXED_USER_HOME": home,
+                        "AGT_APP_SUPPORT": scratch / "support", "AGT_BIN_DIR": scratch / "bin",
+                        "AGT_HOME": agt_home, "AGT_CONFIG_DIR": agt_home,
+                        "AGT_APPLICATIONS_DIRS": scratch / "Applications",
+                        "AGT_APP_TEST_LAUNCHER": ROOT / "scripts/fake_app_agt.py",
+                        "AGT_APP_TEST_CALLS": calls, "AGT_APP_TEST_UPDATE_VERSION": "0.17.1"}, base)
 
 
 def main():
     if not BINARY.is_file():
         raise SystemExit("Build the debug app bundle first.")
     with tempfile.TemporaryDirectory(prefix="agt-app-native-") as folder:
-        scratch = Path(folder)
-        home = scratch / "home"
-        agt_home = home / ".agents-router"
+        scratch = Path(folder).resolve()  # the app logs physical paths
+        calls = scratch / "calls.jsonl"
+        env = child_env(scratch, calls)
+        agt_home = Path(env["AGT_HOME"])
         for path in (agt_home / "state", agt_home / "jobs"):
             path.mkdir(parents=True)
-        calls = scratch / "calls.jsonl"
-        env = dict(os.environ)
-        for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "PYTHONPATH", "PYTHONHOME"):
-            env.pop(name, None)
-        env.update(HOME=str(home), AGT_HOME=str(agt_home), AGT_CONFIG_DIR=str(agt_home),
-                   AGT_APP_TEST_LAUNCHER=str(ROOT / "scripts/fake_app_agt.py"),
-                   AGT_APP_TEST_CALLS=str(calls), AGT_APP_TEST_UPDATE_VERSION="0.17.1")
         # Direct execution preserves the isolated environment and captures native stderr.
         with LOG.open("w") as stream:
             try:
@@ -50,6 +58,9 @@ def main():
         expected_rows = len(json.loads((ROOT / "tests/fixtures/app/config-show.json").read_text())["settings"])
         sizes = re.findall(r"resized-to-content requested=(\d+) height=(\d+) cap=(\d+) top=(-?\d+) mode=(\w+)", text)
         checks = [result.returncode == 0,
+                  # A test build logs its folders once and keeps them out of the release's.
+                  text.count("test build paths app_support=") == 1,
+                  f"agt_home={agt_home} (AGT_HOME)" in text,
                   "class=AgtPopoverPanel NSPanel" in text,
                   text.count("self-test posted NSWorkspaceDidWakeNotification") == 1,
                   text.count("usage read reason=debounced refresh=false") == 1,

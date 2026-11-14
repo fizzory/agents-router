@@ -61,3 +61,6 @@ export const installAction = action => invoke("install_action", { action });
 export const getUpdateStatus = () => invoke("get_update_status");
 export const onUpdateStatus = handler => listen("update-status", ({ payload }) => handler(payload));
 export const updateAction = action => invoke("update_action", { action });
+
+// Test builds only: [{key, path, display, source, origin}]; null in the release.
+export const testBuildPaths = () => invoke("test_build_paths");

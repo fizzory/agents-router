@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-test-build-paths"
+description = "Enables the test_build_paths command without any pre-configured scope."
+commands.allow = ["test_build_paths"]
+
+[[permission]]
+identifier = "deny-test-build-paths"
+description = "Denies the test_build_paths command without any pre-configured scope."
+commands.deny = ["test_build_paths"]

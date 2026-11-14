@@ -20,11 +20,12 @@ import tempfile
 import tomllib
 from urllib.parse import unquote, urlparse
 
-from app_updater import archive_name, latest, validate_release
+from app_updater import RELEASE_IDENTIFIER, RELEASE_NAME, archive_name, latest, validate_release
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build"
 TAURI = ROOT / "macos/src-tauri"
+APP = f"{RELEASE_NAME}.app"
 PLUGIN_ITEMS = ("agents", "skills", "commands", "hooks", ".claude-plugin",
                 "plugin.json", "mcp_config.json", "LICENSE", "NOTICE")
 MACHO_MAGIC = {bytes.fromhex(value) for value in (
@@ -238,6 +239,7 @@ def verify_app(app, version, lock):
         info = plistlib.load(file)
     if info["CFBundleShortVersionString"] != version or info["LSMinimumSystemVersion"] != "14.0":
         raise ValueError("App plist version/deployment target differs")
+    verify_identity(app)
     runtime = app / "Contents/Resources/runtime"
     manifest = json.loads((runtime / "agt-bundle.json").read_text())
     if (manifest["app_version"], manifest["runtime_version"], manifest["python_version"]) != (
@@ -272,6 +274,31 @@ def verify_app(app, version, lock):
     return entries
 
 
+def verify_identity(app):
+    """Only the release bundle may carry the release name and identifier."""
+    with (app / "Contents/Info.plist").open("rb") as file:
+        info = plistlib.load(file)
+    expected = {"CFBundleIdentifier": RELEASE_IDENTIFIER, "CFBundleName": RELEASE_NAME,
+                "CFBundleDisplayName": RELEASE_NAME}
+    actual = {key: info.get(key) for key in expected}
+    if actual != expected:
+        raise ValueError(f"App plist identity differs from the release identity: {actual}")
+
+
+def release_overlay(runtime, updater):
+    """The base config builds the test app; only this overlay names the release."""
+    return {"productName": RELEASE_NAME, "identifier": RELEASE_IDENTIFIER,
+            "bundle": {"resources": {str(runtime): "runtime/"}, "createUpdaterArtifacts": updater}}
+
+
+def remove_intermediate(app):
+    """Drop the release-named bundle in build/ so only the DMG's copy is "Agents Router.app"."""
+    if app.is_symlink() or app.is_file():
+        app.unlink()
+    elif app.exists():
+        shutil.rmtree(app)
+
+
 def tree_size(root):
     return sum(p.stat().st_size for p in root.rglob("*") if p.is_file() and not p.is_symlink())
 
@@ -303,41 +330,59 @@ def main():
                       PIP_DISABLE_PIP_VERSION_CHECK="1", PIP_CACHE_DIR=str(BUILD / "pip-cache"),
                       SOURCE_DATE_EPOCH="1704067200", TMPDIR=str(BUILD / "tmp"))
     runtime = stage(version, lock)
+    release(version, lock, runtime, updater)
+
+
+def release(version, lock, runtime, updater):
     overlay = BUILD / "release.conf.json"
-    config = {"bundle": {"resources": {str(runtime): "runtime/"}, "createUpdaterArtifacts": updater}}
-    overlay.write_text(json.dumps(config, indent=2) + "\n")
+    overlay.write_text(json.dumps(release_overlay(runtime, updater), indent=2) + "\n")
     env = {**os.environ, "PATH": str(BUILD / "tools/bin") + os.pathsep + os.environ["PATH"]}
-    run("cargo", "tauri", "build", "--target", "aarch64-apple-darwin", "--bundles", "app,dmg",
-        "--config", overlay, "--", "--locked", "--no-default-features", cwd=TAURI, env=env)
     bundles = BUILD / "app-target/aarch64-apple-darwin/release/bundle"
-    app = bundles / "macos/Agents Router.app"
+    app = bundles / "macos" / APP
+    # Spotlight indexes build/; the intermediate goes on success and on failure.
+    try:
+        run("cargo", "tauri", "build", "--target", "aarch64-apple-darwin", "--bundles", "app,dmg",
+            "--config", overlay, "--", "--locked", "--no-default-features", cwd=TAURI, env=env)
+        package(version, lock, updater, bundles, app)
+    except BaseException:
+        try:
+            remove_intermediate(app)
+        except OSError as error:
+            print(f"Warning: couldn't remove {app}: {error}", file=sys.stderr, flush=True)
+        raise
+    remove_intermediate(app)
+    print(f"Removed the intermediate {app}; dist/ holds the release app.", flush=True)
+
+
+def package(version, lock, updater, bundles, app):
     entries = verify_app(app, version, lock)
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
     if not updater:
-        for name in ("Agents Router.app.tar.gz", "Agents Router.app.tar.gz.sig", "latest.json",
+        for name in (f"{APP}.tar.gz", f"{APP}.tar.gz.sig", "latest.json",
                      *[p.name for p in dist.glob("Agents-Router-*.app.tar.gz*")]):
             (dist / name).unlink(missing_ok=True)  # Never leave older signed artifacts beside a keyless build.
     dmg = dist / f"Agents-Router-{version}-arm64.dmg"
-    shutil.copy2(bundles / f"dmg/Agents Router_{version}_aarch64.dmg", dmg)
+    shutil.copy2(bundles / f"dmg/{RELEASE_NAME}_{version}_aarch64.dmg", dmg)
     # Isolate the mount, detach even when content verification fails.
     with tempfile.TemporaryDirectory(prefix="dmg-check-", dir=BUILD) as mount:
         run("hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", mount, dmg, capture=True)
         try:
-            if not (Path(mount) / "Agents Router.app").is_dir() or os.readlink(Path(mount) / "Applications") != "/Applications":
-                raise ValueError("DMG must contain Agents Router.app and the /Applications link")
-            print("hdiutil attach: Agents Router.app and Applications -> /Applications verified.", flush=True)
+            if not (Path(mount) / APP).is_dir() or os.readlink(Path(mount) / "Applications") != "/Applications":
+                raise ValueError(f"DMG must contain {APP} and the /Applications link")
+            verify_identity(Path(mount) / APP)
+            print(f"hdiutil attach: {APP} (release identity) and Applications -> /Applications verified.", flush=True)
         finally:
             run("hdiutil", "detach", mount, capture=True)
     if updater:
-        archive = bundles / "macos/Agents Router.app.tar.gz"
+        archive = bundles / f"macos/{APP}.tar.gz"
         signature = archive.with_suffix(archive.suffix + ".sig")
         shutil.copy2(archive, dist / archive_name(version))
         shutil.copy2(signature, dist / (archive_name(version) + ".sig"))
         with tempfile.TemporaryDirectory(prefix="updater-check-", dir=BUILD) as scratch:
             with tarfile.open(archive) as file:
                 file.extractall(scratch, filter="data")
-            verify_app(Path(scratch) / "Agents Router.app", version, lock)
+            verify_app(Path(scratch) / APP, version, lock)
         metadata = latest(version, signature.read_text(),
                           os.environ.get("AGT_RELEASE_NOTES", ""))
         (dist / "latest.json").write_text(json.dumps(metadata, indent=2) + "\n")
@@ -352,7 +397,6 @@ def main():
         if sizes[key] > budget * 1048576:
             raise ValueError(f"{key} exceeds the agreed {budget} MiB budget")
     print(f"Built and verified: {dmg}", flush=True)
-
 
 if __name__ == "__main__":
     try:

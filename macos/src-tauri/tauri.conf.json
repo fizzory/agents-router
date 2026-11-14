@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Agents Router",
-  "version": "0.17.0",
-  "identifier": "io.github.watcharagorn.agents-router",
+  "productName": "Agents Router Test",
+  "version": "0.17.1",
+  "identifier": "io.github.watcharagorn.agents-router.test",
   "build": {
     "frontendDist": "../ui"
   },

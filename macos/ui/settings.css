@@ -57,6 +57,12 @@ main { min-width: 0; overflow: auto; padding: 9px 12px 14px; }
 .login-row { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 7px; }
 #install-group { margin-top: 10px; border-top: 1px solid color-mix(in srgb, var(--line) 50%, transparent); padding-top: 5px; }
 .version-row { font-size: 11px; color: var(--muted); }
+#test-build { margin-top: 10px; }
+#test-build summary { font-size: 11px; color: var(--muted); min-height: 24px; padding-top: 4px; }
+#test-build .version-row { grid-template-columns: auto minmax(0, 1fr) 84px; }
+#test-build .path-value { display: flex; align-items: center; gap: 5px; min-width: 0; }
+#test-build .path-text { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+#general-footer.search-only > :not(#test-build) { display: none; }
 #uninstall { font-size: 11px; border: 0; background: transparent; padding: 4px 0; }
 .banner { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; margin-bottom: 7px; font-size: 11px; border-bottom: 1px solid var(--line); }
 .banner button { font-size: 11px; border: 1px solid var(--line); background: var(--field); white-space: nowrap; padding: 1px 7px; }

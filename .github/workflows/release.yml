@@ -46,9 +46,16 @@ jobs:
       - name: Install bundled CLI and decode live usage in scratch
         run: |
           set -euo pipefail
+          # build_app.sh removes its intermediate .app; use the verified DMG's copy.
+          dmgs=(dist/Agents-Router-*-arm64.dmg)
+          [ "${#dmgs[@]}" -eq 1 ] || { echo "expected one DMG in dist/" >&2; exit 1; }
+          test -f "${dmgs[0]}"
           scratch=$(mktemp -d)
-          trap 'rm -rf "$scratch"' EXIT
-          ditto "$CARGO_TARGET_DIR/aarch64-apple-darwin/release/bundle/macos/Agents Router.app" "$scratch/Agents Router.app"
+          mount=$(mktemp -d)
+          trap 'hdiutil detach "$mount" >/dev/null 2>&1 || true; rm -rf "$scratch"; rmdir "$mount" 2>/dev/null || true' EXIT
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "${dmgs[0]}"
+          ditto "$mount/Agents Router.app" "$scratch/Agents Router.app"
+          hdiutil detach "$mount"
           checker="$CARGO_TARGET_DIR/debug/agt-app-check"
           export HOME="$scratch/home" AGT_HOME="$scratch/agt"
           export AGT_APP_SUPPORT="$scratch/support" AGT_BIN_DIR="$scratch/bin"
@@ -71,7 +78,7 @@ jobs:
           path: build/app-build-report.json
           if-no-files-found: ignore
 
-      # This build replaces the release .app. Package and upload release artifacts above.
+      # This ci-selftest build is "Agents Router Test.app" from the base config. Package and upload release artifacts above.
       - name: Production WebKit pages and all Settings panes
         id: selftest
         timeout-minutes: 25

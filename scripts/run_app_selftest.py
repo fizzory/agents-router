@@ -13,6 +13,8 @@ import subprocess
 import sys
 import tempfile
 
+from app_env import scratch_env, without_agt
+
 ROOT = Path(__file__).resolve().parents[1]
 PROBES = {"css-has", "css-color-mix", "css-container", "css-custom-property", "css-grid",
           "js-es-modules", "js-resize-observer", "js-structured-clone", "js-array-at", "js-queue-microtask"}
@@ -48,6 +50,29 @@ def validate_report(report):
             raise ValueError(f"{name}: missing fixture content or non-zero layout")
 
 
+def build_env(base=None):
+    """The build's environment: no TAURI_* signing input and no AGT_* folder from the caller."""
+    env = {k: v for k, v in without_agt(base).items() if not k.startswith("TAURI_")}
+    env.update(CARGO_HOME=str(ROOT / "build/cargo-home"), CARGO_TARGET_DIR=str(ROOT / "build/app-target"),
+               RUSTUP_AUTO_INSTALL="0", MACOSX_DEPLOYMENT_TARGET="14.0", CI="true")
+    return env
+
+
+def child_env(scratch, temp, fake, report):
+    """The app's whole environment, built from scratch paths alone."""
+    home = scratch / "home"
+    # Not home/.agents-router: a test build refuses the release's agt home.
+    agt_home = home / "agt-home"
+    return scratch_env({"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": home, "CFFIXED_USER_HOME": home,
+           "RUNNER_TEMP": temp, "TMPDIR": scratch / "tmp", "AGT_HOME": agt_home,
+           "AGT_CONFIG_DIR": agt_home, "AGT_APP_SUPPORT": scratch / "support",
+           "AGT_BIN_DIR": scratch / "bin", "AGT_APPLICATIONS_DIRS": scratch / "Applications",
+           "CLAUDE_CONFIG_DIR": home / ".claude", "CODEX_HOME": home / ".codex",
+           "GEMINI_CLI_HOME": home / ".gemini", "AGT_APP_SELFTEST": report,
+           "AGT_APP_TEST_LAUNCHER": fake, "AGT_APP_TEST_USAGE_FIXTURE": "usage-popover.json",
+           "AGT_APP_TEST_CALLS": scratch / "calls.jsonl"}, base={})
+
+
 def main():
     if sys.argv[1:]:
         raise ValueError("Usage: python3 scripts/run_app_selftest.py")
@@ -60,17 +85,14 @@ def main():
         with Path(os.environ["GITHUB_OUTPUT"]).open("a") as stream:
             stream.write(f"diagnostics={scratch}\n")
     print(f"Self-test diagnostics: {scratch}", flush=True)
-    build_env = {k: v for k, v in os.environ.items() if not k.startswith(("TAURI_", "AGT_APP_"))}
-    build_env.update(CARGO_HOME=str(ROOT / "build/cargo-home"), CARGO_TARGET_DIR=str(ROOT / "build/app-target"),
-                     RUSTUP_AUTO_INSTALL="0", MACOSX_DEPLOYMENT_TARGET="14.0", CI="true")
+    build = build_env()
     with (scratch / "build.log").open("w") as log:
-        subprocess.run([str(ROOT / "scripts/check_app_tools.sh")], env=build_env, check=True, stdout=log, stderr=log)
+        subprocess.run([str(ROOT / "scripts/check_app_tools.sh")], env=build, check=True, stdout=log, stderr=log)
         subprocess.run([str(ROOT / "build/tools/bin/cargo-tauri"), "build",
                         "--features", "ci-selftest", "--target", "aarch64-apple-darwin", "--bundles", "app",
-                        "--", "--locked", "--no-default-features"], cwd=ROOT / "macos/src-tauri", env=build_env, check=True,
+                        "--", "--locked", "--no-default-features"], cwd=ROOT / "macos/src-tauri", env=build, check=True,
                        stdout=log, stderr=log)
-    home = scratch / "home"
-    agt_home = home / ".agents-router"
+    agt_home = scratch / "home/agt-home"
     for path in (agt_home / "state", agt_home / "jobs", scratch / "tmp", scratch / "support", scratch / "bin"):
         path.mkdir(parents=True, exist_ok=True)
     fake = scratch / "fake-agt"
@@ -79,15 +101,9 @@ def main():
     fake.write_text(f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(ROOT / 'scripts/fake_app_agt.py'))} \"$@\"\n")
     fake.chmod(0o700)
     report = scratch / "report.json"
-    env = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": str(home), "CFFIXED_USER_HOME": str(home),
-           "RUNNER_TEMP": str(temp), "TMPDIR": str(scratch / "tmp"), "AGT_HOME": str(agt_home),
-           "AGT_CONFIG_DIR": str(agt_home), "AGT_APP_SUPPORT": str(scratch / "support"),
-           "AGT_BIN_DIR": str(scratch / "bin"), "AGT_APPLICATIONS_DIRS": str(scratch / "Applications"),
-           "CLAUDE_CONFIG_DIR": str(home / ".claude"), "CODEX_HOME": str(home / ".codex"),
-           "GEMINI_CLI_HOME": str(home / ".gemini"), "AGT_APP_SELFTEST": str(report),
-           "AGT_APP_TEST_LAUNCHER": str(fake), "AGT_APP_TEST_USAGE_FIXTURE": "usage-popover.json",
-           "AGT_APP_TEST_CALLS": str(scratch / "calls.jsonl")}
-    binary = ROOT / "build/app-target/aarch64-apple-darwin/release/bundle/macos/Agents Router.app/Contents/MacOS/agents-router"
+    env = child_env(scratch, temp, fake, report)
+    # The base config names this ci-selftest build "Agents Router Test.app"; it never replaces a release bundle.
+    binary = ROOT / "build/app-target/aarch64-apple-darwin/release/bundle/macos/Agents Router Test.app/Contents/MacOS/agents-router"
     with (scratch / "native.log").open("w") as log:
         process = subprocess.Popen([str(binary)], cwd=scratch, env=env, stdout=log, stderr=log, start_new_session=True)
         try:

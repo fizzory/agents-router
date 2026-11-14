@@ -1,6 +1,6 @@
 [package]
 name = "agents-router-app"
-version = "0.17.0"
+version = "0.17.1"
 edition = "2021"
 rust-version = "1.90"
 default-run = "agents-router"
@@ -39,6 +39,7 @@ objc2-app-kit = { version = "=0.3.2", features = ["NSWorkspace"] }
 objc2-foundation = { version = "=0.3.2", features = ["NSNotification", "NSOperation", "NSString", "block2"] }
 objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["CAMediaTimingFunction"] }
 block2 = "=0.6.2"
+libc = "=0.2.191"
 notify-debouncer-mini = { version = "=0.7.0", features = ["macos_fsevent"] }
 tokio = { version = "=1.54.1", features = ["process", "rt-multi-thread", "macros", "sync", "time"] }
 serde = { version = "=1.0.229", features = ["derive"] }

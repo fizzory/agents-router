@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import plistlib
 import shutil
 import subprocess
 import tempfile
@@ -144,6 +145,82 @@ Load command 5
                 self.assertIn("build/tools/bin/cargo-tauri" if rustc else "rustc is missing", result.stderr)
                 self.assertEqual(listing(), before, "tool gate changed the before/after listing")
                 self.assertEqual(list((root / "build/tools").iterdir()), [])
+
+    def test_release_overlay_restores_the_release_identity_over_the_test_base(self):
+        module = build_module()
+        base = json.loads((ROOT / "macos/src-tauri/tauri.conf.json").read_text())
+        self.assertEqual((base["productName"], base["identifier"]),
+                         ("Agents Router Test", "io.github.watcharagorn.agents-router.test"))
+        for updater in (False, True):  # Keyless local builds are release-named too.
+            with self.subTest(updater=updater):
+                overlay = module.release_overlay(Path("/scratch/runtime"), updater)
+                effective = {**base, **overlay}
+                self.assertEqual((effective["productName"], effective["identifier"]),
+                                 ("Agents Router", "io.github.watcharagorn.agents-router"))
+                self.assertEqual(overlay["bundle"], {"resources": {"/scratch/runtime": "runtime/"},
+                                                     "createUpdaterArtifacts": updater})
+        self.assertEqual(module.APP, "Agents Router.app")
+
+    def test_info_plist_must_carry_the_release_identity(self):
+        module = build_module()
+        release = {"CFBundleIdentifier": "io.github.watcharagorn.agents-router",
+                   "CFBundleName": "Agents Router", "CFBundleDisplayName": "Agents Router"}
+        test = {"CFBundleIdentifier": "io.github.watcharagorn.agents-router.test",
+                "CFBundleName": "Agents Router Test", "CFBundleDisplayName": "Agents Router Test"}
+        with tempfile.TemporaryDirectory(prefix="agt-build-plist-") as folder:
+            app = Path(folder) / "Agents Router.app"
+            (app / "Contents").mkdir(parents=True)
+            for info, ok in ((release, True), (test, False), ({**release, "CFBundleName": "Agents Router Test"}, False),
+                             ({k: v for k, v in release.items() if k != "CFBundleDisplayName"}, False)):
+                with self.subTest(info=info):
+                    with (app / "Contents/Info.plist").open("wb") as file:
+                        plistlib.dump({"CFBundleShortVersionString": "0.17.0", **info}, file)
+                    if ok:
+                        module.verify_identity(app)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "release identity"):
+                            module.verify_identity(app)
+
+    def test_release_removes_only_the_intermediate_app_on_success_and_failure(self):
+        module = build_module()
+        for outcome in ("success", "package-fails", "build-fails"):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory(prefix="agt-build-clean-") as folder:
+                build = Path(folder) / "build"
+                build.mkdir()
+                target = build / "app-target/aarch64-apple-darwin/release"
+                app = target / "bundle/macos/Agents Router.app"
+                kept = [target / "agents-router", target / "bundle/dmg/Agents Router_0.17.0_aarch64.dmg",
+                        target / "bundle/macos/Agents Router.app.tar.gz", target / "bundle/macos/Agents Router Test.app/Contents/Info.plist"]
+                overlays = []
+
+                def fake_run(*args, **kwargs):
+                    if "tauri" in map(str, args):
+                        overlays.append(json.loads(Path(args[list(args).index("--config") + 1]).read_text()))
+                        for path in [app / "Contents/MacOS/agents-router", *kept]:
+                            path.parent.mkdir(parents=True, exist_ok=True)
+                            path.write_text("built")
+                        if outcome == "build-fails":
+                            raise subprocess.CalledProcessError(1, "cargo tauri build")
+
+                def fake_package(version, lock, updater, bundles, packaged):
+                    self.assertEqual(packaged, app)
+                    self.assertTrue((packaged / "Contents/MacOS/agents-router").is_file())
+                    if outcome == "package-fails":
+                        raise ValueError("DMG must contain Agents Router.app")
+
+                with mock.patch.object(module, "BUILD", build), mock.patch.object(module, "run", fake_run), \
+                        mock.patch.object(module, "package", fake_package):
+                    if outcome == "success":
+                        module.release("0.17.0", {}, Path(folder) / "runtime", False)
+                    else:
+                        with self.assertRaises((ValueError, subprocess.CalledProcessError)):
+                            module.release("0.17.0", {}, Path(folder) / "runtime", False)
+                self.assertFalse(app.exists(), "the release-named intermediate .app survived")
+                for path in kept:
+                    self.assertTrue(path.is_file(), path)
+                self.assertEqual(len(overlays), 1)
+                self.assertEqual((overlays[0]["productName"], overlays[0]["identifier"]),
+                                 ("Agents Router", "io.github.watcharagorn.agents-router"))
 
     def test_versions_disagree_before_any_staging(self):
         module = build_module()

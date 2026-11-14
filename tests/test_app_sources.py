@@ -27,6 +27,7 @@ import shutil
 import tempfile
 import tomllib
 import unittest
+import unittest.mock
 
 import helpers  # noqa: F401 (isolate homes, CLIs and background services)
 from agents_router.config_cli import KEYS
@@ -82,6 +83,19 @@ def nested_css(text):
             stack.pop()
         start = match.end()
     return False
+
+
+# The checks that start the app or agt with scratch folders.
+SCRATCH_ENV_SCRIPTS = ("check_app_native.py", "run_app_selftest.py", "check_app_update.py")
+# A quoted release version ("0.17.1", '0.17.2-test', not "127.0.0.1"): the update rehearsal spells none.
+VERSION_LITERAL = re.compile(r"""["']\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?["']""")
+# A whole-environment copy; reading one variable (os.environ.get / [name]) is fine.
+WHOLE_ENVIRON = re.compile(r"\*\*os\.environ\b|dict\(\s*os\.environ\b|os\.environ\.(?:copy|items|keys|values)\(|"
+                           r"\benv\s*=\s*os\.environ\b|\(\s*os\.environ\s*\)")
+
+
+def uncomment_python(text):
+    return "\n".join(line.split("#", 1)[0] if line.lstrip().startswith("#") else line for line in text.splitlines())
 
 
 def check_sources(root, *, release=False):
@@ -146,6 +160,71 @@ def check_sources(root, *, release=False):
             updater_rules.validate_release(config)
         except ValueError as error:
             fail("updater-key", str(error))
+    # The base config builds the test app ("Agents Router Test.app", .test
+    # identifier). Only build_app.py's generated overlay may name the release.
+    identity = {"productName": updater_rules.TEST_NAME, "identifier": updater_rules.TEST_IDENTIFIER}
+    if {name: config.get(name) for name in identity} != identity:
+        fail("identity", f"tauri.conf.json must build {updater_rules.TEST_NAME}.app as {updater_rules.TEST_IDENTIFIER}")
+    rust = re.search(r'pub const RELEASE_IDENTIFIER: &str = "([^"]*)";',
+                     (cargo / "src/update.rs").read_text(encoding="utf-8"))
+    if not rust or rust[1] != updater_rules.RELEASE_IDENTIFIER:
+        fail("identity", "update.rs RELEASE_IDENTIFIER must equal scripts/app_updater.py's")
+    # Test builds resolve their own folders; the release keeps production ones
+    # and refuses --test-* flags. The bundle identifier decides, never a cfg.
+    app_paths = uncomment((cargo / "src/app_paths.rs").read_text(encoding="utf-8")) if (cargo / "src/app_paths.rs").is_file() else ""
+    test_id = re.search(r'pub const TEST_IDENTIFIER: &str = "([^"]*)";', app_paths)
+    if not test_id or test_id[1] != updater_rules.TEST_IDENTIFIER:
+        fail("test-build", "app_paths.rs TEST_IDENTIFIER must equal scripts/app_updater.py's")
+    if not re.search(r"fn is_test_build\(identifier: &str\) -> bool \{\s*identifier != RELEASE_IDENTIFIER\s*\}", app_paths):
+        fail("test-build", "is_test_build must be every identifier except RELEASE_IDENTIFIER")
+    if re.search(r"debug_assertions", app_paths):
+        fail("test-build", "app_paths.rs must not gate test builds on debug_assertions")
+    resolve = app_paths.split("pub fn resolve(", 1)[-1]
+    if not ('starts_with("--test-")' in resolve and resolve.index('starts_with("--test-")') < resolve.find('env("HOME")')):
+        fail("test-build", "the release must refuse --test-* flags before reading HOME or any folder")
+    app_run = uncomment((cargo / "src/app.rs").read_text(encoding="utf-8")).split("pub fn run()", 1)[-1]
+    if "AppPaths::from_process" not in app_run or app_run.index("AppPaths::from_process") > app_run.find("tauri::Builder::default()"):
+        fail("test-build", "app.rs must resolve AppPaths before building the app")
+    html = (root / UI / "settings.html").read_text(encoding="utf-8")
+    footer = html.split('id="general-footer"', 1)[-1].split('<div id="pane-content"', 1)[0]
+    if not re.search(r'<details id="test-build" hidden>\s*<summary>Test build</summary>', footer) or footer.find('id="test-build"') < footer.find('id="install-group"'):
+        fail("test-build", "settings.html needs a hidden Test build disclosure as the last item of #general-footer")
+
+    # The app checks swap HOME, so the app's production check no longer covers
+    # the caller's folders: an inherited AGT_APP_SUPPORT once reached the real
+    # support folder. Each check builds its children's environment with
+    # app_env.scratch_env, which drops every AGT_* variable it doesn't set.
+    app_env = root / "scripts/app_env.py"
+    helper = uncomment_python(app_env.read_text(encoding="utf-8")) if app_env.is_file() else ""
+    if (not re.search(r'FOLDERS = \("AGT_APP_SUPPORT", "AGT_BIN_DIR", "AGT_HOME", "AGT_CONFIG_DIR"\)', helper)
+            or 'not key.startswith("AGT_")' not in helper):
+        fail("scratch-env", "scripts/app_env.py must drop every AGT_* variable and require the four agt folders")
+    for name in SCRATCH_ENV_SCRIPTS:
+        path = root / "scripts" / name
+        text = uncomment_python(path.read_text(encoding="utf-8")) if path.is_file() else ""
+        if "scratch_env(" not in text:
+            fail("scratch-env", f"scripts/{name} must build the app's environment with app_env.scratch_env")
+        if WHOLE_ENVIRON.search(text):
+            fail("scratch-env", f"scripts/{name} copies os.environ; use app_env.scratch_env or without_agt")
+
+    # The update rehearsal installs this checkout's version, then the next patch's
+    # test build. scripts/check_app_update.py derives both from the package
+    # metadata and hands them to the self-test in versions.json, so a version
+    # bump needs no edit in either file; a spelled version drifts at the next one.
+    update_rs = cargo / "src/update_app.rs"
+    update_py = root / "scripts/check_app_update.py"
+    rust = uncomment(update_rs.read_text(encoding="utf-8")) if update_rs.is_file() else ""
+    script = uncomment_python(update_py.read_text(encoding="utf-8")) if update_py.is_file() else ""
+    for name, text in (("macos/src-tauri/src/update_app.rs", rust), ("scripts/check_app_update.py", script)):
+        if VERSION_LITERAL.search(text):
+            fail("update-versions", f"{name} spells a version; the rehearsal's versions come from versions.json")
+    if not all(part in rust for part in ('root.join("versions.json")', 'versions["from"]', 'versions["to"]')):
+        fail("update-versions", "update_app.rs's self-test must read its from and to versions from versions.json")
+    if not all(part in script for part in ("build_app.versions()", "next_test_version(current)",
+                                           '"versions.json"', '{"from": current, "to": following}')):
+        fail("update-versions", "scripts/check_app_update.py must write this checkout's version and the next "
+                                "patch's test version to versions.json")
+
     # Include checked-in platform/release overlays and the generated release
     # overlay when present, but never traverse build/tools or Cargo caches.
     configs = set(cargo.glob("tauri*.conf.json")) | set(cargo.glob("tauri*.conf.toml"))
@@ -156,6 +235,10 @@ def check_sources(root, *, release=False):
             fail("selftest", f"{path.relative_to(root)} enables ci-selftest")
         if "dangerousInsecureTransportProtocol" in json.dumps(data):
             fail("transport", f"{path.relative_to(root)} enables insecure updater transport")
+        if path != root / "build/release.conf.json" and (
+                data.get("productName") == updater_rules.RELEASE_NAME
+                or data.get("identifier") == updater_rules.RELEASE_IDENTIFIER):
+            fail("identity", f"{path.relative_to(root)} names the release; only build/release.conf.json may")
         if path.name != "tauri.conf.json" and "pubkey" in data.get("plugins", {}).get("updater", {}):
             fail("updater-key", f"{path.relative_to(root)} overrides the release public key")
         endpoints = data.get("plugins", {}).get("updater", {}).get("endpoints", [])
@@ -332,6 +415,18 @@ class AppSourceTests(unittest.TestCase):
         self.assertEqual(len(builds), 1)
         self.assertEqual(len(uploads), 1)
         self.assertLess(builds[0], uploads[0])
+        # build_app.sh removes its intermediate release .app: the CLI check
+        # copies the app out of the verified DMG, mounted read-only.
+        self.assertNotIn("release/bundle/macos/Agents Router.app", workflow)
+        installs = [i for i, step in enumerate(steps) if "--install-cli --app" in step]
+        self.assertEqual(len(installs), 1)
+        self.assertLess(builds[0], installs[0])
+        self.assertLess(installs[0], uploads[0])
+        install = steps[installs[0]]
+        self.assertIn("dmgs=(dist/Agents-Router-*-arm64.dmg)\n", install)
+        self.assertIn('hdiutil attach -readonly -nobrowse -mountpoint "$mount" "${dmgs[0]}"\n', install)
+        self.assertIn('ditto "$mount/Agents Router.app" "$scratch/Agents Router.app"\n', install)
+        self.assertIn('hdiutil detach "$mount"\n', install)
         self.assertLess(uploads[0], selftest_index)
         dmg = steps[uploads[0]]
         self.assertIn("uses: actions/upload-artifact@", dmg)
@@ -339,8 +434,8 @@ class AppSourceTests(unittest.TestCase):
         self.assertIn("if-no-files-found: error\n", dmg)
         self.assertNotRegex(dmg, r"(?m)^        (?:if|continue-on-error):")
 
-        # Only these diagnostics may follow: the self-test replaces the shared
-        # release .app, so later packaging or release uploads would be unsafe.
+        # Only these diagnostics may follow: the self-test's ci-selftest build is
+        # a test bundle, so no packaging or release upload may come after it.
         remaining = steps[selftest_index + 1:]
         self.assertEqual(len(remaining), 2)
         report, diagnostics = remaining
@@ -384,7 +479,7 @@ class AppSourceTests(unittest.TestCase):
         root = Path(temporary.name)
         shutil.copytree(ROOT / "macos", root / "macos", ignore=shutil.ignore_patterns("target", "gen"))
         shutil.copytree(ROOT / "tests/fixtures/app", root / "tests/fixtures/app")
-        for name in ("build_app.sh", "build_app.py"):
+        for name in ("build_app.sh", "build_app.py", "app_env.py", *SCRATCH_ENV_SCRIPTS):
             path = root / "scripts" / name
             path.parent.mkdir(exist_ok=True)
             shutil.copy2(ROOT / "scripts" / name, path)
@@ -477,6 +572,29 @@ class AppSourceTests(unittest.TestCase):
         self.reject("updater-key", lambda root: self.write(root, Path("build/release.conf.json"),
             '{"plugins":{"updater":{"pubkey":"throwaway"}}}'))
 
+    def test_rejects_release_identity_outside_the_release_overlay(self):
+        def base(**changes):
+            def mutate(root):
+                path = TAURI / "tauri.conf.json"
+                config = json.loads((root / path).read_text())
+                config.update(changes)
+                self.write(root, path, json.dumps(config))
+            return mutate
+        self.reject("identity", base(productName="Agents Router"))
+        self.reject("identity", base(identifier="io.github.watcharagorn.agents-router"))
+        self.reject("identity", base(productName="Something Else"))
+        self.reject("identity", lambda root: self.write(root, TAURI / "tauri.macos.conf.json",
+            '{"identifier":"io.github.watcharagorn.agents-router"}'))
+        self.reject("identity", lambda root: self.write(root, Path("build/app-release.json"),
+            '{"productName":"Agents Router"}'))
+        self.reject("identity", lambda root: self.write(root, TAURI / "src/update.rs",
+            (root / TAURI / "src/update.rs").read_text().replace(
+                '"io.github.watcharagorn.agents-router";', '"io.github.watcharagorn.other";', 1)))
+        root = self.temp_tree()
+        self.write(root, Path("build/release.conf.json"),
+                   '{"productName":"Agents Router","identifier":"io.github.watcharagorn.agents-router"}')
+        self.assertEqual(check_sources(root), [])
+
     def test_rejects_insecure_release_overlay(self):
         self.reject("transport", lambda root: self.write(root, Path("build/release.conf.json"),
             '{"plugins":{"updater":{"dangerousInsecureTransportProtocol":true}}}'))
@@ -529,6 +647,131 @@ class AppSourceTests(unittest.TestCase):
         self.reject("symbols", lambda root: self.write(root, UI / "icons/route.symbolset/Contents.json", "{}"))
         self.reject("symbols", lambda root: self.write(root, UI / "icons/route.svg", '<svg><title>SF Symbols export</title></svg>'))
         self.reject("symbols", lambda root: self.write(root, UI / "icons/route.svg", '<svg><g id="Symbols"></g></svg>'))
+
+    def test_rejects_test_build_gates_that_reach_the_release(self):
+        paths = TAURI / "src/app_paths.rs"
+        def edit(old, new, relative=paths):
+            def mutate(root):
+                text = (root / relative).read_text()
+                self.assertIn(old, text)
+                self.write(root, relative, text.replace(old, new, 1))
+            return mutate
+        cases = [
+            edit('"io.github.watcharagorn.agents-router.test"', '"io.github.watcharagorn.agents-router.dev"'),
+            edit("identifier != RELEASE_IDENTIFIER", "identifier.ends_with(\".test\")"),
+            edit("pub fn is_test_build(", "#[cfg(debug_assertions)]\npub fn is_test_build("),
+            edit('<details id="test-build" hidden>', '<details id="test-build">', UI / "settings.html"),
+            edit("let paths = AppPaths::from_process", "let _later = tauri::Builder::default();\n    let paths = AppPaths::from_process", TAURI / "src/app.rs"),
+        ]
+        for mutate in cases:
+            with self.subTest(mutate=cases.index(mutate)):
+                self.reject("test-build", mutate)
+        def move_block(root):
+            text = (root / UI / "settings.html").read_text()
+            block = '        <details id="test-build" hidden><summary>Test build</summary><div id="test-build-rows"></div></details>\n'
+            self.assertIn(block, text)
+            text = text.replace(block, "").replace('<div id="general-footer">\n', '<div id="general-footer">\n' + block)
+            self.write(root, UI / "settings.html", text)
+        self.reject("test-build", move_block)
+
+    def test_rejects_app_checks_that_pass_the_callers_agt_folders(self):
+        def edit(name, old, new):
+            def mutate(root):
+                text = (root / "scripts" / name).read_text()
+                self.assertIn(old, text)
+                self.write(root, Path("scripts") / name, text.replace(old, new, 1))
+            return mutate
+        cases = [
+            edit("check_app_native.py", "    return scratch_env(", "    return dict(os.environ) or scratch_env("),
+            edit("check_app_native.py", "scratch_env(", "dict("),
+            edit("check_app_update.py", "    return scratch_env(", "    env = {**os.environ}\n    return scratch_env("),
+            edit("run_app_selftest.py", "without_agt(base).items()", "os.environ.items()"),
+            edit("app_env.py", 'not key.startswith("AGT_")', 'not key.startswith("AGT_APP_")'),
+            edit("app_env.py", '"AGT_HOME", "AGT_CONFIG_DIR")', '"AGT_HOME")'),
+        ]
+        for index, mutate in enumerate(cases):
+            with self.subTest(case=index):
+                self.reject("scratch-env", mutate)
+
+    def test_rejects_an_update_rehearsal_that_spells_its_versions(self):
+        def edit(path, old, new):
+            def mutate(root):
+                text = (root / path).read_text()
+                self.assertIn(old, text)
+                self.write(root, path, text.replace(old, new, 1))
+            return mutate
+        rust, script = TAURI / "src/update_app.rs", Path("scripts/check_app_update.py")
+        cases = [
+            edit(rust, "if version == from {", 'if version == "0.17.1" {'),
+            edit(rust, "found.version != to", 'found.version != "0.17.2-test"'),
+            edit(rust, 'root.join("versions.json")', 'root.join("other.json")'),
+            edit(script, "build_app.stage(current, lock)", 'build_app.stage("0.17.1", lock)'),
+            edit(script, "following = next_test_version(current)", 'following = "0.17.2-test"'),
+            edit(script, '(scratch / "versions.json")', '(scratch / "other.json")'),
+        ]
+        for index, mutate in enumerate(cases):
+            with self.subTest(case=index):
+                self.reject("update-versions", mutate)
+
+    def test_update_rehearsal_installs_the_next_patch_of_this_checkout(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        self.addCleanup(sys.path.remove, str(ROOT / "scripts"))
+        spec = importlib.util.spec_from_file_location("check_app_update", ROOT / "scripts/check_app_update.py")
+        update = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(update)
+        self.assertEqual(update.next_test_version("0.17.1"), "0.17.2-test")
+        self.assertEqual(update.next_test_version("1.9.9"), "1.9.10-test")
+        for bad in ("0.17.2-test", "0.17", "v0.17.1"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                update.next_test_version(bad)
+        current = update.build_app.versions()  # this checkout's, all files agreeing
+        major, minor, patch = current.split(".")
+        self.assertEqual(update.next_test_version(current), f"{major}.{minor}.{int(patch) + 1}-test")
+        self.assertEqual(check_sources(ROOT), [])
+
+    def test_app_checks_never_pass_inherited_agt_folders(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        self.addCleanup(sys.path.remove, str(ROOT / "scripts"))
+        def load(name):
+            spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+        production = "/Users/someone/Library/Application Support/Agents Router"
+        poison = {"PATH": "/usr/bin:/bin", "TMPDIR": "/tmp", "AGT_APP_SUPPORT": production,
+                  "AGT_BIN_DIR": "/Users/someone/.local/bin", "AGT_HOME": "/Users/someone/.agents-router",
+                  "AGT_CONFIG_DIR": "/Users/someone/.agt", "AGT_APP_TEST_LAUNCHER": "/production/agt",
+                  "AGT_UPDATE_TEST_ROOT": "/production", "AGT_SOMETHING_NEW": "/production",
+                  "CLAUDE_CONFIG_DIR": "/Users/someone/.claude", "CODEX_HOME": "/Users/someone/.codex",
+                  "GEMINI_CLI_HOME": "/Users/someone", "CFFIXED_USER_HOME": "/Users/someone",
+                  "PYTHONPATH": "/production", "TAURI_SIGNING_PRIVATE_KEY": "secret"}
+        scratch = Path(tempfile.gettempdir()) / "agt-scratch-env"
+        app_env = load("app_env")
+        native = load("check_app_native")
+        selftest = load("run_app_selftest")
+        update = load("check_app_update")
+        envs = {
+            "native": native.child_env(scratch, scratch / "calls.jsonl", base=poison),
+            "selftest": selftest.child_env(scratch, scratch / "tmp", scratch / "fake", scratch / "report.json"),
+            "update": update.child_env(scratch, "/toolchain", base=poison),
+        }
+        with unittest.mock.patch.dict("os.environ", poison, clear=True):
+            envs["native default"] = native.child_env(scratch, scratch / "calls.jsonl")
+            envs["update default"] = update.child_env(scratch, "/toolchain")
+            build = selftest.build_env()
+        for name, env in envs.items():
+            with self.subTest(env=name):
+                for folder in app_env.FOLDERS:
+                    self.assertTrue(env[folder].startswith(str(scratch)), f"{folder}={env[folder]}")
+                self.assertTrue(env["HOME"].startswith(str(scratch)))
+                leaked = {k: v for k, v in env.items() if poison.get(k) == v
+                          and (k.startswith("AGT_") or k in app_env.DROPPED)}
+                self.assertEqual(leaked, {})
+                self.assertNotIn("AGT_SOMETHING_NEW", env)
+        self.assertEqual([k for k in build if k.startswith(("AGT_", "TAURI_"))], [])
+        self.assertNotIn("CFFIXED_USER_HOME", build)
+        with self.assertRaisesRegex(ValueError, "AGT_CONFIG_DIR"):
+            app_env.scratch_env({"AGT_APP_SUPPORT": "/s", "AGT_BIN_DIR": "/b", "AGT_HOME": "/h"}, base={})
 
     def test_rejects_missing_fixture_and_uncovered_contract_or_model(self):
         self.reject("fixtures", lambda root: (root / "tests/fixtures/app/usage.json").unlink())

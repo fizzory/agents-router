@@ -438,18 +438,86 @@ pub async fn isolated(root: &Path) -> Result<()> {
         root.join("Move User Applications"),
     ];
     fs::create_dir_all(&move_paths.applications[0]).map_err(err)?;
-    let intent = install::move_application(&app, &move_paths)?;
+    let intent = install::move_application(&app, &move_paths, &[])?;
+    let moved = move_paths.applications[0].join("Agents Router.app");
     require(
-        Path::new(&intent[2]).join("Contents").exists(),
-        "move copy missing",
+        Path::new(&intent[2]) == moved && moved.join("Contents").exists(),
+        "move copy missing or renamed",
     )?;
-    fs::remove_dir_all(&move_paths.applications[0].join("Agents Router.app")).map_err(err)?;
+    fs::write(moved.join("Contents/existing"), "kept").map_err(err)?;
+    let staging = |dir: &Path| -> Result<bool> {
+        Ok(fs::read_dir(dir)
+            .map_err(err)?
+            .filter_map(|e| e.ok())
+            .any(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(".Agents-Router-")
+            }))
+    };
+    require(
+        install::move_application(&app, &move_paths, &[])
+            .is_err_and(|e| e.contains("already exists"))
+            && fs::read_to_string(moved.join("Contents/existing")).map_err(err)? == "kept"
+            && !staging(&move_paths.applications[0])?,
+        "move replaced an existing app or left staging behind",
+    )?;
+    // A test build keeps its own name, beside the release app, and is refused the same way.
+    let test_app = root.join("Applications/Agents Router Test.app");
+    fs::create_dir_all(test_app.join("Contents/Resources")).map_err(err)?;
+    let mut test_move = move_paths.clone();
+    test_move.isolated = Some(install::Isolated {
+        home: root.join("move test home"),
+        config: root.join("move test config"),
+        exclude: root.join("move test home").into_os_string(),
+    });
+    // Its chosen folders travel as launch arguments; the release's argv has none.
+    let relaunch = [
+        "--test-agt-home".to_string(),
+        "/scratch/agt home".to_string(),
+    ];
+    let test_intent = install::move_application(&test_app, &test_move, &relaunch)?;
+    let test_moved = move_paths.applications[0].join("Agents Router Test.app");
+    require(
+        intent.len() == 3 && test_intent[3..] == ["--args", "--test-agt-home", "/scratch/agt home"],
+        "move relaunch argv lost or added test-build folders",
+    )?;
+    require(
+        Path::new(&test_intent[2]) == test_moved
+            && test_moved.join("Contents").exists()
+            && moved.join("Contents/existing").exists(),
+        "test build did not move under its own name",
+    )?;
+    require(
+        install::move_application(&test_app, &test_move, &[])
+            .is_err_and(|e| e.contains("already exists"))
+            && !staging(&move_paths.applications[0])?,
+        "move replaced an existing test app",
+    )?;
+    require(
+        install::move_application(&root.join("Applications"), &test_move, &[])
+            .is_err_and(|e| e == "Choose the app bundle"),
+        "test build move accepted a folder that isn't an app bundle",
+    )?;
+    // The release lands as "Agents Router.app" whatever its bundle is called, as before.
+    fs::remove_dir_all(&moved).map_err(err)?;
+    let release_intent = install::move_application(&test_app, &move_paths, &[])?;
+    require(
+        Path::new(&release_intent[2]) == moved
+            && release_intent.len() == 3
+            && moved.join("Contents/Resources").exists(),
+        "release move changed its destination name",
+    )?;
+    for path in [&moved, &test_moved, &test_app] {
+        fs::remove_dir_all(path).map_err(err)?;
+    }
+    println!("OK: Move to Applications keeps the release's name Agents Router.app and a test build's own (Agents Router Test.app), and refuses an existing app without staging leftovers");
     fs::set_permissions(
         &move_paths.applications[0],
         fs::Permissions::from_mode(0o555),
     )
     .map_err(err)?;
-    let fallback = install::move_application(&app, &move_paths)?;
+    let fallback = install::move_application(&app, &move_paths, &[])?;
     require(
         fallback[2].contains("Move User Applications"),
         "move did not use fallback",
@@ -489,5 +557,210 @@ pub async fn isolated(root: &Path) -> Result<()> {
         "disk error missing space",
     )?;
     println!("OK: setup dry-run deadline shows no sheet and retains Setup status unknown; failed first install and full disk name action and bytes needed");
+    test_build(root, &paths, &app, &two).await?;
+    println!("OK: a test build installs into its own folders; its launcher exports every folder and a private HOME and drops provider folders");
+    Ok(())
+}
+/// A test build resolved through the app's own resolver, with partial flag and env overrides.
+async fn test_build(root: &Path, release: &InstallPaths, app: &Path, payload: &Path) -> Result<()> {
+    let base = crate::app_paths::physical(root)?;
+    let support = base.join("test-support");
+    let agt_home = base.join("test agt home");
+    let applications = std::env::join_paths(&release.applications).map_err(err)?;
+    let lookup = |name: &str| match name {
+        "HOME" => Some(base.join("home").into_os_string()),
+        "AGT_HOME" => Some(agt_home.clone().into_os_string()),
+        "AGT_APPLICATIONS_DIRS" => Some(applications.clone()),
+        _ => None,
+    };
+    let args = [
+        "--test-app-support".into(),
+        support.clone().into_os_string(),
+    ];
+    let resolved =
+        crate::app_paths::AppPaths::resolve(crate::app_paths::TEST_IDENTIFIER, &args, lookup)?;
+    // The release scratch install's own agt home is the production one for this HOME.
+    require(
+        crate::app_paths::AppPaths::resolve(
+            crate::app_paths::TEST_IDENTIFIER,
+            &[
+                "--test-agt-home".into(),
+                base.join("home/.agents-router").into_os_string(),
+            ],
+            lookup,
+        )
+        .is_err_and(|e| e.contains("overlaps")),
+        "test build accepted the production agt home",
+    )?;
+    resolved.prepare()?;
+    let paths = InstallPaths::from_app(&resolved)?;
+    require(
+        paths.bin == support.join("cli-bin")
+            && paths.agt_home == agt_home
+            && paths.isolated
+                == Some(install::Isolated {
+                    home: support.join("home"),
+                    config: agt_home.clone(),
+                    // The private HOME, the launch HOME and the account's home.
+                    exclude: std::env::join_paths([
+                        support.join("home"),
+                        base.join("home"),
+                        crate::app_paths::physical(&crate::app_paths::account_home()?)?,
+                    ])
+                    .map_err(err)?,
+                }),
+        "test build folders differ from the resolver",
+    )?;
+    let release_link = fs::read_link(release.public()).ok();
+    install::install(&paths, app, payload, false).await?;
+    require(
+        install::owns_public(&paths)
+            && install::launcher_current(&paths)
+            && fs::read_link(release.public()).ok() == release_link,
+        "test build install missed its launcher or touched the release CLI",
+    )?;
+    // agt sees only the private HOME, so the launcher's AGT_EXCLUDE_HOMES keeps
+    // the person's own HOME and its .agt/ from becoming a workspace. The
+    // caller's folder stays: below that HOME, a folder is its own workspace.
+    let person = base.join("home");
+    fs::create_dir_all(person.join(".agt")).map_err(err)?;
+    fs::create_dir_all(person.join("Documents")).map_err(err)?;
+    fs::write(person.join(".agt/settings.toml"), "max_jobs = 7\n").map_err(err)?;
+    fs::create_dir_all(&agt_home).map_err(err)?;
+    fs::write(agt_home.join("settings.toml"), "max_jobs = 3\n").map_err(err)?;
+    let theirs = person.join(".agt/settings.toml");
+    let ours = agt_home.join("settings.toml");
+    let documents = person.join("Documents");
+    let show = |cwd: &Path| -> Result<(Value, Vec<String>)> {
+        let out = std::process::Command::new(paths.public())
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("HOME", &person)
+            .current_dir(cwd)
+            .args(["config", "show", "--json"])
+            .output()
+            .map_err(err)?;
+        let doc: Value = serde_json::from_slice(&out.stdout)
+            .map_err(|e| format!("{e}: {}", String::from_utf8_lossy(&out.stderr)))?;
+        let files = doc["files"]
+            .as_array()
+            .ok_or("config show has no files")?
+            .iter()
+            .filter_map(|f| f["file"].as_str().map(String::from))
+            .collect();
+        require(
+            out.status.success(),
+            &format!("config show failed in {}", cwd.display()),
+        )?;
+        Ok((doc, files))
+    };
+    let s = |p: &Path| p.to_string_lossy().into_owned();
+    let (doc, files) = show(&person)?;
+    require(
+        doc["workspace"].is_null() && files == vec![s(&ours)],
+        &format!("test launcher in the person's HOME read other settings: {doc}"),
+    )?;
+    let (doc, files) = show(&documents)?;
+    require(
+        doc["workspace"] == s(&documents).as_str()
+            && files.first() == Some(&s(&ours))
+            && !files.contains(&s(&theirs)),
+        &format!("test launcher below the person's HOME read its .agt/: {doc}"),
+    )?;
+    // A Settings workspace write runs there too: it lands in that folder's .agt/.
+    let set = std::process::Command::new(paths.public())
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", &person)
+        .current_dir(&documents)
+        .args([
+            "config",
+            "set",
+            "subagents.prefer_roles",
+            "false",
+            "--workspace",
+        ])
+        .output()
+        .map_err(err)?;
+    require(
+        set.status.success()
+            && fs::read_to_string(documents.join(".agt/settings.toml")).map_err(err)?
+                == "[subagents]\nprefer_roles = false\n"
+            && fs::read_to_string(&theirs).map_err(err)? == "max_jobs = 7\n",
+        &format!(
+            "test launcher wrote a workspace setting elsewhere: {}",
+            String::from_utf8_lossy(&set.stderr)
+        ),
+    )?;
+    fs::remove_dir_all(documents.join(".agt")).map_err(err)?;
+    // A dotfiles checkout at that HOME makes it the checkout's root: still never a workspace.
+    fs::create_dir_all(person.join(".git")).map_err(err)?;
+    for cwd in [&person, &documents] {
+        let (doc, files) = show(cwd)?;
+        require(
+            doc["workspace"].is_null() && files == vec![s(&ours)],
+            &format!(
+                "test launcher in {} with ~/.git read other settings: {doc}",
+                cwd.display()
+            ),
+        )?;
+    }
+    fs::remove_dir(person.join(".git")).map_err(err)?;
+    fs::remove_file(person.join(".agt/settings.toml")).map_err(err)?;
+    // A link planted under the support folder after launch stops the install
+    // before it writes through it.
+    let outside = base.join("outside-bin");
+    fs::create_dir_all(&outside).map_err(err)?;
+    let real_bin = paths.support.join("bin-kept");
+    fs::rename(paths.support.join("bin"), &real_bin).map_err(err)?;
+    symlink(&outside, paths.support.join("bin")).map_err(err)?;
+    require(
+        install::install(&paths, app, payload, false)
+            .await
+            .is_err_and(|e| e.contains("is a symlink"))
+            && fs::read_dir(&outside).map_err(err)?.next().is_none(),
+        "test build install wrote through a linked support/bin",
+    )?;
+    fs::remove_file(paths.support.join("bin")).map_err(err)?;
+    fs::rename(&real_bin, paths.support.join("bin")).map_err(err)?;
+    script(
+        &paths.current().ok_or("No test runtime")?.join("bin/python3"),
+        "printf '%s\\n' \"$AGT_APP_SUPPORT\" \"$AGT_BIN_DIR\" \"$AGT_HOME\" \"$AGT_CONFIG_DIR\" \"$HOME\" \"$CFFIXED_USER_HOME\" \"${CLAUDE_CONFIG_DIR-unset}\" \"${CODEX_HOME-unset}\" \"${GEMINI_CLI_HOME-unset}\" \"$*\"",
+    )?;
+    let out = std::process::Command::new(paths.public())
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", base.join("home"))
+        .env("AGT_HOME", base.join("home/.agents-router"))
+        .env("CLAUDE_CONFIG_DIR", base.join("home/.claude"))
+        .env("CODEX_HOME", base.join("home/.codex"))
+        .env("GEMINI_CLI_HOME", base.join("home/.gemini"))
+        .args(["usage", "--json"])
+        .output()
+        .map_err(err)?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let s = |p: &Path| p.to_string_lossy().into_owned();
+    let expected = [
+        s(&support),
+        s(&support.join("cli-bin")),
+        s(&agt_home),
+        s(&agt_home),
+        s(&support.join("home")),
+        s(&support.join("home")),
+        "unset".into(),
+        "unset".into(),
+        "unset".into(),
+        "-I -m agents_router usage --json".into(),
+    ];
+    require(
+        out.status.success() && text.lines().collect::<Vec<_>>() == expected,
+        &format!("test launcher environment differs: {text}"),
+    )?;
+    let mut moved = paths.clone();
+    moved.agt_home = base.join("other agt home");
+    require(
+        !install::launcher_current(&moved),
+        "a launcher with other baked folders counts as current",
+    )?;
     Ok(())
 }

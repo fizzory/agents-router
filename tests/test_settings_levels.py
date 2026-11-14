@@ -197,6 +197,138 @@ class WorkspaceTests(LevelsBase):
         below.mkdir()
         self.assertEqual(levels.find_workspace(below).root, below)
 
+    def test_a_folder_agt_exclude_homes_lists_is_never_a_workspace(self):
+        # The app's test build: HOME is a private folder, `person` the account's own home.
+        person = self.root / "person"
+        self.workspace(person, "[codex]\nmax_jobs = 7\n")  # that home's user level
+        deep = person / "notes" / "deep"
+        deep.mkdir(parents=True)
+        documents = person / "Documents"
+        documents.mkdir()
+        repo = person / "src" / "repo"
+        (repo / ".git").mkdir(parents=True)
+        (repo / "lib").mkdir()
+        self.assertEqual(levels.find_workspace(deep).root, person)  # without the variable: an ordinary folder
+        with patch.dict(os.environ, {levels.EXCLUDE_HOMES: os.pathsep.join([str(self.root / "elsewhere"), str(person)])}):
+            self.assertIsNone(levels.find_workspace(person))
+            self.assertEqual(levels.find_workspace(deep).root, deep)  # the search stops below that home
+            self.assertIsNone(load_config(cwd=deep).runtime("codex").max_jobs)
+            self.assertEqual(levels.find_workspace(repo / "lib").root, repo)
+            self.workspace(person / "notes")
+            self.assertEqual(levels.find_workspace(deep).root, person / "notes")  # a nearer .agt/ still counts
+            (person / ".git").mkdir()  # a dotfiles checkout at that home
+            self.assertIsNone(levels.find_workspace(documents))
+            self.assertIsNone(load_config(cwd=documents).runtime("codex").max_jobs)
+            self.assertEqual(levels.find_workspace(deep).root, person / "notes")
+            self.assertEqual(levels.find_workspace(repo / "lib").root, repo)
+            self.assertIsNone(levels.find_workspace(self.user_home))  # HOME itself still counts
+
+    def test_empty_or_relative_exclude_entries_are_ignored(self):
+        inner = self.project / "inner"
+        inner.mkdir()
+        # "" and "." would both name the current folder.
+        with patch.dict(os.environ, {levels.EXCLUDE_HOMES: os.pathsep.join(["", ".", "inner", ""])}), \
+                contextlib.chdir(inner):
+            self.assertEqual(levels.find_workspace().root, inner)
+        with patch.dict(os.environ, {levels.EXCLUDE_HOMES: os.pathsep}), contextlib.chdir(self.project):
+            self.assertEqual(levels.find_workspace().root, self.project)
+
+    @unittest.skipIf(shutil.which("git") is None, "needs git")
+    def test_a_checkout_and_its_worktree_below_an_excluded_home_keep_their_workspace(self):
+        person = self.root / "person"
+        self.workspace(person, "[codex]\nmax_jobs = 7\n")
+        repo = person / "repo"
+        repo.mkdir()
+        git("init", "-q", cwd=repo)
+        (repo / "README").write_text("x\n", encoding="utf-8")
+        git("add", "README", cwd=repo)
+        git("commit", "-qm", "init", cwd=repo)
+        tree = person / "tree"
+        git("worktree", "add", "-q", str(tree), cwd=repo)
+        (person / ".git").mkdir()
+        with patch.dict(os.environ, {levels.EXCLUDE_HOMES: str(person)}):
+            found = levels.find_workspace(tree)
+            self.assertEqual((found.root, found.main), (tree.resolve(), repo.resolve()))
+            self.assertEqual(levels.find_workspace(repo).root, repo.resolve())
+            self.assertIsNone(load_config(cwd=tree).runtime("codex").max_jobs)
+
+    def another_spelling(self, folder):
+        """`folder` in the other case, and a factory for a context in which both name one folder on disk.
+
+        On a case-insensitive volume (APFS by default) they already do; elsewhere
+        levels._identity is taught that they do.
+        """
+        variant = folder.with_name(folder.name.swapcase())
+        self.assertNotEqual(variant.resolve(), folder.resolve())  # a match by path alone would miss it
+        if os.path.exists(variant) and os.path.samefile(variant, folder):
+            return variant, contextlib.nullcontext
+        identity = levels._identity
+
+        def same(path):
+            path = Path(path)
+            if path == variant or variant in path.parents:
+                path = folder / path.relative_to(variant)
+            return identity(path)
+        return variant, lambda: patch.object(levels, "_identity", same)
+
+    def test_a_listed_home_is_excluded_under_another_spelling(self):
+        person = self.root / "Person"
+        self.workspace(person, "[codex]\nmax_jobs = 7\n")
+        (person / "notes").mkdir()
+        variant, same = self.another_spelling(person)
+        for listed, cwd in ((person, variant), (variant, person)):
+            with self.subTest(listed=listed.name, cwd=cwd.name), same(), \
+                    patch.dict(os.environ, {levels.EXCLUDE_HOMES: str(listed)}):
+                self.assertIsNone(levels.find_workspace(cwd))
+                self.assertEqual(levels.find_workspace(cwd / "notes").root, (cwd / "notes").resolve())
+                self.assertIsNone(load_config(cwd=cwd / "notes").runtime("codex").max_jobs)
+
+    def test_a_filesystem_reporting_inode_0_matches_listed_homes_by_path_alone(self):
+        # FAT and some network or FUSE mounts give many folders inode 0: (device, 0) names none of them.
+        person = self.root / "person"
+        self.workspace(person, "[codex]\nmax_jobs = 7\n")
+        (person / "notes").mkdir()
+        repo = self.root / "work" / "repo"
+        (repo / ".git").mkdir(parents=True)
+        plain = self.workspace(self.root / "plain")
+        identity = levels._identity
+
+        def no_inodes(path):
+            found = identity(path)
+            return None if found is None else (found[0], 0)
+        self.assertEqual(no_inodes(repo), no_inodes(person))  # the same pair for both: a match by it would be wrong
+        with patch.object(levels, "_identity", no_inodes), patch.dict(os.environ, {levels.EXCLUDE_HOMES: str(person)}):
+            self.assertEqual(levels.find_workspace(repo).root, repo.resolve())
+            self.assertEqual(levels.find_workspace(plain).root, plain.resolve())
+            self.assertFalse(levels.Homes().lists(repo.resolve()))
+            self.assertIsNone(levels.find_workspace(person))  # the listed home itself, by its path
+            self.assertEqual(levels.find_workspace(person / "notes").root, (person / "notes").resolve())
+            self.assertIsNone(load_config(cwd=person / "notes").runtime("codex").max_jobs)
+
+    @unittest.skipIf(shutil.which("git") is None, "needs git")
+    def test_a_worktree_of_a_listed_home_never_reads_that_homes_local_file(self):
+        # A dotfiles checkout at the account's own home, and a worktree of it elsewhere.
+        person = self.root / "Person"
+        person.mkdir()
+        git("init", "-q", cwd=person)
+        (person / "README").write_text("x\n", encoding="utf-8")
+        git("add", "README", cwd=person)
+        git("commit", "-qm", "init", cwd=person)
+        self.workspace(person, local='[claude]\ndefault_model = "home"\n')
+        tree = self.root / "tree"
+        git("worktree", "add", "-q", str(tree), cwd=person)
+        self.assertEqual(load_config(cwd=tree).runtime("claude").default_model, "home")  # unset: as before
+        variant, same = self.another_spelling(person)
+        for listed in (person, variant):
+            with self.subTest(listed=listed.name), same(), patch.dict(os.environ, {levels.EXCLUDE_HOMES: str(listed)}):
+                found = levels.find_workspace(tree)
+                self.assertEqual((found.root, found.main), (tree.resolve(), person.resolve()))
+                self.assertIsNone(found.local_fallback())
+                self.assertIsNone(load_config(cwd=tree).runtime("claude").default_model)
+        self.workspace(tree, local='[claude]\ndefault_model = "this-tree"\n')
+        with patch.dict(os.environ, {levels.EXCLUDE_HOMES: str(person)}):
+            self.assertEqual(load_config(cwd=tree).runtime("claude").default_model, "this-tree")
+
     @unittest.skipIf(shutil.which("git") is None, "needs git")
     def test_a_worktree_without_its_own_local_file_reads_the_main_checkouts(self):
         git("init", "-q", cwd=self.project)

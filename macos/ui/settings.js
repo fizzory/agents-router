@@ -1,5 +1,7 @@
 import { configShow, configSet, configUnset, rolesConfig, getSettingsTarget, onSettingsTarget, onSettingsEdit,
-  checkForUpdates, getOpenAtLogin, setOpenAtLogin, getSnapshot, onUsageUpdated, onSettingsStatus, chooseWorkspace, openSettingsFile, showSettingMenu, onSettingsHistory } from './tauri.js';
+  checkForUpdates, getOpenAtLogin, setOpenAtLogin, getSnapshot, onUsageUpdated, onSettingsStatus, chooseWorkspace, openSettingsFile, showSettingMenu, onSettingsHistory,
+  testBuildPaths, copyText } from './tauri.js';
+import { testBuildRows, testBuildMatches } from './logic/test-build.js';
 import { LEVELS, PROVIDERS, rowState, labelFor, matches, paneFor, fileTarget, brokenFile, errorMessage, installState, isTextField, dispatchEdit } from './logic/settings.js';
 import { SettingsHistory } from './logic/settings-history.js';
 import { element, icon, makeControl, popup, highlightMatches } from './settings-controls.js';
@@ -12,6 +14,7 @@ const $ = selector => document.querySelector(selector);
 const status = $('#status'), rows = $('#settings'), login = $('#open-at-login'), search = $('#search');
 const scopes = [], cache = new Map(), errors = new Map();
 let scope = { level: 'user', workspace: null }, config = null, generation = 0, busy = false, snapshot = {}, flashKey = null, pendingRead = false;
+let testRows = [];
 $('#search-icon').append(icon('search'));
 const hideTooltip = attachTooltips($('#tooltip'));
 const history = new SettingsHistory({ set: configSet, unset: configUnset, roles: rolesConfig,
@@ -138,6 +141,23 @@ function renderInstall() {
   $('#uninstall').disabled = model.uninstallDisabled;
   $('#restore-cli').hidden = !installer.status.can_restore;
 }
+// Test builds only: where this app keeps its folders. The release gets null and shows nothing.
+function fillTestBuild(rows) {
+  testRows = testBuildRows(rows);
+  $('#test-build-rows').replaceChildren(...testRows.map(row => {
+    const node = element('div', 'version-row'); node.dataset.key = row.key;
+    const value = element('output', 'path-value'), text = element('span', 'path-text', row.value);
+    text.dataset.tooltip = row.full; value.append(text);
+    if (row.chip) value.append(element('span', 'source-chip', row.chip));
+    const copy = element('button', 'icon-button'); copy.type = 'button'; copy.append(icon('copy'));
+    copy.setAttribute('aria-label', row.copyLabel); copy.dataset.tooltip = row.copyLabel;
+    copy.addEventListener('click', () => run(async () => { await copyText(row.path); $('#announcement').textContent = 'Copied'; }));
+    const slot = element('span', 'row-slot'); slot.append(copy);
+    node.append(element('span', null, row.label), value, slot);
+    return node;
+  }));
+  $('#test-build').hidden = !testRows.length;
+}
 function render() {
   hideTooltip();
   const pane = document.body.dataset.pane, query = search.value.trim();
@@ -145,7 +165,11 @@ function render() {
   $('#scope').hidden = !['general', 'roles'].includes(pane);
   $('#scope').textContent = scope.level !== 'user' && scope.workspace ? `${scope.workspace.split('/').pop()} › ${LEVELS[scope.level]} ▾` : 'User ▾';
   $('#scope').dataset.tooltip = scope.workspace || 'User settings';
-  $('#general-footer').hidden = !general || searching;
+  // While searching, the footer shows only a matching Test build block, opened.
+  const testMatch = general && testBuildMatches(testRows, query);
+  $('#general-footer').hidden = !general || (searching && !testMatch);
+  $('#general-footer').classList.toggle('search-only', searching);
+  if (testMatch) $('#test-build').open = true;
 
   rows.replaceChildren(); $('#file-rows').replaceChildren();
   let total = 0, fileCount = 0, lastProvider = null;
@@ -160,7 +184,7 @@ function render() {
   $('#file-only').hidden = fileCount === 0;
   $('#file-only summary').textContent = `File only (${fileCount})`;
   if (searching && fileCount) $('#file-only').open = true;
-  $('#no-match').hidden = !general || !searching || total > 0;
+  $('#no-match').hidden = !general || !searching || total > 0 || testMatch;
   const broken = config && brokenFile(config), banner = $('#broken-banner');
   banner.hidden = !broken || !['general', 'roles'].includes(pane);
   if (broken) {
@@ -231,5 +255,6 @@ await onUsageUpdated(value => { snapshot = value; renderInstall(); if (document.
 await onSettingsStatus(value => { snapshot = value; renderInstall(); if (!busy && !panes.busy) run(async () => { await load(); await panes.refresh(); if (document.body.dataset.pane !== 'sharing') await panes.badge(); }); });
 try { snapshot = await getSnapshot(); } catch (error) { announceFailure(error); }
 try { login.checked = await getOpenAtLogin(); } catch (error) { announceFailure(error); login.disabled = true; }
+try { fillTestBuild(await testBuildPaths()); } catch { fillTestBuild(null); }
 await navigate(await getSettingsTarget());
 if (document.body.dataset.pane !== 'sharing') run(() => panes.badge());

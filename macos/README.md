@@ -31,6 +31,7 @@ other CLI. Malformed manifests do not establish ownership.
 
 `AGT_APP_SUPPORT` overrides `~/Library/Application Support/Agents Router`;
 `AGT_BIN_DIR` overrides `~/.local/bin`. Both apply to scratch installs and checks.
+A test build has its own defaults and flags ([Test build folders](#test-build-folders)).
 The stable launcher is always `$AGT_APP_SUPPORT/bin/agt`; it must resolve
 `current` to its physical runtime once, then execute that runtime's
 `bin/python3 -I -m agents_router` and preserve arguments. Resolving before exec
@@ -66,6 +67,175 @@ All Cargo invocations use `export CARGO_HOME=$PWD/build/cargo-home` from the
 repository root and `--locked`. Tools are checked by
 `scripts/check_app_tools.sh`; this task installs no tools.
 
+## Test and release builds
+
+Only the released app is called `Agents Router.app`. Every other build is a
+test build with its own name and identifier, so Spotlight, Finder and
+LaunchServices tell them apart.
+
+| Build | Bundle | Identifier | Made by |
+| --- | --- | --- | --- |
+| Release | `Agents Router.app` | `io.github.watcharagorn.agents-router` | `scripts/build_app.sh` only, inside `dist/Agents-Router-<version>-arm64.dmg` |
+| Test | `Agents Router Test.app` | `io.github.watcharagorn.agents-router.test` | Every raw `cargo tauri dev` or `cargo tauri build` (debug or release), the self-test and the check scripts |
+
+- `macos/src-tauri/tauri.conf.json` holds the test name and identifier.
+  `build_app.py` writes `build/release.conf.json`, the only config that sets
+  the release ones, also for keyless local builds. `tests/test_app_sources.py`
+  rejects the release name or identifier in any other config.
+- After packaging, `build_app.py` removes its intermediate
+  `build/app-target/aarch64-apple-darwin/release/bundle/macos/Agents Router.app`,
+  on success and on failure. Compiled binaries, caches,
+  `build/app-build-report.json` and `dist/` stay.
+- A test build checks no update feed. A manual check says test builds don't
+  update and offers the Releases page. `scripts/check_app_update.py` uses
+  `io.github.watcharagorn.agents-router.test.update-<pid>` and its own localhost feed.
+- Move to Applications: the release lands as `Agents Router.app`, as before. A
+  test build keeps its own bundle name, `Agents Router Test.app`, lands beside
+  the release and never replaces it.
+- The login item's LaunchAgent label is `<identifier>.app`. The release keeps
+  `io.github.watcharagorn.agents-router.app`.
+- The builds share no folders. The release keeps `~/Library/Application Support/Agents Router`,
+  `~/.local/bin/agt`, `~/.agents-router` and `~/.agt`; a test build gets its own, below.
+
+### Test build folders
+
+`app_paths.rs` resolves every folder once at launch. The embedded bundle
+identifier decides: `io.github.watcharagorn.agents-router` is the release, every
+other identifier (`.test`, `.test.update-<pid>`, optimized or debug) is a test
+build. Nothing depends on `debug_assertions`.
+
+| Folder | Flag | Variable | Test default |
+| --- | --- | --- | --- |
+| App support | `--test-app-support` | `AGT_APP_SUPPORT` | `~/Library/Application Support/Agents Router Test` |
+| Bin folder | `--test-bin-dir` | `AGT_BIN_DIR` | `<app support>/cli-bin` |
+| agt home | `--test-agt-home` | `AGT_HOME` | `<app support>/agt-home` |
+| Settings folder | `--test-config-dir` | `AGT_CONFIG_DIR` | the effective agt home |
+
+- Precedence per folder: flag, then variable, then default. Flags take
+  `--flag <folder>` or `--flag=<folder>`; a missing value, a repeat or an
+  unknown `--test-*` flag stops the launch.
+- Launch with `open -n "<path>/Agents Router Test.app" --args --test-app-support /abs/path`,
+  `open -n --env AGT_APP_SUPPORT=/abs/path "<path>/Agents Router Test.app"`, or by running
+  `Contents/MacOS/agents-router` directly. Finder and the Dock give the defaults.
+- Validation: absolute, non-empty, no `.`/`..`, no control characters. Each
+  folder's physical path (symlinks resolved, case-insensitive) must not be,
+  contain or sit inside `~/.local/bin`, `~/Library/Application Support/Agents Router`,
+  `~/.agents-router` or `~/.agt`, where `~` is both the launch HOME and the
+  account's home from the user database (`getpwuid_r`), which no `HOME` or
+  `CFFIXED_USER_HOME` changes. A failed lookup stops the launch. A dangling
+  symlink is refused, and so is a bin folder equal to `<app support>/bin`, where
+  the stable launcher lives. A refusal prints `agt-app … refused: …` and exits 2.
+- Nothing a test build makes below its folders may be a symlink: `home`, `bin`,
+  `bin/agt`, `handoffs`, `runtimes` and each runtime, `updated`, `plugins`,
+  `install.json` and `install.lock` under app support; `state`,
+  `state/admission.lock` and `jobs` under the agt home; `settings.toml` in the
+  settings folder. `current` must be the installer's `runtimes/<version>` link.
+  `previous-cli` may be a link: it keeps a replaced foreign CLI. Launch refuses
+  them, and the installer checks again before each write. Its lock files open
+  with `O_NOFOLLOW`; the release opens `install.lock` and
+  `state/admission.lock` as before.
+- The stable launcher stays `<app support>/bin/agt`. A test build's launcher also
+  exports `AGT_HOME`, `AGT_CONFIG_DIR`, `HOME=<app support>/home`,
+  `CFFIXED_USER_HOME` and `AGT_EXCLUDE_HOMES`, and unsets `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
+  `GEMINI_CLI_HOME`. Terminal, hooks and MCP servers inherit them. `AgtClient`
+  and installer children get the same environment, with the private home as
+  their working folder. The app keeps the real HOME for Applications
+  destinations and the login item. A launcher written for other folders is
+  rewritten at launch.
+- With the private HOME, agt would no longer know the real HOME isn't a
+  workspace, and would read `~/.agt/settings.toml` as workspace settings.
+  `AGT_EXCLUDE_HOMES` lists the private HOME, the launch HOME and the account's
+  home; agt treats each like its own HOME: never a workspace, and outside a
+  checkout the search stops there. That holds with `~/.git` too. Every command
+  keeps its folder, so a Settings workspace anywhere works as in the release.
+  Terminal handoffs, and their Copy command, start in the private HOME.
+- Relaunch: Move to Applications (`open -n <app> --args …`), the post-update
+  restart and the login item's LaunchAgent carry every non-default folder as a
+  flag, including those that came from variables. An enabled test login item is
+  rewritten at each launch.
+- The single-instance callback ignores a second launch's arguments: quit the
+  running test build before changing its folders.
+- Startup logs `test build paths app_support=… (source) … home=… account_home=…` once.
+- The tray tooltip, which is also the VoiceOver label, ends with `Test build`.
+- `test_build_paths` (Settings capability) returns
+  `[{key, path, display, source, origin}]`, or `null` in the release. `key` is
+  `app_support`, `bin_dir`, `agt_home` or `config_dir`; `source` is `flag`,
+  `env` or `default`; `origin` names the flag or variable; `display` shows HOME
+  as `~`. Settings → General's hidden `Test build` disclosure lists them with a
+  copy button; search opens it.
+- `cargo run --locked --bin agt-app-check -- --resolve-paths <identifier> [flags]`
+  prints the resolution for the current environment without writing.
+
+The release reads `AGT_APP_SUPPORT`, `AGT_BIN_DIR`, `AGT_HOME` and
+`AGT_CONFIG_DIR` as before, with no overlap checks, and refuses any `--test-*`
+argument before touching the filesystem. A dangling symlink among its folders
+doesn't stop the launch, as before: the install reports it. The self-test and check scripts set
+`AGT_HOME` to `$HOME/agt-home`, because `$HOME/.agents-router` is a production
+folder. They swap HOME; the production check still covers the account's own
+folders through the user database. Each script builds the app's environment
+with `scripts/app_env.py`'s `scratch_env`, which drops every inherited `AGT_*`
+variable and sets all four folders to scratch ones.
+
+Test bundles live in these folders:
+
+| Folder | Made by |
+| --- | --- |
+| `macos/src-tauri/target/debug/bundle/macos/`, `macos/src-tauri/target/release/bundle/macos/` | Raw `cargo tauri build` (`--debug`); `scripts/check_app_native.py` runs the debug one |
+| `build/app-target/aarch64-apple-darwin/release/bundle/macos/` | `scripts/run_app_selftest.py` (`ci-selftest`) |
+| `build/update-target/debug/bundle/macos/` | `scripts/check_app_update.py` |
+
+Find and clean them:
+
+```sh
+mdfind 'kMDItemFSName == "Agents Router Test.app"'   # every test bundle
+mdfind 'kMDItemFSName == "Agents Router.app"'        # release-named copies
+```
+
+A test build also leaves a login item and data. `<id>` is its bundle
+identifier: `io.github.watcharagorn.agents-router.test`, or
+`io.github.watcharagorn.agents-router.test.update-<pid>` from
+`scripts/check_app_update.py`.
+
+| What | Where |
+| --- | --- |
+| Login item | `~/Library/LaunchAgents/<id>.app.plist`, launchd label `<id>.app`. `Open at login` writes it. Keep the release's `io.github.watcharagorn.agents-router.app.plist` and agt share's `io.github.watcharagorn.agents-router.share.plist` |
+| Data folder | `~/Library/Application Support/Agents Router Test`. By default it also holds the bin folder (`cli-bin`), the agt home and settings (`agt-home`) and the private HOME (`home`) |
+| Overridden folders | Each folder given with a `--test-*` flag or `AGT_*` variable ([Test build folders](#test-build-folders)). Settings → General → `Test build` lists all four |
+| WebKit, caches, preferences | `~/Library/WebKit/<id>`, `~/Library/Caches/<id>`, `~/Library/Preferences/<id>.plist` |
+
+The scripts swap HOME, so their data folders and login items stay in their
+scratch folders. Their WebKit, cache and preference files still land in the
+real `~/Library`.
+
+Clean up in this order, so no login item opens a deleted bundle:
+
+1. In the running test build, open Settings → General. Note the folders under
+   `Test build`, turn off `Open at login`, click `Uninstall command line tool…`,
+   then quit. Uninstall removes `<bin folder>/agt` and puts back any `agt` it
+   replaced there.
+2. Without the test build, remove its login item by hand. `launchctl bootout`
+   fails when the item isn't loaded; go on to `rm`.
+
+   ```sh
+   ls ~/Library/LaunchAgents/io.github.watcharagorn.agents-router.test*.app.plist
+   label=io.github.watcharagorn.agents-router.test.app
+   launchctl bootout "gui/$(id -u)/$label"
+   rm -f ~/Library/LaunchAgents/"$label".plist
+   ```
+
+3. Delete the data folder. Delete an overridden folder only when the test build
+   made it; a folder you already had keeps your own files. A test build refuses
+   every production folder, so none of them is the release's.
+4. Delete `~/Library/WebKit/<id>` and `~/Library/Caches/<id>`, then run
+   `defaults delete <id>`.
+5. Move the bundle to the Trash, or `rm -rf` that one bundle path.
+
+Builds from before this rule are still named `Agents Router.app`: delete every
+release-named copy under `build/` and `macos/src-tauri/target/`, and keep the
+one in `/Applications`. Their update checks used
+`io.github.watcharagorn.agents-router.update-test-<pid>`: delete those WebKit
+and cache folders and preferences too.
+
 ## Release build (step 9)
 
 Run `scripts/build_app.sh` on an Apple Silicon Mac with Command Line Tools.
@@ -84,8 +254,9 @@ checked-hash bytecode is compiled before signing, so the bare
 Only `bin/python3` is shipped: Tauri dereferences resource symlinks, so keeping
 the `python` and `python3.13` aliases would copy the interpreter three times.
 Every Mach-O and nested bundle is signed ad hoc inside-out before Tauri runs.
-Only the generated `build/release.conf.json` adds the runtime resource; the base
-Tauri config stays usable for development without a staged runtime.
+Only the generated `build/release.conf.json` adds the runtime resource and the
+release name and identifier; the base Tauri config stays usable for development
+without a staged runtime.
 
 The script writes `dist/Agents-Router-<version>-arm64.dmg`. When
 `TAURI_SIGNING_PRIVATE_KEY` is set (a key path or the key value accepted by
@@ -105,8 +276,8 @@ darwin-aarch64 archive URL under the matching GitHub release tag.
 The build verifies the app and every nested Mach-O with strict codesign,
 requires arm64 and minimum OS <= 14.0, compares the shipped plugin bytes, and
 runs Python, native-module imports and `agt --version` in a private scratch
-home. It mounts the DMG read-only to check the app and `/Applications` link,
-then detaches it. A signed updater archive is extracted and checked the same
+home. It mounts the DMG read-only to check the app, its release identity in
+`Info.plist` and the `/Applications` link, then detaches it. A signed updater archive is extracted and checked the same
 way. Strict signature verification runs again after Python execution.
 `build/app-build-report.json` records every binary and apparent file sizes
 (symlinks counted once): shell <= 20 MiB, runtime <= 120 MiB, app <= 140 MiB,
@@ -140,10 +311,11 @@ is available. Failure diagnostics survive at the printed scratch path.
 `.github/workflows/release.yml` runs `app-build` on macos-15 arm64 with CLT
 selected, Rust 1.95.0 and cached repo-local tools/Cargo. PR builds need no signing
 secret. `app-build` tests contracts and isolated CLI operations, builds/mounts
-the DMG and uploads it, then runs the self-test and uploads its report or failure
+the DMG, installs the CLI from the app copied out of the read-only mounted DMG,
+uploads the DMG, then runs the self-test and uploads its report or failure
 diagnostics. The job has a 60-minute timeout; the self-test step has 25 minutes.
-The self-test replaces the build-directory app, so all release packaging and
-artifact uploads finish before it runs. A strict matching `vX.Y.Z` tag in
+The self-test builds `Agents Router Test.app`; all release packaging and
+artifact uploads still finish before it runs. A strict matching `vX.Y.Z` tag in
 `fizzory/agents-router` runs a separate signed build in `draft-release`, using only the
 `release` environment's signing secrets, and creates a draft with the DMG,
 versioned updater archive, `.sig` and `latest.json`. All external actions are
@@ -240,8 +412,9 @@ Only the Settings capability grants the following fixed-purpose commands;
 | `configRevert({...})` | `{entry,workspace?,userSaid?}`; agt's guarded log-entry revert (Activity) |
 | `openSettingsFile(file, line = 1)` | Only paths returned by a config read are accepted; default editor with VS Code's URL or the native `kpos` line parameter; unsupported editors may ignore position; failed open reveals in Finder |
 | `chooseWorkspace()` | Native folder dialog; canonical absolute path or null on cancel |
-| `getOpenAtLogin()` / `setOpenAtLogin(enabled)` | Boolean state; actual autostart plugin LaunchAgent, default off; label `io.github.watcharagorn.agents-router.app`, distinct from `.share` |
+| `getOpenAtLogin()` / `setOpenAtLogin(enabled)` | Boolean state; actual autostart plugin LaunchAgent, default off; label `<bundle identifier>.app` (release: `io.github.watcharagorn.agents-router.app`), distinct from `.share` |
 | `getSettingsTarget()` | Retained `{pane,runtime?,account?}` target so subscription/startup cannot lose navigation |
+| `testBuildPaths()` | `test_build_paths`: a test build's `[{key,path,display,source,origin}]`, `null` in the release ([Test build folders](#test-build-folders)) |
 
 Levels are `user`, `workspace`, `local`. Workspace/local writes require a folder
 and run there as cwd. A null workspace uses HOME as cwd, so launching the app
@@ -296,13 +469,17 @@ in the popover. `Check for Updates…` is in the popover's ⋯ menu, the native 
 menu and General. A manual check opens a sheet; only choosing the update starts
 the download. Download/install failures offer Retry. Key/signature failures
 default to `Open Releases Page`. The download has a progress sheet, and the app
-restarts after installation. The new runtime is installed on first launch and
+restarts after installation. Test builds (the `.test` identifier) check no
+feed; a manual check says so and offers the Releases page. The new runtime is installed on first launch and
 the bundled `agt update --no-package` succeeds once per version, recorded under
 `$AGT_APP_SUPPORT/updated/<version>` under the install lock. Failed refreshes
 remain eligible for retry.
 
-`scripts/check_app_update.py` builds a copied 0.17.0 and 0.17.1-test app with a
-throwaway key, serves a localhost feed, and exercises the actual updater and
+`scripts/check_app_update.py` builds a copied app at the current version and at
+the next patch's `-test` version (for 0.17.1, 0.17.2-test) with a
+throwaway key, writes both to the scratch folder's `versions.json` for the
+self-test (no version is spelled in `update_app.rs`, and the source gate keeps it
+so), serves a localhost feed, and exercises the actual updater and
 LaunchServices restart in a scratch Applications folder. It checks the running
 version, quarantine, strict code signature and once-per-version runtime/plugin
 refresh, then quits both instances and stops the server. All keys, changed
@@ -449,8 +626,10 @@ without running that CLI. An older bundled version requires Downgrade.
 `AGT_APPLICATIONS_DIRS` is an OS path-list (`:` on macOS), ordered system then
 user Applications. Production defaults are `/Applications` and `~/Applications`.
 Install refuses a translocated or read-only app and apps outside these folders;
-Move to Applications copies to the first writable destination, opens that copy
-and quits. It refuses to overwrite an existing app.
+Move to Applications copies to the first writable destination as
+`Agents Router.app` (a test build: under its own bundle name), opens that copy
+and quits. It refuses to overwrite an
+existing app.
 
 Settings alone grants `get_install_status` and `install_action`. The latter
 accepts a fixed action name and verifies the current dialog; it accepts no path,

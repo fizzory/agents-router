@@ -126,7 +126,10 @@ struct Flight {
 }
 struct Inner {
     launcher: PathBuf,
-    agt_home: Option<PathBuf>,
+    /// Set (`Some`) or removed (`None`) in every child's environment.
+    env: crate::app_paths::ChildEnv,
+    /// The working folder when a request names no workspace.
+    cwd: Option<PathBuf>,
     deadline: Duration,
     flights: Mutex<HashMap<Resource, Flight>>,
 }
@@ -135,8 +138,35 @@ pub struct AgtClient {
     inner: Arc<Inner>,
 }
 impl AgtClient {
+    /// Removes PYTHONPATH and PYTHONHOME, and passes AGT_HOME only when explicit.
     pub fn new(launcher: PathBuf, agt_home: Option<PathBuf>) -> Result<Self, ClientError> {
-        if !launcher.is_absolute() || agt_home.as_ref().is_some_and(|p| !p.is_absolute()) {
+        if agt_home.as_ref().is_some_and(|p| !p.is_absolute()) {
+            return Err(ClientError::InvalidRequest(
+                "launcher and explicit AGT_HOME must be absolute".into(),
+            ));
+        }
+        let env = vec![
+            ("AGT_HOME", agt_home.map(PathBuf::into_os_string)),
+            ("PYTHONPATH", None),
+            ("PYTHONHOME", None),
+        ];
+        Self::with_env(launcher, env, None)
+    }
+    /// The app's resolved folders, passed explicitly to every child.
+    pub fn with_env(
+        launcher: PathBuf,
+        env: crate::app_paths::ChildEnv,
+        cwd: Option<PathBuf>,
+    ) -> Result<Self, ClientError> {
+        if !launcher.is_absolute()
+            || cwd.as_ref().is_some_and(|p| !p.is_absolute())
+            || env.iter().any(|(name, value)| {
+                name.starts_with("AGT_")
+                    && value
+                        .as_ref()
+                        .is_some_and(|v| !PathBuf::from(v).is_absolute())
+            })
+        {
             return Err(ClientError::InvalidRequest(
                 "launcher and explicit AGT_HOME must be absolute".into(),
             ));
@@ -144,7 +174,8 @@ impl AgtClient {
         Ok(Self {
             inner: Arc::new(Inner {
                 launcher,
-                agt_home,
+                env,
+                cwd,
                 deadline: Duration::from_secs(30),
                 flights: Mutex::new(HashMap::new()),
             }),
@@ -251,15 +282,15 @@ impl AgtClient {
         command
             .args(request.argv())
             .kill_on_drop(true)
-            .stdin(std::process::Stdio::null())
-            .env_remove("AGT_HOME")
-            .env_remove("PYTHONPATH")
-            .env_remove("PYTHONHOME");
-        if let Some(path) = &request.workspace {
-            command.current_dir(path);
+            .stdin(std::process::Stdio::null());
+        for (name, value) in &self.inner.env {
+            match value {
+                Some(value) => command.env(name, value),
+                None => command.env_remove(name),
+            };
         }
-        if let Some(path) = &self.inner.agt_home {
-            command.env("AGT_HOME", path);
+        if let Some(path) = request.workspace.as_ref().or(self.inner.cwd.as_ref()) {
+            command.current_dir(path);
         }
         let output = timeout(self.inner.deadline, command.output())
             .await
@@ -554,6 +585,45 @@ mod tests {
             "accounts\nlist\nspace ' quote $(touch injected); `false`\n--json\n"
         );
         assert!(!dir.0.join("injected").exists());
+    }
+
+    #[tokio::test]
+    async fn explicit_environment_and_default_folder_reach_every_child() {
+        let dir = Scratch::new("client-env");
+        let launcher = dir.0.join("fake agt");
+        fs::write(&launcher, "#!/bin/sh\nset -eu\nprintf '%s|%s|%s|%s' \"$AGT_HOME\" \"$HOME\" \"${CLAUDE_CONFIG_DIR-unset}\" \"$(pwd -P)\" > \"$AGT_HOME/seen\"\nprintf '{\"runtimes\":[]}'\n").unwrap();
+        fs::set_permissions(&launcher, fs::Permissions::from_mode(0o700)).unwrap();
+        let home = dir.0.canonicalize().unwrap().join("private home");
+        fs::create_dir(&home).unwrap();
+        let env = vec![
+            ("AGT_HOME", Some(dir.0.clone().into_os_string())),
+            ("HOME", Some(home.clone().into_os_string())),
+            ("CLAUDE_CONFIG_DIR", None),
+        ];
+        let client = AgtClient::with_env(launcher, env, Some(home.clone())).unwrap();
+        let reply = client
+            .read(Request::new(CommandKind::AccountsList, None))
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        assert!(matches!(reply, ReadReply::Fresh { result: Ok(_), .. }));
+        assert_eq!(
+            fs::read_to_string(dir.0.join("seen")).unwrap(),
+            format!(
+                "{}|{}|unset|{}",
+                dir.0.display(),
+                home.display(),
+                home.display()
+            )
+        );
+        assert!(AgtClient::with_env(
+            dir.0.join("agt"),
+            vec![("AGT_HOME", Some("relative".into()))],
+            None
+        )
+        .is_err());
+        assert!(AgtClient::with_env(dir.0.join("agt"), vec![], Some("relative".into())).is_err());
     }
 
     #[tokio::test]
