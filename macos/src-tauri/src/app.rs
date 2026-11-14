@@ -1,5 +1,6 @@
 //! Long-lived native refresh/lifecycle and fixed-purpose popover commands.
 use crate::{
+    app_paths::{self, AppPaths},
     client::{AgtClient, ClientError, CommandOutcome, ReadReply, Request},
     install_app::{self, InstallController},
     models::{CommandKind, ConfigShow, Level, Snapshot, Usage},
@@ -46,73 +47,26 @@ pub struct PopoverSnapshot {
     pub fetched_at: Option<f64>,
     pub update_version: Option<String>,
 }
-struct Paths {
-    home: PathBuf,
-    launcher: PathBuf,
-    agt_home: PathBuf,
-    explicit_home: Option<PathBuf>,
-    settings: PathBuf,
-    handoffs: PathBuf,
-}
-impl Paths {
-    fn discover() -> Result<Self, String> {
-        #[cfg(debug_assertions)]
-        if std::env::args().any(|a| a == "--self-test-wake")
-            && std::env::var_os("AGT_APP_TEST_LAUNCHER").is_none()
-        {
-            return Err("self-test requires the isolated debug fixture launcher".into());
-        }
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .filter(|p| p.is_absolute())
-            .ok_or("HOME must be absolute")?;
-        let explicit_home = std::env::var_os("AGT_HOME").map(PathBuf::from);
-        let agt_home = explicit_home
-            .clone()
-            .unwrap_or_else(|| home.join(".agents-router"));
-        let settings = std::env::var_os("AGT_CONFIG_DIR")
-            .map(PathBuf::from)
-            .map(|p| p.join("settings.toml"))
-            .unwrap_or_else(|| {
-                if explicit_home.is_some() {
-                    agt_home.join("settings.toml")
-                } else {
-                    home.join(".agt/settings.toml")
-                }
-            });
-        let support = std::env::var_os("AGT_APP_SUPPORT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join("Library/Application Support/Agents Router"));
-        if !support.is_absolute() {
-            return Err("AGT_APP_SUPPORT must be absolute".into());
-        }
-        let launcher = support.join("bin/agt");
-        #[cfg(any(debug_assertions, feature = "ci-selftest"))]
-        let launcher = if let Some(fake) = std::env::var_os("AGT_APP_TEST_LAUNCHER") {
-            let fake = PathBuf::from(fake);
-            if !fake.is_absolute() || explicit_home.is_none() {
-                return Err(
-                    "debug launcher requires an absolute path and explicit isolated AGT_HOME"
-                        .into(),
-                );
-            }
-            log("debug fixture launcher override active");
-            fake
-        } else {
-            launcher
-        };
-        if !agt_home.is_absolute() || !settings.is_absolute() {
-            return Err("agt home and config paths must be absolute".into());
-        }
-        Ok(Self {
-            home: home.clone(),
-            launcher,
-            agt_home,
-            explicit_home,
-            settings,
-            handoffs: support.join("handoffs"),
-        })
+/// The stable launcher, or in debug and self-test builds the golden fixture CLI.
+fn launcher(paths: &AppPaths) -> Result<PathBuf, String> {
+    #[cfg(debug_assertions)]
+    if std::env::args().any(|a| a == "--self-test-wake")
+        && std::env::var_os("AGT_APP_TEST_LAUNCHER").is_none()
+    {
+        return Err("self-test requires the isolated debug fixture launcher".into());
     }
+    #[cfg(any(debug_assertions, feature = "ci-selftest"))]
+    if let Some(fake) = std::env::var_os("AGT_APP_TEST_LAUNCHER") {
+        let fake = PathBuf::from(fake);
+        if !fake.is_absolute() || paths.agt_home.source == app_paths::Source::Default {
+            return Err(
+                "debug launcher requires an absolute path and explicit isolated AGT_HOME".into(),
+            );
+        }
+        log("debug fixture launcher override active");
+        return Ok(fake);
+    }
+    Ok(paths.launcher())
 }
 pub struct AppState {
     client: AgtClient,
@@ -645,6 +599,11 @@ async fn choose_workspace(app: tauri::AppHandle) -> Result<Option<PathBuf>, Stri
         })
         .transpose()
 }
+/// Settings → General's Test build rows; `null` in the release.
+#[tauri::command]
+fn test_build_paths(paths: State<'_, AppPaths>) -> Option<Vec<app_paths::Row>> {
+    paths.rows()
+}
 #[tauri::command]
 fn get_open_at_login(app: tauri::AppHandle) -> Result<bool, String> {
     use tauri_plugin_autostart::ManagerExt;
@@ -851,15 +810,74 @@ pub fn set_pending_update(app: &tauri::AppHandle, version: Option<String>) {
     });
 }
 
+/// Startup refusals (a release given --test-* flags, an unsafe test folder) end
+/// the launch with a message instead of a crash report.
+fn refuse(message: String) -> ! {
+    eprintln!("agt-app {:.3} refused: {message}", now());
+    std::process::exit(2);
+}
+/// Restart after an update. A test build carries its chosen folders as flags,
+/// including ones that came from environment variables LaunchServices drops.
+pub fn restart(app: &tauri::AppHandle) -> ! {
+    let relaunch = app.state::<AppPaths>().relaunch_args();
+    if relaunch.is_empty() {
+        app.restart();
+    }
+    let mut env = app.env();
+    let args = env.args_os.split_off(env.args_os.len().min(1));
+    env.args_os
+        .extend(app_paths::relaunch_argv(&args, &relaunch));
+    log(&format!(
+        "restarting with {} test-build arguments",
+        relaunch.len()
+    ));
+    // Like Tauri's own restart: clean up and relaunch on the main thread only.
+    if MainThreadMarker::new().is_some() {
+        app.cleanup_before_exit();
+        tauri::process::restart(&env);
+    }
+    let handle = app.clone();
+    if let Err(error) = app.run_on_main_thread(move || {
+        handle.cleanup_before_exit();
+        tauri::process::restart(&env)
+    }) {
+        log(&format!("main-thread restart failed: {error}"));
+        app.restart();
+    }
+    loop {
+        std::thread::sleep(Duration::MAX);
+    }
+}
+
 pub fn run() {
-    let paths = Paths::discover().expect("valid app paths");
-    let client = AgtClient::new(paths.launcher.clone(), paths.explicit_home.clone())
-        .expect("absolute launcher");
-    let settings = SettingsCore::new(client.clone(), paths.home.clone());
+    // The identifier embedded in the bundle decides release or test build;
+    // resolve every folder from it before any filesystem activity.
+    let context = tauri::generate_context!();
+    let identifier = context.config().identifier.clone();
+    let paths = AppPaths::from_process(&identifier).unwrap_or_else(|e| refuse(e));
+    if paths.test {
+        paths.prepare().unwrap_or_else(|e| refuse(e));
+    }
+    let launcher = launcher(&paths).unwrap_or_else(|e| refuse(e));
+    let client = AgtClient::with_env(
+        launcher.clone(),
+        paths.child_env(),
+        paths.test.then(|| paths.child_home()),
+    )
+    .expect("absolute launcher");
+    let settings = SettingsCore::new(client.clone(), paths.child_home());
+    let terminal =
+        TerminalLauncher::new(launcher, paths.handoffs()).expect("absolute handoff path");
+    let terminal = if paths.test {
+        terminal
+            .starting_in(paths.child_home())
+            .expect("absolute private HOME")
+    } else {
+        terminal
+    };
     let state = AppState {
         client,
-        terminal: TerminalLauncher::new(paths.launcher, paths.handoffs)
-            .expect("absolute handoff path"),
+        terminal,
         snapshot: Mutex::new(PopoverSnapshot {
             reading: true,
             ..Default::default()
@@ -867,6 +885,15 @@ pub fn run() {
         watcher: Mutex::new(None),
         quitting: AtomicBool::new(false),
         settings_target: Mutex::new(serde_json::json!({"pane":"general"})),
+    };
+    // The login item follows the bundle identifier, so a test build never replaces
+    // the release's, and it reopens a test build with its chosen folders.
+    let autostart = settings::autostart_plugin(&identifier, &paths.relaunch_args());
+    let installer = InstallController::new(&paths).unwrap_or_else(|e| refuse(e));
+    let watch = WatchPaths {
+        state: paths.agt_home.path.join("state"),
+        jobs: paths.agt_home.path.join("jobs"),
+        settings: vec![paths.settings_file()],
     };
     let builder = tauri::Builder::default();
     #[cfg(feature = "ci-selftest")]
@@ -884,10 +911,11 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(update_app::UpdateController::default())
-        .plugin(settings::autostart_plugin())
+        .plugin(autostart)
         .manage(state)
         .manage(settings)
-        .manage(InstallController::new().expect("valid install paths"))
+        .manage(installer)
+        .manage(paths)
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             install_app::get_install_status,
@@ -928,6 +956,7 @@ pub fn run() {
             check_for_updates,
             update_app::get_update_status,
             update_app::update_action,
+            test_build_paths,
             quit_app
         ])
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -1003,6 +1032,11 @@ pub fn run() {
         })
         .setup(move |app| {
             let mtm = MainThreadMarker::new().expect("setup on main thread");
+            // Here, not before the builder: a second launch exits in the
+            // single-instance plugin first, so only the running app logs it.
+            if app.state::<AppPaths>().test {
+                log(&app.state::<AppPaths>().describe());
+            }
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             native::create_panel(app, mtm)?;
             TrayIconBuilder::with_id(TRAY_ID)
@@ -1037,14 +1071,17 @@ pub fn run() {
                 &app.state::<AppState>().snapshot.lock().expect("snapshot"),
             );
             let handle = app.handle().clone();
-            let watcher = SettingsWatcher::start(
-                WatchPaths {
-                    state: paths.agt_home.join("state"),
-                    jobs: paths.agt_home.join("jobs"),
-                    settings: vec![paths.settings],
-                },
-                move || request_usage(&handle, false, "debounced"),
-            )?;
+            let watcher =
+                SettingsWatcher::start(watch, move || request_usage(&handle, false, "debounced"))?;
+            if app.state::<AppPaths>().test {
+                // Rewrite an enabled login item so it reopens with this launch's folders.
+                use tauri_plugin_autostart::ManagerExt;
+                if app.autolaunch().is_enabled().unwrap_or(false) {
+                    if let Err(error) = app.autolaunch().enable() {
+                        log(&format!("login item refresh failed: {error}"));
+                    }
+                }
+            }
             native::observe_wake(mtm, watcher.wake_trigger());
             *app.state::<AppState>().watcher.lock().expect("watcher") = Some(watcher);
             request_usage(app.handle(), true, "startup");
@@ -1074,7 +1111,7 @@ pub fn run() {
             log("ready activation=Accessory left-click=popover right-click=native-menu");
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("could not build Agents Router");
     app.run(|app, event| match event {
         tauri::RunEvent::ExitRequested { api, code, .. }

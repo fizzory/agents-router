@@ -29,8 +29,9 @@ pub fn configure_self_test() {
     // isolation before Paths::discover or any CLI/installer code on EVERY launch.
     for (name, path) in [
         ("HOME", root.join("home")),
-        ("AGT_HOME", root.join("home/.agents-router")),
-        ("AGT_CONFIG_DIR", root.join("home/.agents-router")),
+        // Not home/.agents-router: a test build refuses the release's agt home.
+        ("AGT_HOME", root.join("home/agt-home")),
+        ("AGT_CONFIG_DIR", root.join("home/agt-home")),
         ("AGT_APP_SUPPORT", root.join("support")),
         ("AGT_BIN_DIR", root.join("public-bin")),
         ("AGT_APPLICATIONS_DIRS", root.join("Applications")),
@@ -79,6 +80,12 @@ fn publish(app: &tauri::AppHandle, dialog: Option<Dialog>, foreground: bool) {
 pub fn request(app: &tauri::AppHandle, manual: bool) {
     #[cfg(any(debug_assertions, feature = "ci-selftest"))]
     if std::env::var_os("AGT_APP_TEST_LAUNCHER").is_some() {
+        return;
+    }
+    if !update::checks_feed(&app.config().identifier) {
+        if manual {
+            publish(app, Some(Dialog::test_build()), true);
+        }
         return;
     }
     let c = app.state::<UpdateController>();
@@ -141,6 +148,9 @@ pub fn start(app: &tauri::AppHandle) {
         self_test(app);
         return;
     }
+    if !update::checks_feed(&app.config().identifier) {
+        return; // A test build checks no feed; a manual check explains why.
+    }
     request(app, false);
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -178,8 +188,8 @@ async fn install(app: &tauri::AppHandle) -> Result<(), (Stage, tauri_plugin_upda
         .map_err(|e| (Stage::Download, e))?;
     publish(app, Some(Dialog::progress("Installing update…")), true);
     found.install(bytes).map_err(|e| (Stage::Install, e))?;
-    // Tauri's process plugin uses the same restart path and preserves launch args.
-    app.restart();
+    // Tauri's restart path; a test build also carries its chosen folders as flags.
+    app::restart(app);
 }
 #[tauri::command]
 pub fn get_update_status(state: State<'_, UpdateController>) -> UpdateStatus {
@@ -250,26 +260,33 @@ fn self_test(app: &tauri::AppHandle) {
         let result = async {
             let root = std::path::PathBuf::from(std::env::var_os("AGT_UPDATE_TEST_ROOT").ok_or("missing scratch root")?);
             if !root.is_absolute() || !root.join("test-only").is_file() { return Err("invalid scratch root".into()); }
+            // scripts/check_app_update.py picks both versions (this checkout's and the next
+            // patch's test build) and writes them here; no version is spelled in this file.
+            let versions: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("versions.json")).map_err(|e| format!("versions.json: {e}"))?).map_err(|e| format!("versions.json: {e}"))?;
+            let (from, to) = match (versions["from"].as_str(), versions["to"].as_str()) {
+                (Some(from), Some(to)) if !from.is_empty() && from != to => (from.to_owned(), to.to_owned()),
+                _ => return Err("versions.json needs two different versions, from and to".into()),
+            };
             let c = app.state::<InstallController>();
             if c.paths.support != root.join("support") || c.paths.home != root.join("home") { return Err("nonisolated update test".into()); }
             for _ in 0..600 {
                 let v = app.package_info().version.to_string();
-                if c.paths.version().as_deref() == Some(&v) && (v == "0.17.0" || c.paths.support.join("updated").join(&v).is_file()) { break; }
+                if c.paths.version().as_deref() == Some(&v) && (v == from || c.paths.support.join("updated").join(&v).is_file()) { break; }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
             c.settled().await;
             let version = app.package_info().version.to_string();
             if c.paths.version().as_deref() != Some(&version) { return Err("runtime not refreshed".into()); }
-            if version == "0.17.0" {
+            if version == from {
                 let found = app.updater_builder().timeout(Duration::from_secs(30)).build().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?.ok_or("no test update")?;
-                if found.version != "0.17.1-test" { return Err("unexpected test version".into()); }
+                if found.version != to { return Err(format!("unexpected test version {}, expected {to}", found.version)); }
                 *app.state::<UpdateController>().pending.lock().unwrap() = Some(found);
                 install(&app).await.map_err(|(_, e)| e.to_string())?;
-            } else if version == "0.17.1-test" {
+            } else if version == to {
                 // A second attempt must read the refresh record and do no work.
                 crate::install::refresh_plugins(&c.paths).await?;
                 std::fs::write(root.join("relaunch.json"), serde_json::to_vec(&serde_json::json!({"version":version,"runtime":c.paths.version(),"refresh_record":c.paths.support.join("updated").join(&version).is_file()})).unwrap()).map_err(|e| e.to_string())?;
-            } else { return Err("unexpected running version".into()); }
+            } else { return Err(format!("unexpected running version {version}, expected {from} or {to}")); }
             Ok::<(), String>(())
         }.await;
         if let Err(error) = result {

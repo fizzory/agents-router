@@ -22,9 +22,9 @@ Which workspace you're in:
 
 - inside a git checkout: the nearest folder with `.agt/` between the current folder and the checkout's root, else the root. agt never looks above the root, so a worktree, a submodule or a nested clone never uses an outer repo's settings;
 - outside git: the nearest folder with `.agt/` at or above the current one, else the current folder;
-- your home folder is never a workspace (its `.agt/` is your user level), so there only your user file counts.
+- your home folder is never a workspace (its `.agt/` is your user level), so there only your user file counts. Nor is a folder `AGT_EXCLUDE_HOMES` lists, under any spelling of it (`/users/me` for `/Users/me` on a case-insensitive volume). On a filesystem that reports inode 0 for folders, such as FAT, a listed folder matches by its path alone.
 
-A worktree without its own `settings.local.toml` reads the main checkout's, so your own picks follow you into it. agt never creates `.agt/` on its own; only `agt config set` run in a workspace does.
+A worktree without its own `settings.local.toml` reads the main checkout's, so your own picks follow you into it, unless the main checkout is a folder `AGT_EXCLUDE_HOMES` lists. agt never creates `.agt/` on its own; only `agt config set` run in a workspace does.
 
 Some keys are machine-wide and count only in your user file: `primary`, `binary`, the five [unhealthy-account settings](#unhealthy-accounts) and the account tables (`[[claude.accounts]]` and the like). A workspace file that sets one is reported with its file and line (`agt config show` and `agt doctor` list it), and the value is ignored. `[share]` is read from your user file only, for now: a repo's own share settings come with sharing a repo's items. A workspace can still pick which of your accounts its jobs use, by name, usually in its local file:
 
@@ -541,6 +541,32 @@ Your settings are in the files under [Settings files](#settings-files), not here
 
 Job records and generated files contain your prompts, results and MCP server settings. They stay on your machine and are created with owner-only permissions where the OS supports it.
 
+### Test build folders
+
+A test build (`Agents Router Test.app`, any bundle identifier other than the release's) never uses the release's folders. Each folder takes a launch flag, then an environment variable, then a default:
+
+| Folder | Flag | Variable | Default |
+|---|---|---|---|
+| App support | `--test-app-support` | `AGT_APP_SUPPORT` | `~/Library/Application Support/Agents Router Test` |
+| Bin folder (the public `agt` link) | `--test-bin-dir` | `AGT_BIN_DIR` | `<app support>/cli-bin` |
+| agt home (jobs, state, account folders) | `--test-agt-home` | `AGT_HOME` | `<app support>/agt-home` |
+| Settings folder | `--test-config-dir` | `AGT_CONFIG_DIR` | the agt home |
+
+```sh
+open -n "/path/to/Agents Router Test.app" --args --test-app-support /tmp/agt-test
+open -n --env AGT_APP_SUPPORT=/tmp/agt-test "/path/to/Agents Router Test.app"
+"/path/to/Agents Router Test.app/Contents/MacOS/agents-router" --test-agt-home /tmp/agt-home
+```
+
+- Folders must be absolute, without `.` or `..`. A folder that is, contains or sits inside `~/.local/bin`, `~/Library/Application Support/Agents Router`, `~/.agents-router` or `~/.agt`, also through a symlink, stops the launch with a message. `~` is checked twice: as the HOME the app was launched with and as your account's home folder from the user database, so a changed `HOME` can't move the check.
+- agt run by the test build, its Terminal handoffs, hooks and MCP servers get all four folders and a private HOME, `<app support>/home`, so they never see your real Claude, Codex or Gemini setup.
+- They also get `AGT_EXCLUDE_HOMES` with the private HOME and your own, so agt never reads your `~/.agt/settings.toml` as a workspace's settings, also when `~/.git` exists. A folder you pick as a Settings workspace keeps working as one.
+- Move to Applications, a restart and **Open at login** reopen the app with the chosen folders as flags, also those that came from variables.
+- A running test build ignores a second launch's folders: quit it before changing them.
+- Settings → General → **Test build** lists the folders and where each came from.
+
+The release honours `AGT_APP_SUPPORT`, `AGT_BIN_DIR`, `AGT_HOME` and `AGT_CONFIG_DIR` as before and refuses the `--test-*` flags.
+
 ## Environment variables
 
 | Variable | Effect |
@@ -549,6 +575,7 @@ Job records and generated files contain your prompts, results and MCP server set
 | `AGT_CONFIG_DIR` | The folder of your user `settings.toml` (default `~/.agt`) |
 | `AGT_APP_SUPPORT` | The app's runtime and installer folder (default `~/Library/Application Support/Agents Router`) |
 | `AGT_BIN_DIR` | The folder for the app's public `agt` link (default `~/.local/bin`) |
+| `AGT_EXCLUDE_HOMES` | More folders that, like your home folder, are never a workspace, as a `:` list (`;` on Windows) of absolute folders. Outside a checkout, the workspace search stops at them. A listed folder matches as the same folder on disk, whatever its spelling (by its path alone where the filesystem reports inode 0), and a worktree of a checkout there never reads that checkout's `settings.local.toml`. The app's test build sets it to its private HOME and your own |
 | `AGT_DEPTH` | Set by Agents Router in workers; used to refuse nested delegation |
 | `AGT_LAUNCHCTL`, `AGT_OSASCRIPT` | A JSON list to run instead of `launchctl` or `osascript` (the tests use fakes). Without them, agt never uses the real ones for an agt home in a temp folder |
 | `CLAUDE_CONFIG_DIR` | Default for `[claude] primary` when the config doesn't set it |

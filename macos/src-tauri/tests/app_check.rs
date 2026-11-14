@@ -185,3 +185,139 @@ fn app_mode_installs_only_the_supplied_scratch_bundles_runtime() {
     assert!(!root.0.join("home/.local").exists());
     assert!(!root.0.join("home/Library").exists());
 }
+
+fn resolve(root: &Scratch, identifier: &str, args: &[&str]) -> Output {
+    root.command()
+        .arg("--resolve-paths")
+        .arg(identifier)
+        .args(args)
+        .output()
+        .unwrap()
+}
+const RELEASE: &str = "io.github.watcharagorn.agents-router";
+const TEST: &str = "io.github.watcharagorn.agents-router.test";
+
+#[test]
+fn release_refuses_test_flags_and_keeps_its_environment() {
+    let root = Scratch::new();
+    let refused = resolve(&root, RELEASE, &["--test-app-support", "/tmp/agt-test"]);
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&refused.stderr)
+        .contains("--test-app-support works only in Agents Router Test.app"));
+    let release = resolve(&root, RELEASE, &[]);
+    assert!(
+        release.status.success(),
+        "{}",
+        String::from_utf8_lossy(&release.stderr)
+    );
+    let doc: serde_json::Value = serde_json::from_slice(&release.stdout).unwrap();
+    assert_eq!(doc["test"], false);
+    assert!(doc["rows"].is_null());
+    assert_eq!(
+        doc["launcher"],
+        root.0.join("support/bin/agt").to_str().unwrap()
+    );
+    assert_eq!(
+        doc["settings"],
+        root.0.join("agt/settings.toml").to_str().unwrap()
+    );
+    assert_eq!(
+        doc["child_env"]["AGT_HOME"],
+        root.0.join("agt").to_str().unwrap()
+    );
+    assert!(doc["child_env"].get("HOME").is_none());
+    assert!(doc["child_env"].get("AGT_EXCLUDE_HOMES").is_none());
+    assert!(doc["account_home"].is_null());
+    assert_eq!(doc["relaunch"], serde_json::json!([]));
+    // Resolving creates nothing.
+    assert_eq!(fs::read_dir(&root.0).unwrap().count(), 1);
+}
+
+#[test]
+fn test_build_takes_flag_over_env_over_default_and_refuses_production_folders() {
+    let root = Scratch::new();
+    let flag_home = root.0.join("flag agt home");
+    let result = resolve(
+        &root,
+        TEST,
+        &["--test-agt-home", flag_home.to_str().unwrap()],
+    );
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let doc: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(doc["test"], true);
+    let rows = doc["rows"].as_array().unwrap();
+    let row = |key: &str| rows.iter().find(|r| r["key"] == key).unwrap().clone();
+    assert_eq!(row("app_support")["source"], "env");
+    assert_eq!(row("app_support")["origin"], "AGT_APP_SUPPORT");
+    assert_eq!(row("bin_dir")["path"], root.0.join("bin").to_str().unwrap());
+    assert_eq!(row("agt_home")["source"], "flag");
+    assert_eq!(row("agt_home")["origin"], "--test-agt-home");
+    assert_eq!(row("config_dir")["source"], "default");
+    assert_eq!(row("config_dir")["path"], flag_home.to_str().unwrap());
+    let private = root.0.join("support/home");
+    assert_eq!(doc["child_home"], private.to_str().unwrap());
+    assert_eq!(doc["child_env"]["HOME"], private.to_str().unwrap());
+    assert_eq!(
+        doc["child_env"]["AGT_CONFIG_DIR"],
+        flag_home.to_str().unwrap()
+    );
+    assert!(doc["child_env"]["CLAUDE_CONFIG_DIR"].is_null());
+    // The account's home comes from the user database, never from HOME.
+    let account = agents_router_app::app_paths::account_home().unwrap();
+    assert_eq!(doc["account_home"], account.to_str().unwrap());
+    assert_ne!(account, root.0.join("home"));
+    let physical = agents_router_app::app_paths::physical(&account).unwrap();
+    assert_eq!(
+        doc["child_env"]["AGT_EXCLUDE_HOMES"],
+        format!(
+            "{}:{}:{}",
+            private.display(),
+            root.0.join("home").display(),
+            physical.display()
+        )
+    );
+    assert_eq!(doc["relaunch"].as_array().unwrap().len(), 6);
+    let swapped = root
+        .command()
+        .env("CFFIXED_USER_HOME", root.0.join("home"))
+        .arg("--resolve-paths")
+        .arg(TEST)
+        .output()
+        .unwrap();
+    assert!(swapped.status.success());
+    let doc: serde_json::Value = serde_json::from_slice(&swapped.stdout).unwrap();
+    assert_eq!(doc["account_home"], account.to_str().unwrap());
+    // The account's own production folders are refused whatever HOME says.
+    for path in [physical.join(".agents-router"), physical.join(".agt/x")] {
+        let refused = resolve(&root, TEST, &["--test-agt-home", path.to_str().unwrap()]);
+        assert_eq!(refused.status.code(), Some(1), "{}", path.display());
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("overlaps the release's"));
+    }
+    for (name, path) in [
+        ("AGT_HOME", root.0.join("home/.agents-router")),
+        ("AGT_BIN_DIR", root.0.join("home/.local/bin")),
+        (
+            "AGT_APP_SUPPORT",
+            root.0
+                .join("home/Library/Application Support/Agents Router"),
+        ),
+    ] {
+        let refused = root
+            .command()
+            .env(name, &path)
+            .arg("--resolve-paths")
+            .arg(TEST)
+            .output()
+            .unwrap();
+        assert_eq!(refused.status.code(), Some(1), "{name}");
+        assert!(
+            String::from_utf8_lossy(&refused.stderr).contains("overlaps the release's"),
+            "{name}"
+        );
+    }
+    assert_eq!(fs::read_dir(&root.0).unwrap().count(), 1);
+}

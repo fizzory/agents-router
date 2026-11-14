@@ -48,6 +48,10 @@ The tests use fake CLIs (`tests/fake_claude.py`, `fake_codex.py`, `fake_agy.py`,
 
 The setup guide has one source, `src/agents_router/guides/setup.md`, which `agt guide setup` prints. After editing it, run `python3 scripts/sync_guide.py` to copy it into `skills/agents-router-setup/SKILL.md`; `tests/test_guide.py` fails while the two differ. The procedure for working here (branch, docs to move, tests, review, release) is the project skill `.claude/skills/agt-maintainer/` (Codex reads it through `.codex/skills/agt-maintainer`).
 
+### macOS app build names
+
+Only `scripts/build_app.sh` makes `Agents Router.app`, inside the DMG in `dist/`, and it removes its intermediate copy under `build/`. Every other build (`cargo tauri dev` or `build`, the self-test, the check scripts) is `Agents Router Test.app` with the identifier `io.github.watcharagorn.agents-router.test`. Where test bundles live, and how to clean them with their data folders and login item: [macos/README.md](macos/README.md#test-and-release-builds).
+
 ### Live checks in the sandbox
 
 Live checks run real jobs, so they use quota and need the user's OK. Run them only in the sandbox, never against the real setup. The one exception is Kiro: the sandbox's `HOME` swap logs Kiro out, so Kiro is checked on the real Kiro login with a scratch `AGT_HOME`, as `.claude/skills/agt-maintainer/references/live-check.md` §7 describes:

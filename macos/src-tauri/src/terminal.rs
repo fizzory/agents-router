@@ -51,6 +51,10 @@ pub struct Handoff {
 pub struct TerminalLauncher {
     launcher: PathBuf,
     directory: PathBuf,
+    /// A test build's private HOME: handoffs start in the HOME agt sees, as the
+    /// app's own agt calls do. The launcher's AGT_EXCLUDE_HOMES, not this
+    /// folder, keeps the person's own settings out. The release has none.
+    start: Option<PathBuf>,
 }
 impl TerminalLauncher {
     pub fn new(launcher: PathBuf, directory: PathBuf) -> io::Result<Self> {
@@ -63,7 +67,18 @@ impl TerminalLauncher {
         Ok(Self {
             launcher,
             directory,
+            start: None,
         })
+    }
+    pub fn starting_in(mut self, folder: PathBuf) -> io::Result<Self> {
+        if !folder.is_absolute() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Terminal start folder must be absolute",
+            ));
+        }
+        self.start = Some(folder);
+        Ok(self)
     }
     pub fn prepare(&self, action: &TerminalAction) -> io::Result<Handoff> {
         let launcher = self
@@ -71,7 +86,16 @@ impl TerminalLauncher {
             .to_str()
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "launcher is not UTF-8"))?;
         let arguments = action.arguments();
-        if launcher.contains('\0') || arguments.iter().any(|arg| arg.contains('\0')) {
+        let start = match &self.start {
+            Some(folder) => Some(folder.to_str().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "start folder is not UTF-8")
+            })?),
+            None => None,
+        };
+        if launcher.contains('\0')
+            || start.is_some_and(|s| s.contains('\0'))
+            || arguments.iter().any(|arg| arg.contains('\0'))
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Terminal argument contains NUL",
@@ -93,11 +117,18 @@ impl TerminalLauncher {
                 "handoff directory must be private (0700) and not a symlink",
             ));
         }
-        let copy_command = std::iter::once(launcher)
+        let command = std::iter::once(launcher)
             .chain(arguments.iter().map(String::as_str))
             .map(posix_quote)
             .collect::<Vec<_>>()
             .join(" ");
+        let (cd, copy_command) = match start {
+            Some(folder) => (
+                format!("cd -- {} || exit 1\n", posix_quote(folder)),
+                format!("cd {} && {command}", posix_quote(folder)),
+            ),
+            None => (String::new(), command.clone()),
+        };
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -116,7 +147,7 @@ impl TerminalLauncher {
         let result = (|| {
             writeln!(
                 file,
-                "#!/bin/sh\n/bin/rm -f -- \"$0\" || exit 1\nexec {copy_command}"
+                "#!/bin/sh\n/bin/rm -f -- \"$0\" || exit 1\n{cd}exec {command}"
             )?;
             file.sync_all()
         })();
@@ -220,6 +251,60 @@ pub(crate) mod tests {
         );
         assert!(!temp.0.join("injected").exists());
         assert_eq!(posix_quote(""), "''");
+    }
+    #[test]
+    fn test_build_handoffs_start_in_the_private_home() {
+        let temp = Scratch::new("terminal-start");
+        let base = temp.0.canonicalize().unwrap();
+        let launcher = base.join("agt");
+        let result = base.join("cwd");
+        fs::write(
+            &launcher,
+            format!(
+                "#!/bin/sh\npwd -P > {}\n",
+                posix_quote(result.to_str().unwrap())
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&launcher, fs::Permissions::from_mode(0o700)).unwrap();
+        let private = base.join("private home");
+        let person = base.join("person");
+        fs::create_dir_all(&private).unwrap();
+        fs::create_dir_all(person.join(".agt")).unwrap();
+        let release = TerminalLauncher::new(launcher.clone(), base.join("handoffs")).unwrap();
+        let test = TerminalLauncher::new(launcher.clone(), base.join("handoffs"))
+            .unwrap()
+            .starting_in(private.clone())
+            .unwrap();
+        let plain = release.prepare(&TerminalAction::Setup).unwrap();
+        assert_eq!(
+            plain.copy_command,
+            format!("{} 'setup'", posix_quote(launcher.to_str().unwrap()))
+        );
+        assert!(!fs::read_to_string(&plain.path).unwrap().contains("cd "));
+        let handoff = test.prepare(&TerminalAction::Setup).unwrap();
+        assert_eq!(
+            handoff.copy_command,
+            format!(
+                "cd {} && {} 'setup'",
+                posix_quote(private.to_str().unwrap()),
+                posix_quote(launcher.to_str().unwrap())
+            )
+        );
+        // Terminal opens in the person's own HOME; the handoff starts in the private one.
+        assert!(std::process::Command::new(&handoff.path)
+            .current_dir(&person)
+            .status()
+            .unwrap()
+            .success());
+        assert_eq!(
+            fs::read_to_string(&result).unwrap().trim_end(),
+            private.to_str().unwrap()
+        );
+        assert!(TerminalLauncher::new(launcher, base.join("handoffs"))
+            .unwrap()
+            .starting_in(PathBuf::from("relative"))
+            .is_err());
     }
     #[test]
     fn refuses_public_or_symlinked_handoff_directory() {

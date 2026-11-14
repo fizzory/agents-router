@@ -41,6 +41,7 @@
     "allow-install-action",
     "allow-check-for-updates",
     "allow-get-update-status",
-    "allow-update-action"
+    "allow-update-action",
+    "allow-test-build-paths"
   ]
 }

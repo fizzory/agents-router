@@ -116,6 +116,38 @@ class ShowTests(ConfigBase):
                                                 f"  user   {ui.short_path(self.user_file)}   not there yet"])
 
 
+class ExcludedHomeTests(ConfigBase):
+    """The app's test build: a private HOME, and the account's own home in AGT_EXCLUDE_HOMES."""
+
+    def test_settings_writes_and_reads_below_an_excluded_home_never_use_its_agt_folder(self):
+        person = self.root / "person"
+        (person / ".agt").mkdir(parents=True)
+        theirs = person / ".agt" / "settings.toml"
+        theirs.write_text("[codex]\nmax_jobs = 7\n", encoding="utf-8")
+        folder = person / "notes"
+        folder.mkdir()
+        exclude = {"AGT_EXCLUDE_HOMES": str(person)}
+        os.chdir(folder)
+        code, report = self.json("config", "set", "subagents.prefer_roles", "false", "--workspace", env=exclude)
+        self.assertEqual((code, report["level"]), (0, "workspace"))
+        self.assertEqual(self.text(folder / ".agt" / "settings.toml"), "[subagents]\nprefer_roles = false\n")
+        self.assertEqual(self.text(theirs), "[codex]\nmax_jobs = 7\n")
+        code, shown = self.json("config", "show", env=exclude)
+        self.assertEqual((code, shown["workspace"]), (0, str(folder.resolve())))
+        self.assertNotIn(str(theirs), [entry["file"] for entry in shown["files"]])
+        (person / ".git").mkdir()  # a dotfiles checkout at that home
+        (folder / ".agt" / "settings.toml").unlink()
+        (folder / ".agt").rmdir()
+        for cwd in (person, folder):
+            os.chdir(cwd)
+            code, shown = self.json("config", "show", env=exclude)
+            self.assertEqual((code, shown["workspace"]), (0, None), cwd)
+            self.assertEqual([entry["file"] for entry in shown["files"]], [str(self.user_file)], cwd)
+            code, _, _ = self.agt("config", "set", "subagents.prefer_roles", "false", "--workspace", env=exclude)
+            self.assertNotEqual(code, 0)
+            self.assertEqual(self.text(theirs), "[codex]\nmax_jobs = 7\n")
+
+
 class SubagentsTests(ConfigBase):
     def test_show_set_and_unset_never_look_up_a_subagents_runtime(self):
         code, shown = self.json("config", "show")

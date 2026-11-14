@@ -40,6 +40,7 @@ fn main() {
             "check_for_updates",
             "get_update_status",
             "update_action",
+            "test_build_paths",
             "quit_app",
         ]),
     ))

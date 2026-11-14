@@ -6,11 +6,21 @@ use crate::{
 use serde_json::{json, Value};
 use std::{collections::HashSet, path::PathBuf, sync::Mutex};
 
-pub const AUTOSTART_LABEL: &str = "io.github.watcharagorn.agents-router.app";
+/// The login item's LaunchAgent label: the release keeps
+/// `io.github.watcharagorn.agents-router.app`, a test build gets its own.
+pub fn autostart_label(identifier: &str) -> String {
+    format!("{identifier}.app")
+}
 
-pub fn autostart_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+/// `relaunch` carries a test build's chosen folders into the LaunchAgent; the
+/// release passes none. auto-launch writes each argument into the plist verbatim.
+pub fn autostart_plugin<R: tauri::Runtime>(
+    identifier: &str,
+    relaunch: &[String],
+) -> tauri::plugin::TauriPlugin<R> {
     tauri_plugin_autostart::Builder::new()
-        .app_name(AUTOSTART_LABEL)
+        .app_name(autostart_label(identifier))
+        .args(relaunch.iter().map(|a| crate::app_paths::plist_escape(a)))
         .macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent)
         .build()
 }
@@ -287,18 +297,24 @@ mod tests {
         };
         assert_eq!(std::env::var_os("HOME"), Some(home.clone()));
         use tauri_plugin_autostart::ManagerExt;
+        let label = autostart_label(crate::update::RELEASE_IDENTIFIER);
+        assert_eq!(label, "io.github.watcharagorn.agents-router.app");
+        assert_eq!(
+            autostart_label("io.github.watcharagorn.agents-router.test"),
+            "io.github.watcharagorn.agents-router.test.app"
+        );
         let app = tauri::test::mock_builder()
-            .plugin(autostart_plugin())
+            .plugin(autostart_plugin(crate::update::RELEASE_IDENTIFIER, &[]))
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
         let plist = PathBuf::from(home)
             .join("Library/LaunchAgents")
-            .join(format!("{AUTOSTART_LABEL}.plist"));
+            .join(format!("{label}.plist"));
         assert!(!app.autolaunch().is_enabled().unwrap());
         app.autolaunch().enable().unwrap();
         assert!(app.autolaunch().is_enabled().unwrap());
         let data = fs::read_to_string(&plist).unwrap();
-        assert!(data.contains(&format!("<string>{AUTOSTART_LABEL}</string>")));
+        assert!(data.contains(&format!("<string>{label}</string>")));
         assert!(!data.contains("agents-router.share"));
         let triggers = include_str!("../../../src/agents_router/share/triggers.py");
         let trigger_label = triggers
@@ -306,9 +322,35 @@ mod tests {
             .find_map(|l| l.strip_prefix("LABEL = \""))
             .unwrap()
             .trim_end_matches('"');
-        assert_ne!(AUTOSTART_LABEL, trigger_label);
+        assert_ne!(label, trigger_label);
+        assert!(!data.contains("--test-"));
         app.autolaunch().disable().unwrap();
         assert!(!plist.exists());
         assert!(!app.autolaunch().is_enabled().unwrap());
+        // A test build's login item reopens it with its chosen folders, escaped for the plist.
+        let test_label = autostart_label(crate::app_paths::TEST_IDENTIFIER);
+        let folder = "/tmp/agt test & <home>";
+        let test_app = tauri::test::mock_builder()
+            .plugin(autostart_plugin(
+                crate::app_paths::TEST_IDENTIFIER,
+                &["--test-agt-home".into(), folder.into()],
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        test_app.autolaunch().enable().unwrap();
+        let test_plist = plist.with_file_name(format!("{test_label}.plist"));
+        let data = fs::read_to_string(&test_plist).unwrap();
+        assert!(data.contains(
+            "<string>--test-agt-home</string><string>/tmp/agt test &amp; &lt;home&gt;</string>"
+        ));
+        assert!(!plist.exists());
+        let parsed = std::process::Command::new("/usr/bin/plutil")
+            .args(["-extract", "ProgramArguments.2", "raw", "-o", "-"])
+            .arg(&test_plist)
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&parsed.stdout).trim(), folder);
+        test_app.autolaunch().disable().unwrap();
+        assert!(!test_plist.exists());
     }
 }

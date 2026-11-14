@@ -11,8 +11,49 @@ fn stdin_document(kind: &str, mut input: impl Read) -> Result<(), String> {
     Ok(())
 }
 
+/// Prints how an app with `identifier` would resolve its folders from these
+/// arguments and this environment. Writes nothing.
+fn resolve_paths(identifier: &str, args: &[String]) -> Result<(), String> {
+    use agents_router_app::app_paths::AppPaths;
+    let args: Vec<std::ffi::OsString> = args.iter().map(Into::into).collect();
+    let paths = AppPaths::resolve(identifier, &args, |name| std::env::var_os(name))?;
+    let child_env: serde_json::Map<String, serde_json::Value> = paths
+        .child_env()
+        .into_iter()
+        .map(|(name, value)| {
+            (
+                name.to_string(),
+                value.map_or(serde_json::Value::Null, |v| v.to_string_lossy().into()),
+            )
+        })
+        .collect();
+    println!(
+        "{}",
+        serde_json::json!({
+            "test": paths.test,
+            "rows": paths.rows(),
+            "launcher": paths.launcher(),
+            "settings": paths.settings_file(),
+            "child_home": paths.child_home(),
+            "account_home": paths.account_home,
+            "child_env": child_env,
+            "relaunch": paths.relaunch_args(),
+        })
+    );
+    Ok(())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [flag, identifier, rest @ ..] = args.as_slice() {
+        if flag == "--resolve-paths" {
+            if let Err(error) = resolve_paths(identifier, rest) {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+            return;
+        }
+    }
     let roundtrip = match args.as_slice() {
         [flag] if flag == "--install-cli" => Some(agents_router_app::install_check::run()),
         [flag, app_flag, app] if flag == "--install-cli" && app_flag == "--app" => Some(
@@ -42,7 +83,7 @@ fn main() {
         return;
     }
     if args.len() != 1 || args[0].starts_with("--") {
-        eprintln!("usage: agt-app-check <fixture-folder>\n       agt-app-check --stdin <kind>\n       agt-app-check --install-cli [--app <path>]\n       agt-app-check --roundtrip");
+        eprintln!("usage: agt-app-check <fixture-folder>\n       agt-app-check --stdin <kind>\n       agt-app-check --install-cli [--app <path>]\n       agt-app-check --roundtrip\n       agt-app-check --resolve-paths <bundle identifier> [--test-… <folder>]");
         std::process::exit(2);
     }
     match check_fixtures(Path::new(&args[0])) {

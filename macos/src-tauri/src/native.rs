@@ -303,6 +303,11 @@ pub fn update_tray(
         })));
         formatter.stringFromDate(&date).to_string()
     });
+    let mut glyph = glyph;
+    if crate::app_paths::is_test_build(&app.config().identifier) {
+        // The tooltip doubles as the VoiceOver label.
+        glyph.tooltip.push_str("\nTest build");
+    }
     if let Err(error) = apply_glyph(app, glyph) {
         app::log(&format!("tray update failed: {error}"));
     }
