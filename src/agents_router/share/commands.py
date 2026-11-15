@@ -45,7 +45,8 @@ from typing import Any, Callable
 from agents_router import helptext, hosts, settings_write, synclog, ui
 from agents_router.config import default_primary, load_config
 from agents_router.share import (
-    apply, attention, engine, gitexclude, hooks, instructions, mcp, model, plugin_view, plugins, names, normalize, picker, plan as planner, providers, scope,
+    apply, attention, engine, gitexclude, hooks, instructions, mcp, model, plugin_parts, plugin_view, plugins, names, normalize, picker,
+    plan as planner, providers, scope,
     settings, state, status_view, toolmap, triggers,
 )
 from agents_router.share.providers import _short as short
@@ -149,6 +150,7 @@ def add_parser(subparsers) -> None:
     shown.add_argument("--json", action="store_true")
     status = actions.add_parser("status", help="What's in sync, what differs and what waits for you; writes nothing.")
     status.add_argument("--diff", action="store_true", help="Show how the copies of each conflict differ.")
+    status.add_argument("-v", "--verbose", action="store_true", help="Name the plugin skills and commands left out of Kiro.")
     status.add_argument("--json", action="store_true")
     listing = actions.add_parser("list", help="Read-only item and CLI cells, including whether each can be changed; exits 0.")
     listing.add_argument("--json", action="store_true")
@@ -247,6 +249,8 @@ def _kinds(value: str) -> tuple[str, ...]:
         raise ValueError("hooks aren't a kind of item: use --hooks on, or `agt share kinds add hooks`")
     if "plugins" in kinds:
         raise ValueError("plugins aren't a kind of item: use --plugins on, or `agt share kinds add plugins`")
+    if plugin_parts.KIND in kinds:
+        raise ValueError("plugin parts aren't a kind of item: use `agt share kinds add plugin-parts`")
     later = [kind for kind in kinds if kind in LATER_KINDS]
     if later:
         raise ValueError(f"agt doesn't share {', '.join(later)} yet; it shares agents and skills")
@@ -397,7 +401,32 @@ def _plan(args: argparse.Namespace, current: state.State, saved: settings.Settin
         # Installs clone repos and take a while: a session hook or a save leaves them to the watcher.
         later = frozenset(plugins.NATIVE) if getattr(args, "trigger", "command") in MCP_LATER_TRIGGERS else frozenset()
         plan.plugins = plugins.build(included, current, options, saved.plugin_approvals if saved else {}, later=later)
+    if saved is not None and saved.plugin_parts and not scope.current().project:
+        plan.plugin_parts = plugin_parts.view(included, saved)  # what the last run left; status never builds
     return plan
+
+
+def _parts_run(saved: settings.Settings, included: list[providers.Provider],
+               trigger: str = "command") -> tuple[str, plugin_parts.Result | None]:
+    """This run's id, and the plugin-parts pass it makes first, holding the lock after `replay` and before `_plan`, so a
+    link that steps aside for your skill is gone when the plan links yours. A session start or a save builds no mirror:
+    it leaves that to the watcher and `agt share sync`. In a repo, or with the kind off, there's no pass."""
+
+    run_id = apply.new_run_id()
+    if not saved.plugin_parts or scope.current().project:
+        return run_id, None
+    return run_id, plugin_parts.run(included, run_id, build=trigger not in MCP_LATER_TRIGGERS, picks=saved)
+
+
+def _part_outcomes(parts: plugin_parts.Result | None) -> list[apply.Outcome]:
+    """The plugin-parts pass's changes, as outcomes of the run (its report and log; `undo` leaves them out)."""
+
+    return [apply.Outcome(plugin_parts.KIND, change.name, [change.label] if change.label else [], change.action,
+                          change.path, change.ok, change.message, change.backup) for change in parts.changes] if parts else []
+
+
+def _part_notes(parts: plugin_parts.Result | None) -> list[str]:
+    return [f"plugin parts: {parts.problem}"] if parts is not None and parts.problem else []
 
 
 def _mcp_on(args: argparse.Namespace, saved: settings.Settings | None) -> bool:
@@ -423,7 +452,7 @@ def _item_key(plan: planner.Plan, name: str) -> str:
     """`<kind>/<name>`, as the folders spell it, for an item named on the command line (bare when it's unique)."""
 
     kind, slash, bare = name.partition("/")
-    if kind in (mcp.KIND, hooks.KIND, plugins.KIND) and bare:
+    if kind in (mcp.KIND, hooks.KIND, plugins.KIND, plugin_parts.KIND) and bare:
         return name
     if not slash:
         kind, bare = "", name
@@ -463,7 +492,8 @@ def _saved_answers(plan: planner.Plan, args: argparse.Namespace, saved: settings
                                worktrees=saved.worktrees if saved else "auto", mcp=_mcp_on(args, saved),
                                hooks=_hooks_on(args, saved), hook_approvals=dict(saved.hook_approvals) if saved else {},
                                plugins=_plugins_on(args, saved),
-                               plugin_approvals=dict(saved.plugin_approvals) if saved else {}, **switches)
+                               plugin_approvals=dict(saved.plugin_approvals) if saved else {},
+                               plugin_parts=saved.plugin_parts if saved else False, **switches)
     result.off = {_item_key(plan, name) for name in options.off}
     for name, label in options.skip:
         result.not_in.setdefault(_item_key(plan, name), []).append(label)
@@ -502,6 +532,7 @@ def _needs_choice(plan: planner.Plan, command: str, as_json: bool) -> int:
 
 
 MARKS = {"copy": "+", "link": "+", "update": "~", "relink": "~", "migrate": "~", "remove": "-", "rename": ">",
+         "rebuild": "~", "backup": "~",
          "rename-folder": ">", "rename-link": ">"}
 MARK_STYLES = {"+": "ok", "~": "warn", "-": "muted", ">": "warn"}
 _verbose = False  # -v: each item line is followed by the file of each copy written
@@ -1214,15 +1245,20 @@ def _run_sync(args: argparse.Namespace, saved: settings.Settings, command: str, 
     with apply.lock([provider.folder for provider in included]):
         current = state.load()
         replayed = apply.replay(current)
+        run_id, parts = _parts_run(saved, included)
         plan = _plan(args, current, saved)
         if any(item.decision.reason == "saved less than 3 s ago" for item in plan.waiting):
             time.sleep(planner.FRESH_SECONDS)  # wait the edit out instead of skipping it
             plan = _plan(args, current, saved)
         saved_at = settings.save(saved) if save else None  # saved only now, holding the lock
-        result = apply.apply(plan, current)
+        result = apply.apply(plan, current, run=run_id, prior=_part_outcomes(parts))
+        if _part_notes(parts):
+            notes = [*(notes or []), *_part_notes(parts)]
         result.replayed = replayed
         saved_at = _after_renames(args, saved, current, result) or saved_at
         _remember(plan, current, result)
+    if plan.plugin_parts is not None:  # what the plugins' mirrors leave out, from the state file this run wrote
+        plan.notices += plan.plugin_parts.left_out(named=args.json or _verbose)
     repos = repo_runs(False)  # after your folders, so no repo gets ahead of the settings saved above
     _report(plan, result, saved_at, args.json, title=command, notes=notes, repos=repos,
             plugin_blocks=command == "agt share kinds add plugins", found=_triggers(saved, plan.included) if save else None,
@@ -1297,7 +1333,11 @@ def _status(args: argparse.Namespace) -> int:
     servers, shared_hooks, shared_plugins = plan.mcp, plan.hooks, plan.plugins
     code = 1 if plan.conflicts or pending or plan.frozen or (shared is not None and shared.conflict) \
         or (servers is not None and (servers.conflicts or servers.pending)) \
-        or (shared_plugins is not None and (shared_plugins.pending or shared_plugins.waiting)) else 0
+        or (shared_plugins is not None and (shared_plugins.pending or shared_plugins.waiting)) \
+        or (plan.plugin_parts is not None and bool(plugin_parts.attention(plan.plugin_parts))) else 0
+    if plan.plugin_parts is not None:
+        # Your skill coming first, and what the mirrors leave out: notes, so they don't make status exit 1.
+        plan.notices += plan.plugin_parts.notes() + plan.plugin_parts.left_out(named=args.json or _verbose)
     repos = [] if scope.current().project else [_repo_status(target) for target in _repo_scopes(saved)]
     if any(entry.get("conflicts") or entry.get("pending") for entry in repos):
         code = 1
@@ -1310,6 +1350,7 @@ def _status(args: argparse.Namespace) -> int:
                 "mcp": servers.summary() if servers is not None else None,
                 "hooks": shared_hooks.summary() if shared_hooks is not None else None,
                 "plugins": shared_plugins.summary() if shared_plugins is not None else None,
+                "plugin_parts": plan.plugin_parts.summary() if plan.plugin_parts is not None else None,
                 "repos": [{key: value for key, value in entry.items() if key != "scope"} for entry in repos],
                 "diffs": {item.name: _diff(item) for item in plan.conflicts} if args.diff else None})
         return code
@@ -1569,6 +1610,8 @@ def _pick(args: argparse.Namespace) -> int:
         return _pick_hook(args, saved, plan, to_in, to_out, only)
     if args.item.startswith(f"{plugins.KIND}/"):
         return _pick_plugin(args, saved, plan, to_in, to_out, only)
+    if args.item.startswith(f"{plugin_parts.KIND}/"):
+        return _pick_plugin_part(args, saved, plan, to_in, to_out, only)
     key = _existing(plan, args.item)
     name = key.partition("/")[2]
     if not (to_in or to_out or only):
@@ -1857,6 +1900,63 @@ def _pick_hook(args: argparse.Namespace, saved: settings.Settings, plan: planner
     return 1 if result.failed else 0
 
 
+def _pick_plugin_part(args: argparse.Namespace, saved: settings.Settings, plan: planner.Plan, to_in: list[str],
+                      to_out: list[str], only: list[str] | None) -> int:
+    """`pick plugin-parts/<name>`: which Kiro folders get a plugin's skill. `--in` also takes back a link you deleted
+    there; `--not-in` takes agt's link away, with a backup. No flags: where it goes now."""
+
+    if plan.plugin_parts is None:
+        raise ValueError(f"plugin parts don't share; `agt share kinds add {plugin_parts.KIND}` links them into Kiro")
+    shown = plan.plugin_parts
+    name = args.item.partition("/")[2]
+    key = names.identity(name)
+    entry = shown.parts().get(key)
+    if entry is None:
+        raise ValueError(f"no plugin skill or command named {name}; `agt share list` lists them as {plugin_parts.KIND}/<name>")
+    pick = f"{plugin_parts.KIND}/{key}"
+    if not (to_in or to_out or only):
+        cells = shown.cells(key, entry, lambda state_, note="", reason=None: {"state": state_, "note": note})
+        if args.json:
+            _print({"kind": plugin_parts.KIND, "name": entry["name"], "plugins": entry["plugins"], "cells": cells})
+        else:
+            ui.out([ui.bold(f"agt share pick {plugin_parts.KIND}/{entry['name']}"), "  ",
+                    ui.muted(f"from the {plugin_parts._and(entry['plugins'])} plugin")], "",
+                   *ui.columns([[label, ui.muted(cell["state"]), ui.muted(cell["note"])] for label, cell in cells.items()],
+                               indent=2, gap=3))
+        return 0
+    both = sorted(set(to_in) & set(to_out))
+    if both:
+        raise ValueError(f"{', '.join(both)} is in both --in and --not-in")
+    for label in sorted({*to_in, *to_out, *(only or [])}):
+        if label not in shown.labels:
+            raise ValueError(f"{label} loads {entry['name']} from the plugin; plugin parts go to Kiro folders only")
+    _change_picks(saved, pick, to_in, to_out, only, None)
+    if apply.in_worker():
+        print(IN_WORKER)
+        return 2
+    included = plan.included
+    with apply.lock([provider.folder for provider in included]):
+        current = state.load()
+        saved_at = settings.save(saved)
+        back = sorted({*to_in, *(only or [])})
+        if back:
+            plugin_parts.unstop(key, back)  # a link you deleted there is wanted again
+        run_id, parts = _parts_run(saved, included)
+        after = _plan(args, current, saved)
+        locked = after.restricted(set())
+        result = apply.apply(locked, current, op="pick", run=run_id, prior=_part_outcomes(parts))
+        _remember(after, current, result)
+    removed = [outcome for outcome in result.written if outcome.kind == plugin_parts.KIND and outcome.action == "remove"]
+    notes = [f"{entry['name']} goes to {', '.join(after.plugin_parts.labels) or 'no Kiro folder'} except "
+             f"{', '.join(saved.not_in.get(pick, []))}." if saved.not_in.get(pick) else
+             f"{entry['name']} goes to every Kiro folder sharing."] if not saved.only.get(pick) else \
+        [f"{entry['name']} goes to {', '.join(saved.only[pick])} only."]
+    notes += [f"agt's link in {', '.join(outcome.labels)} is in the backups." for outcome in removed]
+    notes += _part_notes(parts)
+    _report(locked, result, saved_at, args.json, title="agt share pick", notes=notes)
+    return 1 if result.failed else 0
+
+
 def _plugin_entry(plan: planner.Plan, key: str) -> Any:
     if plan.plugins is None:
         raise ValueError("plugins don't share; `agt share kinds add plugins` shows what it would install")
@@ -1914,6 +2014,9 @@ def _pick_plugin(args: argparse.Namespace, saved: settings.Settings, plan: plann
         if label in entry.copies:
             continue  # it's there already
         if label not in shared.by_label:
+            if shared.has_own(label):
+                raise ValueError(f"{label} has its own plugins, which agt doesn't share to yet; only Claude Code and "
+                                 "Codex folders get them")
             raise ValueError(f"{label} installs no plugins; only Claude Code and Codex folders do")
         if label in entry.stays:
             raise ValueError(f"{entry.name} can't go to {label}: {entry.stays[label]}")
@@ -2446,14 +2549,24 @@ def _import_left(part: _Part, current: state.State) -> list[planner.Left]:
     return [planner.Left(planner.Item("instructions", "CLAUDE.md"), ["claude"], path, "agt", "agt made it")] if path else []
 
 
-def _survey(args: argparse.Namespace, part: _Part) -> None:
+def _survey(args: argparse.Namespace, part: _Part, op: str = "") -> None:
     """What the turn-off leaves behind in this part, before anything is written."""
 
     with scope.use(part.target):
         current = state.load()
         plan = _plan(args, current, part.saved)
         _no_rename_pending(plan)
-        part.left = planner.leave(plan, current, part.kinds, part.labels) + _import_left(part, current)
+        part.left = planner.leave(plan, current, part.kinds, part.labels) + _import_left(part, current) \
+            + (_parts_left(part, plan) if op == "cli-remove" else [])
+
+
+def _parts_left(part: _Part, plan: planner.Plan) -> list[planner.Left]:
+    """A Kiro folder that stops sharing: the plugin-part links agt made there, which the same answer keeps or removes."""
+
+    if part.target.project or not part.saved.plugin_parts:
+        return []
+    return [planner.Left(planner.Item("skills", path.name), [label], path, "agt", f"part of the {plugin_id} plugin")
+            for label, path, plugin_id in plugin_parts.links(plan.included, part.labels)]
 
 
 def _repo_parts(saved: settings.Settings,
@@ -2489,7 +2602,7 @@ def _turn_off(args: argparse.Namespace, saved: settings.Settings, kinds: set[str
     user = _Part(scope.current(), saved, kinds, labels, change)
     parts = [*_repo_parts(saved, repos), user]
     for part in parts:
-        _survey(args, part)
+        _survey(args, part, op)
     left = [entry for part in parts for entry in part.left]
     agt = [entry for entry in left if entry.status == "agt"]
     choice = "remove" if getattr(args, "remove_copies", False) else "keep" if getattr(args, "keep_copies", False) or not agt else None
@@ -2561,7 +2674,8 @@ def _turn_off(args: argparse.Namespace, saved: settings.Settings, kinds: set[str
     notes = ([done(choice == "remove")] if not result.failed else
              [f"Nothing else changed: a removal failed, so {what} still shares. Run it again to finish."])
     stays = _stays_lines(user.left, choice)
-    removed = len(result.written)
+    removed = len([outcome for outcome in result.written  # agt's plugin-part mirrors are in no CLI
+                   if outcome.labels or outcome.kind != plugin_parts.KIND])
     sections: list[ui.Line] = []
     for status, heading in STAYS:  # what stays, as the dry run listed it (Notes name the edited copies kept)
         found = [entry for entry in user.left if entry.status == status and status != "edited"]
@@ -2603,6 +2717,15 @@ def _turn_off_writes(args: argparse.Namespace, part: _Part, op: str, what: str, 
             result = apply.apply(off, current, op=op, command=command,
                                  log={"turned_off": what, "answer": choice, "copies": copies})
             result.replayed = replayed
+            if not result.failed and op == "cli-remove" and not part.target.project and saved.plugin_parts:
+                # Its plugin-part links follow the same answer, and the plugin-parts state forgets the folder.
+                if choice == "remove":
+                    result.outcomes += _part_outcomes(plugin_parts.remove(included, result.run, labels=part.labels))
+                else:
+                    plugin_parts.forget_label(part.labels)
+            if not result.failed and op == "disable" and choice == "remove" and not part.target.project and saved.plugin_parts:
+                # Every plugin-part link and agt's mirrors go to the backups too, and the plugin-parts state goes.
+                result.outcomes += _part_outcomes(plugin_parts.remove(included, result.run))
             saved_at = None
             if not result.failed:
                 part.change(saved, current)
@@ -2911,7 +3034,7 @@ def _kinds_command(args: argparse.Namespace) -> int:
         return 0
     kind = args.kind
     title = f"agt share kinds {args.kinds_command} {kind}"
-    word = {mcp.KIND: "MCP servers"}.get(kind, kind)
+    word = {mcp.KIND: "MCP servers", plugin_parts.KIND: "plugin parts"}.get(kind, kind)
 
     def already(how: str = "") -> int:
         if args.json:
@@ -3021,6 +3144,8 @@ def _kinds_command(args: argparse.Namespace) -> int:
         return 1 if any(entry.get("result") and entry["result"].failed for entry in repos) else 0
     if kind in LATER_KINDS:
         raise ValueError(f"agt doesn't share {kind} yet; it shares agents and skills")
+    if kind == plugin_parts.KIND:
+        return _kinds_plugin_parts(args, saved, already, turned_on)
     if kind == plugins.KIND:
         return _kinds_plugins(args, saved)
     if kind not in SUPPORTED_KINDS:
@@ -3048,6 +3173,121 @@ def _kinds_command(args: argparse.Namespace) -> int:
                      + (" and fills the copies." if removed else ", and the copies you kept stay your own files."),
                      repos=in_repo, off=f"{kind} don't share any more",
                      again=("Share them again", f"agt share kinds add {kind}"))
+
+
+PARTS_ON = ("The skills and commands of your Claude Code plugins go to Kiro as skills, linked from agt's copy of each "
+            "plugin and kept current as the plugins update. Claude Code and Codex load them from the plugins themselves.")
+
+
+def _kinds_plugin_parts(args: argparse.Namespace, saved: settings.Settings, already: Callable[..., int],
+                        turned_on: Callable[..., Any]) -> int:
+    """`kinds add plugin-parts`: a sync that builds the mirrors and links them into Kiro. `kinds remove plugin-parts`:
+    the links agt made stay as your own files (`--keep-copies`, agt stops updating them) or go to the backups with
+    the mirrors (`--remove-copies`); an agent without either gets `needs_choice`."""
+
+    title = f"agt share kinds {args.kinds_command} {plugin_parts.KIND}"
+    if args.kinds_command == "add":
+        if saved.plugin_parts:
+            return already()
+        saved.plugin_parts = True
+        kiro = any(folder.cli == "kiro" for folder in saved.folders)
+        sentence = PARTS_ON if kiro else PARTS_ON + " No Kiro folder shares yet: `agt share cli add kiro` adds one."
+        return _run_sync(args, saved, title, save=True, notes=[sentence], shown=turned_on(sentence))
+    if not saved.plugin_parts:
+        return already()
+    retry = title
+    again = [ui.muted("Share them again"), ui.cmd(f"agt share kinds add {plugin_parts.KIND}")]
+    included = _folders(load_config(), None, False, saved)[1]
+    found = plugin_parts.links(included)
+    count = f"{len(found)} link{'s' if len(found) != 1 else ''}"
+    choice = "remove" if getattr(args, "remove_copies", False) else \
+        "keep" if getattr(args, "keep_copies", False) or not found else None
+    ask = (f"Turning off plugin parts leaves the {count} agt made in Kiro. Keep them as your own files, or remove them "
+           "(with a backup)?")
+    copies = [{"kind": plugin_parts.KIND, "name": path.name, "labels": [label], "path": str(path), "status": "agt",
+               "note": f"part of the {plugin_id} plugin"} for label, path, plugin_id in found]
+    rows = ui.columns([[path.name, ui.muted(label)] for label, path, _ in found], indent=2, gap=3)
+    heading = f"Turning off plugin parts leaves the {count} agt made in Kiro:" if found else \
+        "agt linked no plugin parts; turning them off removes nothing."
+    if args.dry_run:
+        if args.json:
+            _print({"dry_run": True, "turn_off": plugin_parts.KIND, "copies": copies,
+                    "needs_answer": [] if choice else [{"ask": ask, "choices": ["--keep-copies", "--remove-copies"]}]})
+        else:
+            ui.out([ui.bold(title), "  ", ui.muted("dry run, nothing changed")], "", heading, *rows)
+        return 0
+    if choice is None:
+        if _interactive():
+            ui.out(heading, *rows, "")
+            while choice is None:
+                try:
+                    answer = input("Keep them as your own files, or remove them with a backup? k keep · r remove · q quit: ")
+                except EOFError:
+                    answer = "q"
+                if answer.strip().lower() == "q":
+                    print("Nothing was changed.")
+                    return 0
+                choice = {"k": "keep", "r": "remove"}.get(answer.strip().lower())
+        else:
+            if args.json:
+                _print({"error": "needs_choice", "ask": ask, "choices": [
+                    {"value": "--keep-copies", "means": "the links stay as your own files; agt stops updating them"},
+                    {"value": "--remove-copies", "means": "the links and agt's copies of the plugins go to the backups"}],
+                    "copies": copies, "retry": f"{retry} --keep-copies | --remove-copies"})
+            else:
+                ui.out([ui.bold(title), "  ", ui.warn(f"! nothing changed: keep or remove {count}?")], "", heading, *rows, "",
+                       *ui.columns([[ui.muted("Keep them as your own files"), ui.cmd(f"{retry} --keep-copies")],
+                                    [ui.muted("Remove them, with a backup"), ui.cmd(f"{retry} --remove-copies")]], gap=3))
+            return 3
+    if apply.in_worker():
+        print(IN_WORKER)
+        return 2
+    with apply.lock([provider.folder for provider in included]):
+        run_id = apply.new_run_id()
+        synclog.notice(None)  # a hand edit of your share settings shows before this turn-off's line
+        parts = plugin_parts.remove(included, run_id) if choice == "remove" else None
+        if choice == "keep":
+            plugin_parts.forget_label(set(plugin_parts.recorded_labels()), stops=False)  # they're your files now
+        failed = parts is not None and bool(parts.failed)
+        _log_parts_off(title, run_id, choice, found, _part_outcomes(parts))
+        at = None
+        if not failed:
+            saved.plugin_parts = False
+            at = settings.save(saved)
+            current = state.load()
+            attention.save(_plan(args, current, saved), current)
+    removed = [change for change in (parts.written if parts else []) if change.label]
+    if args.json:
+        _print({plugin_parts.KIND: "on" if failed else "off", "settings": str(at) if at else None, "answer": choice,
+                "removed": [_outcome(outcome) for outcome in _part_outcomes(parts) if outcome.ok],
+                "failed": [_outcome(outcome) for outcome in _part_outcomes(parts) if not outcome.ok],
+                "kept": [] if choice == "remove" else copies,
+                "backups": str(state.share_dir() / "backups" / run_id / plugin_parts.KIND) if removed else None})
+    elif failed:
+        ui.out([ui.bold(title), "  ", ui.error(f"✗ {len(parts.failed)} couldn't be removed; plugin parts still go to Kiro")],
+               "", *([["  ", *ui.inline(f"{change.path}: {change.message}")] for change in parts.failed]), "",
+               "Run it again to finish.")
+    else:
+        done = ", removed " + (f"{len(removed)} link{'s' if len(removed) != 1 else ''}") if removed else ""
+        body = ["  The links agt made stay as your own files; agt stops updating them."] if choice == "keep" and found else \
+            [["  ", ui.muted("Backups: "), short(state.share_dir() / "backups" / run_id / plugin_parts.KIND)]] if removed else []
+        ui.out([ui.bold(title), "  ", ui.ok("✓ plugin parts don't go to Kiro any more" + done)], "", *body, "",
+               *ui.columns([again], gap=3))
+    return 1 if failed else 0
+
+
+def _log_parts_off(command: str, run_id: str, choice: str, found: list[tuple[str, Path, str]],
+                   outcomes: list[apply.Outcome]) -> None:
+    """`kinds remove plugin-parts` in agt's log, as the other kinds' turn-offs are: what it moved and the answer."""
+
+    changes = [{"item": f"{o.kind}/{o.name}", "labels": o.labels, "action": o.action, "path": str(o.path), "ok": o.ok,
+                "backup": str(o.backup) if o.backup else None, **({"message": o.message} if not o.ok else {})}
+               for o in outcomes]
+    copies = [{"item": f"{plugin_parts.KIND}/{path.name}", "labels": [label], "path": str(path), "status": "agt"}
+              for label, path, _ in found]
+    synclog.append({"type": "sync", **synclog.where(None), "command": command, "trigger": "command", "run": run_id,
+                    "items": sorted({o.name for o in outcomes}), "changes": changes, "kept": [], "conflicts": [],
+                    "turned_off": plugin_parts.KIND, "answer": choice, "copies": copies})
 
 
 def _kinds_plugins(args: argparse.Namespace, saved: settings.Settings) -> int:

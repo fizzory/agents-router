@@ -22,6 +22,7 @@ writes only that file's `[share.targets]`.
     worktrees = "command"                 # a listed repo's worktrees join by `agt share repo add .` ("auto" by default)
     mcp = true                            # share your user MCP servers too (off by default)
     hooks = true                          # list your hooks for sharing; each copy waits for your approval (off by default)
+    plugin_parts = true                   # link your Claude Code plugins' skills and commands into Kiro (off by default)
 
     [[share.folders]]                     # the folders sharing, with their labels
     cli = "claude"
@@ -33,6 +34,7 @@ writes only that file's `[share.targets]`.
     "agents/dana" = { not_in = ["codex"] }
     "agents/explorer" = { only = ["kiro"] }
     "mcp/notes" = { only = ["claude"] }   # an MCP server stays in that folder
+    "plugin-parts/fmt" = { not_in = ["kiro"] }  # a plugin's skill kept out of a Kiro folder
 
     [share.hook_approvals]                # hooks you approved per CLI, pinned to the hook as it was (hooks.py)
     "pretooluse-guard-shell" = { codex = "1a2b3c4d5e6f" }
@@ -50,7 +52,7 @@ from agents_router import config, levels
 from agents_router.share import codex_toml, model, toolmap
 
 KINDS = ("agents", "skills")
-TARGET_KINDS = (*KINDS, "mcp", "plugins")  # what `[share.targets]` keys name: items, MCP servers and plugins
+TARGET_KINDS = (*KINDS, "mcp", "plugins", "plugin-parts")  # what `[share.targets]` keys name: items, MCP servers, plugins and their parts
 # On/off switches for the background side (see triggers.py), with their defaults. Saved only when they differ.
 SWITCHES = {"watcher": True, "push_on_save": True, "notify": True, "codex_session": False}
 INSTRUCTIONS = ("off", "block", "whole")  # see instructions.py
@@ -89,6 +91,7 @@ class Settings:
     hook_approvals: dict[str, dict[str, str]] = field(default_factory=dict)  # hook name -> label -> identity prefix
     plugins: bool = False
     plugin_approvals: dict[str, dict[str, str]] = field(default_factory=dict)  # plugin id -> label -> what you said yes to
+    plugin_parts: bool = False  # your plugins' skills and commands linked into Kiro (plugin_parts.py)
 
 
 def path() -> Path:
@@ -159,7 +162,7 @@ def _settings(data: Any) -> Settings:
     if not isinstance(data, dict):
         raise ValueError("must be a table")
     known = {"enabled", "kinds", "tool_widening", "auto_copy", "folders", "targets", "instructions", "worktrees", "mcp",
-             "hooks", "hook_approvals", "plugins", "plugin_approvals", *SWITCHES}
+             "hooks", "hook_approvals", "plugins", "plugin_approvals", "plugin_parts", *SWITCHES}
     unknown = sorted(set(data) - known)
     if unknown:
         raise ValueError(f"unknown key {unknown[0]}")
@@ -188,7 +191,7 @@ def _settings(data: Any) -> Settings:
     worktrees = data.get("worktrees", "auto")
     if worktrees not in WORKTREES:
         raise ValueError(f"worktrees must be {' or '.join(WORKTREES)}")
-    for name in ("mcp", "hooks", "plugins"):
+    for name in ("mcp", "hooks", "plugins", "plugin_parts"):
         if not isinstance(data.get(name, False), bool):
             raise ValueError(f"{name} must be true or false")
     approvals, plugin_approvals = _approvals(data, "hook_approvals", "hook"), _approvals(data, "plugin_approvals", "plugin")
@@ -196,7 +199,7 @@ def _settings(data: Any) -> Settings:
                       auto_copy=parse_auto_copy(data.get("auto_copy", True)), folders=folders, instructions=mode,
                       worktrees=worktrees, mcp=data.get("mcp", False), hooks=data.get("hooks", False),
                       hook_approvals=approvals, plugins=data.get("plugins", False), plugin_approvals=plugin_approvals,
-                      **switches)
+                      plugin_parts=data.get("plugin_parts", False), **switches)
     targets = data.get("targets", {})
     if not isinstance(targets, dict):
         raise ValueError("targets must be a table")
@@ -233,6 +236,8 @@ def render(settings: Settings) -> str:
         lines.append("hooks = true")
     if settings.plugins:
         lines.append("plugins = true")
+    if settings.plugin_parts:
+        lines.append("plugin_parts = true")
     for folder in settings.folders:
         lines += ["", "[[share.folders]]", f"cli = {value(folder.cli)}", f"label = {value(folder.label)}",
                   f"path = {value(str(folder.path))}"]

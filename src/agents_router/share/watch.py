@@ -167,7 +167,7 @@ def watched_files(saved: settings.Settings, included: list[providers.Provider]) 
                 *(instructions.import_watched(current.root) if saved.instructions != "off" else [])]
     return [*files, *(instructions.signature_files(included) if saved.instructions != "off" else []),
             *(mcp.watched_files(included) if saved.mcp else []), *(hooks.watched_files(included) if saved.hooks else []),
-            *(plugins.watched_files(included) if saved.plugins else [])]
+            *(plugins.watched_files(included) if saved.plugins or saved.plugin_parts else [])]
 
 
 def repo_scopes(saved: settings.Settings) -> list[scope.Scope]:
@@ -251,15 +251,19 @@ def _scope_sync(saved: settings.Settings, trigger: str, if_stale: bool) -> tuple
                 return "nothing moved", []
             current = state.load()
             replayed = apply.replay(current)
+            run_id, parts = commands._parts_run(saved, included, trigger)
             plan = commands._plan(args, current, saved)
             if any(item.decision.reason == "saved less than 3 s ago" for item in plan.waiting):
                 time.sleep(planner.FRESH_SECONDS)
                 plan = commands._plan(args, current, saved)
-            result = apply.apply(plan, current, command="agt share sync", trigger=trigger)
+            result = apply.apply(plan, current, command="agt share sync", trigger=trigger, run=run_id,
+                                 prior=commands._part_outcomes(parts))
             result.replayed = replayed
             commands._after_renames(args, saved, current, result)
             commands._remember(plan, current, result)
-            settled = not result.failed and not any(
+            # A plugin build left to the next run (a session start or a save builds none) keeps the signature
+            # unsaved, so the watcher still sees that something moved.
+            settled = not result.failed and not (parts is not None and parts.deferred) and not any(
                 item.decision.action == engine.WAIT and item.decision.reason == "saved less than 3 s ago"
                 for item in plan.waiting)
             if settled:

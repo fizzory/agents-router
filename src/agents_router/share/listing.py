@@ -53,8 +53,11 @@ def snapshot(plan: planner.Plan, current: state.State, *, enabled: bool) -> dict
             choice = pick_cell(item, label, made)
             cells[label] = cell(raw.state, raw.note, choice.note if choice.state in (picker.FIXED, picker.BLOCKED) else None)
         add(item.key, item.kind, item.name, cells)
+    parts = plan.plugin_parts.parts() if plan.plugin_parts is not None else {}
     for excluded in plan.excluded:
         key = f"{excluded.kind}/{planner.names.identity(excluded.name)}"
+        if planner.names.identity(excluded.name) in parts and excluded.reason.endswith("agt links it into Kiro only"):
+            continue  # a plugin part's link in Kiro: its `plugin-parts/<name>` item below stands for it
         if not any(item["id"] == key for item in items):
             add(key, excluded.kind, excluded.name,
                 {label: cell(planner.BLOCKED, excluded.reason, excluded.reason) for label in labels})
@@ -103,6 +106,12 @@ def snapshot(plan: planner.Plan, current: state.State, *, enabled: bool) -> dict
                     planner.COPY if label in entry.writes else planner.SKIPPED
                 cells[label] = cell(status, reason or "; ".join(entry.asks.get(label, [])), reason)
             add(entry.key, "plugins", entry.name, cells)
+    if plan.plugin_parts is not None:
+        from agents_router.share import plugin_parts
+
+        for key, entry in sorted(parts.items()):
+            cells = plan.plugin_parts.cells(key, entry, cell)
+            add(f"{plugin_parts.KIND}/{key}", plugin_parts.KIND, entry["name"], {label: cells[label] for label in labels})
     if plan.instructions is not None:
         shared = plan.instructions
         copies = {copy.label: copy for copy in shared.copies}

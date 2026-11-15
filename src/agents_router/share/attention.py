@@ -104,6 +104,10 @@ def entries(plan: planner.Plan, current: State) -> list[dict[str, Any]]:
         from agents_router.share import plugins
 
         found += plugins.attention(plan.plugins)
+    if getattr(plan, "plugin_parts", None) is not None:
+        from agents_router.share import plugin_parts
+
+        found += plugin_parts.attention(plan.plugin_parts)
     return found
 
 

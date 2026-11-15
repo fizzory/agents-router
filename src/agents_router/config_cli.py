@@ -165,6 +165,8 @@ KEYS: dict[str, Key] = {key.name: key for key in [
         user_only=True, applies=SYNC),
     Key("share.plugins", "fixed", "Install your plugins in your other Claude Code and Codex folders, where they fit.",
         changed_by="agt share kinds add|remove plugins (it shows what it would install first)", applies=SYNC),
+    Key("share.plugin_parts", "fixed", "Link the skills and commands of your Claude Code plugins into Kiro, which installs no plugins.",
+        changed_by="agt share kinds add|remove plugin-parts", applies=SYNC),
     Key("share.watcher", "bool", "The background watcher (macOS): a sync every minute and when a shared folder changes.",
         user_only=True, applies=AT_ONCE),
     Key("share.push_on_save", "bool", "A save in Claude Code inside a shared folder spreads within seconds.",
@@ -601,7 +603,7 @@ def share_command(args: argparse.Namespace) -> int:
         command = SHARE_COMMANDS.get(key.name) or ("agt share disable" if share.enabled else "agt share enable")
         rows.append({"key": key.name, "value": value, "shown": _text(key, value), "source": level, "command": command})
     picks = len(share.off | set(share.not_in) | set(share.only))
-    plugins = KEYS["share.plugins"]
+    plugins, parts = KEYS["share.plugins"], KEYS["share.plugin_parts"]
     rows += [
         {"key": "share.folders", "value": [folder.label for folder in share.folders],
          "shown": ", ".join(folder.label for folder in share.folders) or "none", "source": "user" if share.folders else "default",
@@ -610,6 +612,8 @@ def share_command(args: argparse.Namespace) -> int:
          "source": "user" if picks else "default", "command": "agt share pick <item> --in|--not-in|--only <label>"},
         {"key": plugins.name, "value": share.plugins, "shown": _text(plugins, share.plugins),
          "source": _source(plugins, [layer] if layer else [])[0], "command": "agt share kinds add|remove plugins"},
+        {"key": parts.name, "value": share.plugin_parts, "shown": _text(parts, share.plugin_parts),
+         "source": _source(parts, [layer] if layer else [])[0], "command": "agt share kinds add|remove plugin-parts"},
     ]
     if args.json:
         print(json.dumps({"file": str(user), "settings": rows}, indent=2, ensure_ascii=False, default=str))
@@ -631,7 +635,7 @@ def share_command(args: argparse.Namespace) -> int:
 
 
 SHARE_ORDER = ("enabled", "kinds", "folders", "targets", "auto_copy", "tool_widening", "instructions", "mcp", "hooks", "plugins",
-               "worktrees", *share_settings.SWITCHES)
+               "plugin_parts", "worktrees", *share_settings.SWITCHES)
 SHARE_TEXT = {  # what changes each one: the command, or the values `agt config set` takes
     "share.enabled": "agt share enable | disable",
     "share.kinds": "agt share kinds add | remove <kind>",
@@ -640,6 +644,7 @@ SHARE_TEXT = {  # what changes each one: the command, or the values `agt config 
     "share.auto_copy": "on | off | <kinds>",
     "share.tool_widening": " | ".join(toolmap.TOOL_WIDENING),
     **{f"share.{kind}": f"agt share kinds add | remove {kind}" for kind in ("instructions", "mcp", "hooks", "plugins")},
+    "share.plugin_parts": "agt share kinds add | remove plugin-parts",
     "share.worktrees": " | ".join(share_settings.WORKTREES),
     **{f"share.{name}": "true | false" for name in share_settings.SWITCHES},
 }

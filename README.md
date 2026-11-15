@@ -102,6 +102,7 @@ Per host details: [docs/hosts.md](docs/hosts.md).
 | Turn sharing on | `agt share enable`, then Enter | [Sharing](docs/share.md#turning-it-on) |
 | Check what's in sync | `agt share status` | [Sharing](docs/share.md#everyday-use) |
 | Read sharing cells for an app | `agt share list --json` | [Sharing](docs/share.md#everyday-use) |
+| Bring your plugins' skills and commands to Kiro | `agt share kinds add plugin-parts` | [Sharing](docs/share.md#sharing-plugin-parts) |
 | Read role choices for an app | `agt roles show --json [--discover-models]` | [Roles](docs/roles.md) |
 | Use your other Claude profiles | Nothing to set up: `account=claude-work` | [Claude Code](docs/claude-code.md#2-your-other-profiles-work-with-no-setup) |
 | Add a Claude account | `agt accounts add max-2` | [Claude Code](docs/claude-code.md#3-add-more-accounts) |
@@ -138,7 +139,7 @@ Per host details: [docs/hosts.md](docs/hosts.md).
   - **Follow-ups:** a message to a running Kiro job waits for its turn to end, then continues the same session; a kiro-cli without `--output-format stream-json` has no session, so its jobs can't take follow-ups.
   - **Accounts:** Kiro keeps one login per machine.
   - **Hooks:** agt doesn't read or write Kiro's hooks yet.
-  - **Plugins:** Kiro installs none.
+  - **Plugins:** Kiro installs none; `agt share kinds add plugin-parts` links their skills and commands into it as skills.
   - **Shell in `edit` jobs:** none yet; use `full` when a Kiro job must run commands ([Kiro](docs/kiro.md)).
 - **Any other MCP client:** host only, through `agt mcp` ([hosts](docs/hosts.md#any-other-mcp-client)).
 - **Cursor, Gemini CLI, Copilot, OpenCode and others:** not supported as subagents yet; as hosts they work through `agt mcp` ([CLI comparison](docs/research/cli-permissions-and-headless.md)).
@@ -161,6 +162,7 @@ flowchart LR
 | MCP servers | `agt share kinds add mcp` | A server with a secret written into it stays in its CLI |
 | Hooks | `agt share kinds add hooks` | Each hook goes to a CLI only after you approve it there |
 | Plugins | `agt share kinds add plugins` | Claude Code and Codex; one the other CLI would load only partly waits for your yes |
+| Plugin parts | `agt share kinds add plugin-parts` | Your Claude Code plugins' skills and commands, linked into Kiro as skills and kept current as the plugins update |
 
 `agt share undo` restores what the last change to an agent or skill replaced. Full guide: [Sharing agents and skills](docs/share.md).
 
@@ -328,7 +330,7 @@ See [prior art](docs/research/prior-art.md) and [how other projects share setups
 | [Hosts](docs/hosts.md) | Install and use from Claude Code, Codex, Antigravity and other MCP clients |
 | [Claude Code](docs/claude-code.md) | Accounts, what is shared, switching, troubleshooting |
 | [Codex](docs/codex.md), [Gemini](docs/gemini.md) and [Kiro](docs/kiro.md) | The other subagent CLIs |
-| [Sharing agents and skills](docs/share.md) | `agt share`: agents, skills, instructions, MCP servers, hooks and plugins across Claude Code, Codex, Antigravity and Kiro |
+| [Sharing agents and skills](docs/share.md) | `agt share`: agents, skills, instructions, MCP servers, hooks, plugins and plugin parts across Claude Code, Codex, Antigravity and Kiro |
 | [Configuration](docs/configuration.md) | Settings files per workspace, `agt config`, limits, the log, files, environment |
 | [Roles](docs/roles.md) | Reviewer, Builder and your own roles: which providers each uses, `agt roles config`, role agents |
 | [Delegation rules](docs/delegation.md) | Optional model tiers, work folders and helper limits |

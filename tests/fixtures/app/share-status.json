@@ -49,6 +49,7 @@
   "mcp": null,
   "hooks": null,
   "plugins": null,
+  "plugin_parts": null,
   "repos": [],
   "diffs": null
 }

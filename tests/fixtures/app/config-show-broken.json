@@ -5972,6 +5972,53 @@
       }
     },
     {
+      "key": "share.plugin_parts",
+      "value": false,
+      "shown": "false",
+      "source": "default",
+      "file": null,
+      "line": null,
+      "description": "Link the skills and commands of your Claude Code plugins into Kiro, which installs no plugins.",
+      "needs_user_words": false,
+      "user_only": false,
+      "changed_by": "agt share kinds add|remove plugin-parts",
+      "applies": "the next sync (agt share sync)",
+      "kind": "fixed",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": false,
+      "accepted_levels": [
+        "user",
+        "workspace",
+        "local"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "missing"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "missing"
+        }
+      }
+    },
+    {
       "key": "share.watcher",
       "value": true,
       "shown": "true",

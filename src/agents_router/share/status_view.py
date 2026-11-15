@@ -28,9 +28,12 @@ FIXES = {
     "adopt": ["Add the section"],
     "plugin": ["Install it as it is", "Keep it out"],
     "failing": ["Try again now", "Keep it out"],
+    "part-conflict": ["Leave it out"],
+    "part-failed": ["Try again now"],
 }
 WATCHER_FIX = {"restart": "Restart it", "install": "Install it", "repair": "Repair it"}
-NOUNS = {"agents": "agent", "skills": "skill", "mcp": "MCP server", "hooks": "hook", "plugins": "plugin"}
+NOUNS = {"agents": "agent", "skills": "skill", "mcp": "MCP server", "hooks": "hook", "plugins": "plugin",
+         "plugin-parts": "plugin skill"}
 REPO_FLAG = ("agt share pick ", "agt share resolve ", "agt share rm ", "agt share mv ", "agt share undo ")
 MISSING = re.compile(r"^(?P<label>.+)'s (?P<kind>\w+) folder is missing: nothing is filled or deleted there until it's back$")
 
@@ -162,7 +165,27 @@ def kind_rows(plan: planner.Plan, *, named: bool = False) -> list[list[ui.Line]]
         rows.append([ui.muted("Hooks"), _hooks_row(plan.hooks)])
     if plan.plugins is not None:
         rows.append([ui.muted("Plugins"), _plugins_row(plan.plugins, named)])
+    if plan.plugin_parts is not None:
+        rows.append([ui.muted("Plugin parts"), _parts_row(plan.plugin_parts)])
     return rows
+
+
+def _parts_row(shown: Any) -> ui.Line:
+    """`43 skills from 6 plugins, linked in kiro; 1 not linked`: what the last run left."""
+
+    if shown.problem:
+        return ui.error("agt can't read its plugin-parts state; Waiting for you says what to do")
+    summary = shown.summary()
+    if not shown.labels:
+        return "no Kiro folder shares: `agt share cli add kiro` adds one"
+    if not summary["skills"]:
+        return "none yet: the next sync links your plugins' skills and commands into Kiro"
+    linked = [f"{count} in {label}" for label, count in summary["linked"].items()]
+    parts = [f"{_plural(summary['skills'], 'skill', 'skills')} from {_plural(summary['plugins'], 'plugin', 'plugins')}, "
+             f"linked {', '.join(linked)}"]
+    if summary["issues"]:
+        parts.append(f"{summary['issues']} not linked")
+    return "; ".join(parts)
 
 
 def kind_notes(plan: planner.Plan) -> list[str]:
@@ -220,6 +243,8 @@ def _title(entry: dict[str, Any], plan: planner.Plan) -> list[ui.Piece]:
         label = entry["id"].rpartition(":")[2]
         frozen = next((found for found in plan.frozen if found["label"] == label), None)
         return [ui.bold(f"{frozen['kind']} in {label}" if frozen else label)]
+    if kind == "part-failed":
+        return [ui.bold(f"plugin {name.partition('@')[0]}" if name else "plugin parts")]
     if kind == "adopt" or noun == "instructions":
         title: list[ui.Piece] = [ui.bold("instructions")]
     elif name:

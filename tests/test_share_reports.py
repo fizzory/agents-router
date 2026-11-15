@@ -144,7 +144,8 @@ class ReportTests(ItemBase):
         self.assertIn("\n  plugins         false ", out)
         self.assertTrue(out.endswith("\nSet a value with `agt config set share.<setting> <value>`.\n"), out)
         keys = [row["key"] for row in json.loads(self.share("settings", "--json"))["settings"]]
-        self.assertEqual(keys[-3:], ["share.folders", "share.targets", "share.plugins"])  # added last, the rest in place
+        self.assertEqual(keys[-4:], ["share.folders", "share.targets", "share.plugins", "share.plugin_parts"])  # added last
+        self.assertIn("\n  plugin_parts    false ", out)
 
 
 class ConfigShowTests(ItemBase):

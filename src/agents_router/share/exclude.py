@@ -5,12 +5,14 @@ Each check returns the reason shown in `status` and the setup list, or None.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import tomllib
 
 OWN_AGENT_PREFIX = "agt-"  # agt's relay agents
 OWN_SKILL = "agents-router"
 NOT_SHARED_SKILLS = {"synced": "skills/synced is never shared"}
+PLUGIN_PARTS = "plugin-parts"  # the folder under agt's share state that holds the plugin mirrors
 # Agents that rely on tools only KiroCrew has.
 KIROCREW_PREFIX = "kirocrew"
 KIROCREW_ONLY = {"ops-reporter"}
@@ -33,9 +35,50 @@ def agent(cli: str, name: str, path: Path, data: dict | None = None) -> str | No
     return None
 
 
+def plugin_parts_root() -> Path:
+    """Where agt keeps the mirrors of your plugins' skills and commands (`share/plugin_parts.py`), in any scope."""
+
+    from agents_router.share import scope
+
+    return scope.share_root() / PLUGIN_PARTS
+
+
+def plugin_part(path: Path, root: Path | None = None) -> str | None:
+    """The plugin (`name@marketplace`) whose mirror a link at `path` leads into, or None for anything else.
+
+    It reads the link itself, so a link that dangles for a moment (its mirror is being rebuilt) is still agt's.
+    """
+
+    try:
+        if not os.path.islink(path) and not _junction(path):
+            return None
+        target = os.readlink(path)
+    except (OSError, ValueError):
+        return None
+    root = root if root is not None else plugin_parts_root()
+    leads = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(path)), target))
+    for found in (leads, os.path.realpath(path)):
+        for base in (os.path.normpath(os.path.abspath(root)), os.path.realpath(root)):
+            if found.startswith(base + os.sep):
+                parts = Path(os.path.relpath(found, base)).parts
+                return f"{parts[1]}@{parts[0]}" if len(parts) >= 2 else "a plugin"
+    return None
+
+
+def _junction(path: Path) -> bool:
+    if os.name != "nt":
+        return False
+    from agents_router import fsutil
+
+    return fsutil.is_link(Path(path))
+
+
 def skill(name: str, folder: Path, disabled: set[str] | None = None) -> str | None:
     if name.startswith("."):
         return "hidden folder"
+    plugin = plugin_part(folder)
+    if plugin:
+        return f"part of the {plugin} plugin; agt links it into Kiro only"
     if name in NOT_SHARED_SKILLS:
         return NOT_SHARED_SKILLS[name]
     if name == OWN_SKILL or name.startswith(OWN_AGENT_PREFIX):

@@ -63,7 +63,7 @@ export class AccountNameCheck {
 export const SHARE_LABELS = { 'share.mcp': 'MCP servers', 'share.hooks': 'Hooks', 'share.watcher': 'Sync in background',
   'share.push_on_save': 'Sync on save in Claude Code', 'share.notify': 'Notify about conflicts', 'share.instructions': 'Instructions',
   'share.auto_copy': 'New items', 'share.tool_widening': 'Tools in copies', 'share.worktrees': 'Worktrees', 'share.codex_session': 'Sync on session start in Codex',
-  'share.enabled': 'Sharing', 'share.kinds': 'Shared kinds', 'share.plugins': 'Plugins' };
+  'share.enabled': 'Sharing', 'share.kinds': 'Shared kinds', 'share.plugins': 'Plugins', 'share.plugin_parts': 'Plugin parts' };
 export const SHARE_ORDER = ['share.mcp', 'share.hooks', 'share.watcher', 'share.push_on_save', 'share.notify', 'share.instructions', 'share.auto_copy'];
 export const SHARE_MORE = ['share.tool_widening', 'share.worktrees', 'share.codex_session'];
 export const shellQuote = value => `'${String(value).replaceAll("'", "'\\''")}'`;

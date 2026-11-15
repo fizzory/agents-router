@@ -871,11 +871,12 @@ def _log(plan: planner.Plan, result: Result, command: str, started: float, extra
 
 
 def write_manifest(result: Result, op: str, records: dict | None = None) -> None:
-    # MCP servers, hooks and plugins are left out: `undo` puts back whole files, a Claude server's backup is only its
-    # entry, hook copies follow your approvals, and plugins come and go with each CLI's own commands.
+    # MCP servers, hooks, plugins and plugin parts are left out: `undo` puts back whole files, a Claude server's backup
+    # is only its entry, hook copies follow your approvals, plugins come and go with each CLI's own commands, and plugin
+    # parts keep their own manifest (`backups/<run>/plugin-parts/manifest.json`).
     manifest = [{"key": f"{o.kind}/{names.identity(o.name)}", "name": o.name, "labels": o.labels, "action": o.action,
                  "path": str(o.path), "backup": str(o.backup) if o.backup else None}
-                for o in result.written if o.kind not in ("mcp", "hooks", "plugins")]
+                for o in result.written if o.kind not in ("mcp", "hooks", "plugins", "plugin-parts")]
     if manifest:
         folder = share_dir() / "backups" / result.run
         fsutil.make_private_dir(folder)

@@ -147,6 +147,7 @@ class Plan:
     mcp: Any = None  # the MCP servers' plan (mcp.Plan) when they share
     hooks: Any = None  # the hooks' plan (hooks.Plan) when they share
     plugins: Any = None  # the plugins' plan (plugins.Plan) when they share
+    plugin_parts: Any = None  # what the last plugin-parts run left (plugin_parts.View) when they share
     claude_import: Any = None  # a listed repo's `CLAUDE.md` holding `@AGENTS.md` (instructions.Import), when it changes
 
     @property
