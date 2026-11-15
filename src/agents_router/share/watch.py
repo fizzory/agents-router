@@ -252,10 +252,10 @@ def _scope_sync(saved: settings.Settings, trigger: str, if_stale: bool) -> tuple
             current = state.load()
             replayed = apply.replay(current)
             run_id, parts = commands._parts_run(saved, included, trigger)
-            plan = commands._plan(args, current, saved)
+            plan = commands._plan(args, current, saved, parts=parts)
             if any(item.decision.reason == "saved less than 3 s ago" for item in plan.waiting):
                 time.sleep(planner.FRESH_SECONDS)
-                plan = commands._plan(args, current, saved)
+                plan = commands._plan(args, current, saved, parts=parts)
             result = apply.apply(plan, current, command="agt share sync", trigger=trigger, run=run_id,
                                  prior=commands._part_outcomes(parts))
             result.replayed = replayed

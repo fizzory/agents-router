@@ -376,7 +376,11 @@ def _folders(config: Any, explicit: list[tuple[str, Path]] | None, no_agy: bool,
 
 
 def _plan(args: argparse.Namespace, current: state.State, saved: settings.Settings | None, *,
-          resolve: dict[str, str] | None = None, keep_copies: bool = False, own: frozenset[str] = frozenset()) -> planner.Plan:
+          resolve: dict[str, str] | None = None, keep_copies: bool = False, own: frozenset[str] = frozenset(),
+          parts: plugin_parts.Result | None = None) -> planner.Plan:
+    """The plan for this scope. `parts` is this run's plugin-parts pass (`_parts_run`), whose state the plan's
+    plugin-parts view reads instead of the file."""
+
     config = load_config()
     explicit = _explicit_folders(args) if hasattr(args, "claude_dir") else None
     rows, included = _folders(config, explicit, getattr(args, "no_agy", False), saved)
@@ -402,7 +406,8 @@ def _plan(args: argparse.Namespace, current: state.State, saved: settings.Settin
         later = frozenset(plugins.NATIVE) if getattr(args, "trigger", "command") in MCP_LATER_TRIGGERS else frozenset()
         plan.plugins = plugins.build(included, current, options, saved.plugin_approvals if saved else {}, later=later)
     if saved is not None and saved.plugin_parts and not scope.current().project:
-        plan.plugin_parts = plugin_parts.view(included, saved)  # what the last run left; status never builds
+        # What the last run left (this run's, when it made one); status never builds.
+        plan.plugin_parts = plugin_parts.view(included, picks=saved, run_state=parts.state if parts is not None else None)
     return plan
 
 
@@ -1246,10 +1251,10 @@ def _run_sync(args: argparse.Namespace, saved: settings.Settings, command: str, 
         current = state.load()
         replayed = apply.replay(current)
         run_id, parts = _parts_run(saved, included)
-        plan = _plan(args, current, saved)
+        plan = _plan(args, current, saved, parts=parts)
         if any(item.decision.reason == "saved less than 3 s ago" for item in plan.waiting):
             time.sleep(planner.FRESH_SECONDS)  # wait the edit out instead of skipping it
-            plan = _plan(args, current, saved)
+            plan = _plan(args, current, saved, parts=parts)
         saved_at = settings.save(saved) if save else None  # saved only now, holding the lock
         result = apply.apply(plan, current, run=run_id, prior=_part_outcomes(parts))
         if _part_notes(parts):
@@ -1942,7 +1947,7 @@ def _pick_plugin_part(args: argparse.Namespace, saved: settings.Settings, plan: 
         if back:
             plugin_parts.unstop(key, back)  # a link you deleted there is wanted again
         run_id, parts = _parts_run(saved, included)
-        after = _plan(args, current, saved)
+        after = _plan(args, current, saved, parts=parts)
         locked = after.restricted(set())
         result = apply.apply(locked, current, op="pick", run=run_id, prior=_part_outcomes(parts))
         _remember(after, current, result)
@@ -3280,14 +3285,11 @@ def _log_parts_off(command: str, run_id: str, choice: str, found: list[tuple[str
                    outcomes: list[apply.Outcome]) -> None:
     """`kinds remove plugin-parts` in agt's log, as the other kinds' turn-offs are: what it moved and the answer."""
 
-    changes = [{"item": f"{o.kind}/{o.name}", "labels": o.labels, "action": o.action, "path": str(o.path), "ok": o.ok,
-                "backup": str(o.backup) if o.backup else None, **({"message": o.message} if not o.ok else {})}
-               for o in outcomes]
     copies = [{"item": f"{plugin_parts.KIND}/{path.name}", "labels": [label], "path": str(path), "status": "agt"}
               for label, path, _ in found]
     synclog.append({"type": "sync", **synclog.where(None), "command": command, "trigger": "command", "run": run_id,
-                    "items": sorted({o.name for o in outcomes}), "changes": changes, "kept": [], "conflicts": [],
-                    "turned_off": plugin_parts.KIND, "answer": choice, "copies": copies})
+                    "items": sorted({o.name for o in outcomes}), "changes": apply.log_changes(outcomes), "kept": [],
+                    "conflicts": [], "turned_off": plugin_parts.KIND, "answer": choice, "copies": copies})
 
 
 def _kinds_plugins(args: argparse.Namespace, saved: settings.Settings) -> int:

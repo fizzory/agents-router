@@ -196,7 +196,6 @@ class _Reports(list):
 class Part:
     name: str  # what the CLI calls it: the skill's frontmatter name, or the command's file name
     folder: Path  # its skill folder in the mirror
-    command: bool = False
 
 
 @dataclass
@@ -226,7 +225,10 @@ def mirror_path(root: Path, plugin_id: str) -> Path:
     return root / market / name
 
 
-def _entries(folder: Path) -> list[tuple[str, os.stat_result, bool]]:
+Entries = list[tuple[str, os.stat_result, bool]]  # (relative path, lstat, is a folder), as `_entries` lists a tree
+
+
+def _entries(folder: Path) -> Entries:
     """(relative path, lstat, is a folder) for everything under `folder`, `.git` left out, links not followed."""
 
     found = []
@@ -246,30 +248,33 @@ def _entries(folder: Path) -> list[tuple[str, os.stat_result, bool]]:
     return sorted(found, key=lambda item: item[0])
 
 
-def _signature(folder: Path) -> str | None:
-    """Names, sizes and mtimes (ns) of a tree's files and links: a change detector that reads no content."""
+def _signature(folder: Path, entries: Entries | None = None) -> str | None:
+    """Names, sizes and mtimes (ns) of a tree's files and links: a change detector that reads no content.
+    `entries` is the tree's `_entries`, when the caller has them already."""
 
-    if not folder.is_dir():
-        return None
+    if entries is None:
+        if not folder.is_dir():
+            return None
+        entries = _entries(folder)
     digest = hashlib.sha256()
-    for relative, info, is_folder in _entries(folder):
+    for relative, info, is_folder in entries:
         if not is_folder:
             digest.update(f"{relative}\0{info.st_size}\0{info.st_mtime_ns}\n".encode("utf-8", "surrogateescape"))
     return digest.hexdigest()
 
 
-def _digest(folder: Path) -> str:
+def _digest(folder: Path, entries: Entries | None = None) -> str:
     """The mirror's content: every file's bytes and every link's target, dot folders included."""
 
     digest = hashlib.sha256()
-    for relative, info, is_folder in _entries(folder):
+    for relative, info, is_folder in entries if entries is not None else _entries(folder):
         path = folder / relative
         if is_folder:
             continue
         if stat.S_ISLNK(info.st_mode):
             value = "link:" + os.readlink(path)
         else:
-            value = hashlib.sha256(path.read_bytes()).hexdigest()
+            value = fsutil.sha256_file(path)
         digest.update(f"{relative}\0{value}\n".encode("utf-8", "surrogateescape"))
     return digest.hexdigest()
 
@@ -300,7 +305,7 @@ def _write_new(path: Path, data: bytes) -> None:
     except FileNotFoundError:
         mode = 0o644
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
+    temporary = fsutil.temp_sibling(path)
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode | stat.S_IWUSR)
     try:
         with os.fdopen(descriptor, "wb") as handle:
@@ -496,7 +501,7 @@ def _commands(build: Path, final: Path, plugin: str, skills: list[Part], clashes
         content = frontmatter.render({"name": name, "description": description},
                                      "\n" + "\n\n".join(head) + "\n\n" + body.lstrip("\r\n"))
         _write_new(build / COMMANDS / name / "SKILL.md", content.encode("utf-8"))
-        parts.append(Part(name, skill_dir, command=True))
+        parts.append(Part(name, skill_dir))
     return parts
 
 
@@ -572,11 +577,11 @@ def _record(source: Source, signature: str | None, mirror_signature: str | None,
 
 
 def _from_record(source: Source, mirror: Path, record: dict[str, Any]) -> Projection:
-    def parts(key: str, command: bool) -> list[Part]:
-        return [Part(str(item["name"]), mirror / str(item["folder"]), command)
+    def parts(key: str) -> list[Part]:
+        return [Part(str(item["name"]), mirror / str(item["folder"]))
                 for item in record.get(key) or [] if isinstance(item, dict) and "name" in item and "folder" in item]
 
-    return Projection(source.id, source, mirror, parts("skills", False), parts("commands", True),
+    return Projection(source.id, source, mirror, parts("skills"), parts("commands"),
                       [str(line) for line in record.get("reports") or []], record)
 
 
@@ -593,11 +598,18 @@ def refresh(source: Source, root: Path, previous: dict[str, Any] | None = None, 
 
     mirror = mirror_path(root, source.id)
     previous = previous if isinstance(previous, dict) else None
+    exists = os.path.lexists(mirror)
+    # Without `build`, a change known before any tree is walked (no mirror or record, a link in its place, another
+    # root or version) defers at once.
+    if not build and (previous is None or not exists or mirror.is_symlink() or previous.get("root") != str(source.root)
+                      or previous.get("version") != source.version):
+        return _deferred(source, mirror, previous)
     try:
         signature = _signature(source.root)
     except OSError as exc:
         return _failed(source, mirror, previous, f"agt can't read {source.root} ({exc})")
-    exists = os.path.lexists(mirror)
+    if not build and signature != previous.get("source_signature"):
+        return _deferred(source, mirror, previous)  # the mirror tree needn't be walked either
     edited = False
     if exists and previous is not None:
         mirror_signature = None if mirror.is_symlink() else _signature(mirror)
@@ -627,10 +639,11 @@ def refresh(source: Source, root: Path, previous: dict[str, Any] | None = None, 
         _sweep(mirror, backup)
     except OSError as exc:
         return _failed(source, mirror, previous, f"agt can't prepare {mirror.parent} ({exc})")
-    build = mirror.with_name(f".{mirror.name}.{secrets.token_hex(6)}.tmp")
+    build = fsutil.temp_sibling(mirror)
     try:
         skills, commands, reports = _render(source, build, mirror)
-        digest, built_signature = _digest(build), _signature(build)
+        built = _entries(build)  # one listing of the finished tree for both fingerprints
+        digest, built_signature = _digest(build, built), _signature(build, built)
         old = _swap(build, mirror)
     except (OSError, shutil.Error) as exc:
         return _failed(source, mirror, previous, f"agt couldn't build its mirror ({exc})")
@@ -734,6 +747,7 @@ class Result:
     problem: str | None = None  # why the run changed nothing at all (a damaged state file)
     issues: list[dict[str, Any]] = field(default_factory=list)  # what isn't linked: conflicts, failed builds (attention), clashes (notes)
     deferred: list[str] = field(default_factory=list)  # plugins whose build this run left to the next sync
+    state: dict[str, Any] | None = None  # `plugin-parts.json` as this run left it (None: the run didn't get that far)
 
     @property
     def written(self) -> list[Written]:
@@ -1007,6 +1021,7 @@ def run(included: list[providers.Provider], run_id: str, *, root: Path | None = 
             "stopped": {key: sorted(found) for key, found in sorted(stopped.items()) if found}}
     if kept != saved:  # the watcher runs every minute: a run that changed nothing writes nothing
         fsutil.write_json(state_path(), kept)
+    result.state = kept
     if made:
         result.excluded = gitexclude.update(made)
     if removed:
@@ -1241,14 +1256,16 @@ class View:
 
         found: dict[str, dict[str, Any]] = {}
         for plugin_id, record in sorted(self.records.items()):
-            linked = record.get("links") if isinstance(record.get("links"), dict) else {}
+            links = record.get("links") if isinstance(record.get("links"), dict) else {}
+            linked = {label: {name for name in held if isinstance(name, str)}
+                      for label, held in links.items() if isinstance(held, list)}
             for part in [*(record.get("skills") or []), *(record.get("commands") or [])]:
                 if not isinstance(part, dict) or "name" not in part:
                     continue
                 name = str(part["name"])
                 entry = found.setdefault(names.identity(name), {"name": name, "plugins": [], "linked": set()})
                 entry["plugins"].append(plugin_id)
-                entry["linked"] |= {label for label, held in linked.items() if name in (held or [])}
+                entry["linked"] |= {label for label, held in linked.items() if name in held}
         return found
 
     def notes(self) -> list[str]:
@@ -1306,16 +1323,19 @@ class View:
         return cells
 
 
-def view(included: list[providers.Provider], picks: Any = None) -> View:
-    """What the last run left, for `status` and `list`: nothing is read from the plugins and nothing is built."""
+def view(included: list[providers.Provider], picks: Any = None, run_state: dict[str, Any] | None = None) -> View:
+    """What the last run left, for `status` and `list`: nothing is read from the plugins and nothing is built.
+    `run_state` is that run's `Result.state`, when the caller has it; without, the state file is read."""
 
     found = View([provider.label for provider in included if provider.cli == "kiro"],
                  {provider.label: provider.cli for provider in included if provider.cli != "kiro"}, picks=picks)
-    try:
-        saved = load_state()
-    except StateError as exc:
-        found.problem = str(exc)
-        return found
+    saved = run_state
+    if saved is None:
+        try:
+            saved = load_state()
+        except StateError as exc:
+            found.problem = str(exc)
+            return found
     found.records = {plugin_id: record for plugin_id, record in (saved.get("plugins") or {}).items()
                      if isinstance(record, dict) and _valid_id(plugin_id)}
     found.issues = [issue for issue in saved.get("issues") or [] if isinstance(issue, dict) and issue.get("item")]
@@ -1327,12 +1347,12 @@ def attention(shown: View) -> list[dict[str, Any]]:
     """The attention list's entries: two plugins with one skill, a build that failed, and a state file agt can't use.
     Each has its fix. Your own skill coming first is the designed outcome, so it's one of `View.notes`, not here."""
 
+    from agents_router.share import attention as listed
+
     who = {"part-conflict": "choice", "part-failed": "action"}
-    found = [{"id": f"{issue['kind']}:{issue['item']}", "kind": issue["kind"], "item": issue["item"],
-              "who": who.get(str(issue.get("kind")), "action"), "message": str(issue.get("message") or ""),
-              "fix": [str(fix) for fix in issue.get("fix") or []]}
+    found = [listed._entry(issue["kind"], issue["item"], who[issue["kind"]], str(issue.get("message") or ""),
+                           [str(fix) for fix in issue.get("fix") or []])
              for issue in shown.issues if issue.get("kind") in who]
     if shown.problem:
-        found.append({"id": f"part-failed:{KIND}", "kind": "part-failed", "item": KIND, "who": "action",
-                      "message": shown.problem, "fix": []})
+        found.append(listed._entry("part-failed", KIND, "action", shown.problem, []))
     return found

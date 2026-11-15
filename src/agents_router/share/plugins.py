@@ -448,10 +448,15 @@ class Plan:
     problems: list[str] = field(default_factory=list)
     by_label: dict[str, providers.Provider] = field(default_factory=dict)  # the Claude Code and Codex folders
     holdings: dict[str, Holding] = field(default_factory=dict)
-    others: list[str] = field(default_factory=list)  # folders of CLIs that agt installs no plugins in
-    other_clis: dict[str, str] = field(default_factory=dict)  # label -> cli of each folder in `others`
+    other_clis: dict[str, str] = field(default_factory=dict)  # label -> cli of each folder agt installs no plugins in
     later: set[str] = field(default_factory=set)  # labels whose installs wait for the next run
     removing: dict[str, set[str] | None] = field(default_factory=dict)  # id -> labels to uninstall it from (None: all)
+
+    @property
+    def others(self) -> list[str]:
+        """The folders of CLIs that agt installs no plugins in."""
+
+        return list(self.other_clis)
 
     @property
     def writes(self) -> list[tuple[Entry, str]]:
@@ -581,7 +586,6 @@ def build(included: list[providers.Provider], current: State, options: Any, appr
 
     native = [provider for provider in included if provider.cli in NATIVE]
     plan = Plan(by_label={provider.label: provider for provider in native},
-                others=[provider.label for provider in included if provider.cli not in NATIVE],
                 other_clis={provider.label: provider.cli for provider in included if provider.cli not in NATIVE},
                 later={provider.label for provider in native if provider.cli in later})
     entries: dict[str, Entry] = {}

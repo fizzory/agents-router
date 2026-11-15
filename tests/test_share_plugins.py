@@ -113,8 +113,7 @@ class CompatibilityTests(unittest.TestCase):
             self.assertIn("doesn't know where", plugins.reach(None, "elsewhere", "claude", "claude"))
 
     def test_kiro_installs_no_plugins_and_antigravity_has_its_own(self):
-        shared = plugins.Plan(others=["kiro", "antigravity"], other_clis={"kiro": "kiro", "antigravity": "antigravity"},
-                              problems=["x"])
+        shared = plugins.Plan(other_clis={"kiro": "kiro", "antigravity": "antigravity"}, problems=["x"])
         self.assertIn("  kiro: it installs no plugins; antigravity: it has its own plugins, which agt doesn't share to "
                       "yet; plugins go between Claude Code and Codex folders only.", shared.summary())
         self.assertEqual(shared.others_split(), (["kiro"], ["antigravity"]))

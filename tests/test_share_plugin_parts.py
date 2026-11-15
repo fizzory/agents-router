@@ -409,7 +409,7 @@ class CommandTests(PartsBase):
         self.assertTrue((result.mirror / "skills" / "x" / "scripts" / "y.py").is_file())
         self.assertIn("Export the diagram at `$1`", body)
         self.assertIn(("export-diagram", folder), [(part.name, part.folder) for part in result.commands])
-        self.assertTrue(all(part.command for part in result.commands))
+        self.assertTrue(all(part.folder.parent.name == plugin_parts.COMMANDS for part in result.commands))
 
     def test_a_command_without_front_matter_takes_its_first_line(self):
         result = self.build()

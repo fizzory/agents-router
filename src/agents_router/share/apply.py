@@ -854,13 +854,19 @@ def _apply_plugins(plan: planner.Plan, current: State, command: str) -> list[Out
             for written in written]
 
 
+def log_changes(outcomes: list[Outcome]) -> list[dict]:
+    """A run's outcomes as agt's log lists them (`changes`)."""
+
+    return [{"item": f"{o.kind}/{o.name}", "labels": o.labels, "action": o.action, "path": str(o.path), "ok": o.ok,
+             "backup": str(o.backup) if o.backup else None, **({"message": o.message} if not o.ok else {})}
+            for o in outcomes]
+
+
 def _log(plan: planner.Plan, result: Result, command: str, started: float, extra: dict | None,
          trigger: str = "command") -> None:
     if trigger != "command" and not result.outcomes and not result.replayed:
         return  # a background run that changed nothing isn't a line (the watcher runs every minute)
-    changes = [{"item": f"{o.kind}/{o.name}", "labels": o.labels, "action": o.action, "path": str(o.path), "ok": o.ok,
-                "backup": str(o.backup) if o.backup else None, **({"message": o.message} if not o.ok else {})}
-               for o in result.outcomes]
+    changes = log_changes(result.outcomes)
     kept = [{"item": item.key, "label": label} for item in plan.items for label, how in item.drops.items() if how == "release"]
     conflicts = sorted(item.key for item in plan.items if item.decision and item.decision.action == engine.CONFLICT)
     names = {o.name for o in result.outcomes} | {entry["item"].partition("/")[2] for entry in kept} | \

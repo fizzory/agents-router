@@ -203,7 +203,8 @@ def write_text(path: Path, text: str) -> None:
 
 
 def sha256_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    with open(path, "rb") as handle:  # streamed, so a large file never sits in memory whole
+        return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
 def same_path(left: Path | str, right: Path | str) -> bool:

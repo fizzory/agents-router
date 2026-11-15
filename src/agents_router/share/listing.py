@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_router.share import engine, picker, plan as planner, state
+from agents_router.share import engine, exclude, picker, plan as planner, state
 
 
 def pick_cell(item: planner.Item, label: str, made: set[str]) -> picker.Cell:
@@ -56,7 +56,7 @@ def snapshot(plan: planner.Plan, current: state.State, *, enabled: bool) -> dict
     parts = plan.plugin_parts.parts() if plan.plugin_parts is not None else {}
     for excluded in plan.excluded:
         key = f"{excluded.kind}/{planner.names.identity(excluded.name)}"
-        if planner.names.identity(excluded.name) in parts and excluded.reason.endswith("agt links it into Kiro only"):
+        if excluded.origin_kind == exclude.PLUGIN_PARTS and planner.names.identity(excluded.name) in parts:
             continue  # a plugin part's link in Kiro: its `plugin-parts/<name>` item below stands for it
         if not any(item["id"] == key for item in items):
             add(key, excluded.kind, excluded.name,

@@ -5,9 +5,12 @@ Each check returns the reason shown in `status` and the setup list, or None.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 import os
 from pathlib import Path
 import tomllib
+
+from agents_router import fsutil
 
 OWN_AGENT_PREFIX = "agt-"  # agt's relay agents
 OWN_SKILL = "agents-router"
@@ -50,43 +53,55 @@ def plugin_part(path: Path, root: Path | None = None) -> str | None:
     """
 
     try:
-        if not os.path.islink(path) and not _junction(path):
+        if not fsutil.is_link(Path(path)):
             return None
         target = os.readlink(path)
     except (OSError, ValueError):
         return None
     root = root if root is not None else plugin_parts_root()
     leads = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(path)), target))
-    for found in (leads, os.path.realpath(path)):
-        for base in (os.path.normpath(os.path.abspath(root)), os.path.realpath(root)):
-            if found.startswith(base + os.sep):
-                parts = Path(os.path.relpath(found, base)).parts
-                return f"{parts[1]}@{parts[0]}" if len(parts) >= 2 else "a plugin"
+    for found, base in _pairs(path, leads, root):
+        if found.startswith(base + os.sep):
+            parts = Path(os.path.relpath(found, base)).parts
+            return f"{parts[1]}@{parts[0]}" if len(parts) >= 2 else "a plugin"
     return None
 
 
-def _junction(path: Path) -> bool:
-    if os.name != "nt":
-        return False
-    from agents_router import fsutil
+def _pairs(path: Path, leads: str, root: Path) -> Iterator[tuple[str, str]]:
+    """(where the link leads, the mirrors' root) to compare: the lexical paths first, and the real ones, which cost
+    a `realpath` each, only when those don't match."""
 
-    return fsutil.is_link(Path(path))
+    lexical = os.path.normpath(os.path.abspath(root))
+    yield leads, lexical
+    real = os.path.realpath(root)
+    yield leads, real
+    resolved = os.path.realpath(path)
+    yield resolved, lexical
+    yield resolved, real
 
 
 def skill(name: str, folder: Path, disabled: set[str] | None = None) -> str | None:
+    found = skill_exclusion(name, folder, disabled)
+    return found[0] if found else None
+
+
+def skill_exclusion(name: str, folder: Path, disabled: set[str] | None = None) -> tuple[str, str | None] | None:
+    """`skill`'s reason, with the kind of item that stands for the skill instead (`PLUGIN_PARTS` for a link into a
+    plugin's mirror, else None), or None for a skill that's shared."""
+
     if name.startswith("."):
-        return "hidden folder"
+        return "hidden folder", None
     plugin = plugin_part(folder)
     if plugin:
-        return f"part of the {plugin} plugin; agt links it into Kiro only"
+        return f"part of the {plugin} plugin; agt links it into Kiro only", PLUGIN_PARTS
     if name in NOT_SHARED_SKILLS:
-        return NOT_SHARED_SKILLS[name]
+        return NOT_SHARED_SKILLS[name], None
     if name == OWN_SKILL or name.startswith(OWN_AGENT_PREFIX):
-        return "agt's own skill"
+        return "agt's own skill", None
     if not (folder / "SKILL.md").is_file():
-        return "no SKILL.md"
+        return "no SKILL.md", None
     if disabled and _real(folder) in disabled:
-        return "disabled in Codex"
+        return "disabled in Codex", None
     return None
 
 
