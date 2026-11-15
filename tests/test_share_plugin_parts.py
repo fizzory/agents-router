@@ -888,6 +888,36 @@ class LinkTests(PartsBase):
         self.assertTrue(self.link("fmt").is_symlink() and self.link("tidy").is_symlink())
         self.assertEqual(self.saved()["stopped"], {})
 
+    def test_a_folder_you_put_in_place_of_a_link_while_agt_copies_it_stays_yours(self):
+        self.run_parts()
+        copytree = shutil.copytree
+
+        def swapped(source, *args, **kwargs):
+            made = copytree(source, *args, **kwargs)
+            if Path(source) == self.link("fmt"):  # you swap agt's link for a folder of your own as the copy ends
+                self.link("fmt").unlink()
+                self.link("fmt").mkdir()
+                (self.link("fmt") / "SKILL.md").write_text("mine\n")
+            return made
+
+        with apply.lock([provider.folder for provider in self.included]), \
+                patch.object(plugin_parts.shutil, "copytree", swapped):
+            result = plugin_parts.detach(self.included, apply.new_run_id(), {"kiro"})
+        self.assertEqual(self.changes(result), [("detach", "kiro", "fmt", False), ("detach", "kiro", "tidy", True)])
+        [skipped] = result.failed
+        self.assertTrue(skipped.message.startswith(plugin_parts.NOT_NOW), skipped.message)
+        self.assertFalse(self.link("fmt").is_symlink())
+        self.assertEqual((self.link("fmt") / "SKILL.md").read_text(), "mine\n")  # untouched, never the stale copy
+        self.assertEqual(sorted(entry.name for entry in (self.kiro / "skills").iterdir()), ["fmt", "tidy"])  # nothing hidden
+        self.assertFalse(self.link("tidy").is_symlink())
+        # The run isn't finished, so the state file keeps kiro's links; the next one finishes it and leaves yours alone.
+        self.assertEqual(self.saved()["plugins"]["infra@ntbx"]["links"], {"kiro": ["fmt", "tidy"]})
+        with apply.lock([provider.folder for provider in self.included]):
+            again = plugin_parts.detach(self.included, apply.new_run_id(), {"kiro"})
+        self.assertEqual(again.changes, [])
+        self.assertEqual(self.saved()["plugins"]["infra@ntbx"]["links"], {})
+        self.assertEqual((self.link("fmt") / "SKILL.md").read_text(), "mine\n")
+
     def test_kept_copies_never_land_in_a_claude_folder_that_is_kiros(self):
         self.run_parts()
         os.symlink(self.kiro / "skills", self.ntb / "skills", target_is_directory=True)  # after agt linked there

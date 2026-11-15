@@ -1327,13 +1327,19 @@ def detach(included: list[providers.Provider], run_id: str, labels: set[str], *,
 
 
 def _detach(path: Path, label: str) -> Written:
-    """Swap one link for a copy of the folder it leads to: copied next to it, then put in its place by rename."""
+    """Swap one link for a copy of the folder it leads to: copied next to it, then put in its place by rename. What
+    isn't that link any more once it's moved aside (you put a folder of your own there meanwhile) goes back untouched."""
 
+    target = _link_target(path)
+    if target is None:
+        return Written(path.name, label, "detach", path, False, f"{NOT_NOW}{path} changed while agt was working")
     copy = fsutil.temp_sibling(path)
     aside = path.with_name(f".{path.name}.{secrets.token_hex(6)}.old")
     try:
         shutil.copytree(path, copy, symlinks=False, ignore_dangling_symlinks=True, copy_function=_copy_file)
         os.rename(path, aside)
+        if _link_target(aside) != target:
+            return _put_back(aside, path, label, copy)
         try:
             os.rename(copy, path)
         except OSError:
@@ -1346,6 +1352,33 @@ def _detach(path: Path, label: str) -> Written:
         return Written(path.name, label, "detach", path, False,
                        f"couldn't make it a folder of its own ({exc}); run it again to finish")
     return Written(path.name, label, "detach", path, True, "a folder of your own now")
+
+
+def _link_target(path: Path) -> str | None:
+    """What the link at `path` holds, or None when it isn't a link."""
+
+    try:
+        return os.readlink(path) if fsutil.is_link(path) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _put_back(aside: Path, path: Path, label: str, copy: Path) -> Written:
+    """You put something of your own in place of agt's link while agt copied it: it goes back where it was, as it is,
+    never into something that appeared there since, and agt's copy goes."""
+
+    try:
+        if os.path.lexists(path):
+            raise FileExistsError(f"{path} appeared meanwhile")
+        os.rename(aside, path)
+        why = f"{NOT_NOW}{path} changed while agt was working, so agt left it as it is"
+    except OSError as exc:
+        why = f"{NOT_NOW}{path} changed while agt was working; what you put there is at {aside} ({exc})"
+    try:
+        _remove_tree(copy)
+    except OSError:
+        pass
+    return Written(path.name, label, "detach", path, False, why)
 
 
 def links(included: list[providers.Provider], labels: set[str] | None = None,
