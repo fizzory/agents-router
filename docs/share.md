@@ -243,13 +243,15 @@ Only Kiro folders get them. Claude Code and Codex load the plugins themselves, a
 └── hooks/, scripts/, …               copied as they are, so the paths the skills name exist
 ```
 
+A link inside the plugin that leads elsewhere in the plugin leads to the same place in the mirror, so nothing read or written through it reaches the plugin's installed files. A link that leads out of the plugin, such as into another version's folder, is left out, and `agt share status` notes it.
+
 Each Kiro link leads to a skill folder in the mirror. The link's path holds no version, so it stays the same when the plugin updates. `~/.agents-router/state/share/plugin-parts.json` records each plugin's source, version and links.
 
 In the markdown files under `skills/`:
 
 - `${CLAUDE_PLUGIN_ROOT}` and `$CLAUDE_PLUGIN_ROOT` become the mirror's path, and `${CLAUDE_SKILL_DIR}` and `$CLAUDE_SKILL_DIR` the skill's folder in the mirror. Shell forms such as `${CLAUDE_SKILL_DIR:+…}` stay as written.
 - A path that starts with `./` or `../` becomes an absolute path in the mirror when it names something there, so it works wherever Kiro reads the skill from. A path of dots only, such as `cd ../..`, stays: it means the reader's own folder.
-- Other paths and URLs stay as written.
+- Other paths stay as written, and so do URLs, their queries included.
 
 **Commands.** A command becomes a skill like this:
 
@@ -261,7 +263,7 @@ In the markdown files under `skills/`:
 | `allowed-tools` | left out |
 | Its text | kept, after a line naming the command and its plugin; variables and paths change as in skills, and so do paths from the plugin's root, such as `skills/x/run.py` |
 
-A command whose name Kiro doesn't accept, or that has no text, isn't made a skill.
+A command whose name Kiro doesn't accept, or that has neither a description nor text, isn't made a skill. One with a description and no text is.
 
 **What's left out.** `agt share sync` and `agt share status` note what each plugin leaves out, one line per plugin and reason, such as `loom: 5 commands not made skills, its skills of the same names cover them.` `-v` adds the names, and `--json` notes always have them. They're notes, not something that [waits for you](#what-waits-for-you), so `status` still exits 0.
 
@@ -279,8 +281,11 @@ A command whose name Kiro doesn't accept, or that has no text, isn't made a skil
 - **Session starts, saves and MCP server starts** never build a mirror, since a plugin can hold thousands of files. They keep the links as they are and leave the build to the watcher and `agt share sync`.
 - **A plugin uninstalled, off everywhere or installed only for a project now:** its links and its mirror go to the backups.
 - **A Claude folder whose plugin files agt can't read now** (Claude Code in the middle of an update, say): its plugins keep their mirrors and links as they were.
+- **A link agt can't move to the backups** (a Kiro folder you can't write to, say): its mirror stays, so the link still works, and the next run tries again.
+- **A Kiro skills folder that's missing now**, after agt linked parts or shared skills into it: agt doesn't make it again, and links or removes nothing there until it's back. Back, it gets its links again; none counts as one you deleted.
+- **A Kiro skills folder that is another CLI's folder, or agt's, under another name** (a link either way, such as `~/.kiro/skills` leading to `~/.claude/skills`): agt links nothing there, since the links would land in that CLI too, and it [waits for you](#what-waits-for-you). Made a folder of its own again, it gets its links again; none counts as one you deleted.
 
-**Edits.** A plugin's parts belong to the plugin. An edit to a linked skill through Kiro changes agt's mirror, never the plugin. The next sync or watcher run moves the edited mirror to the backups and builds it again from the plugin. To keep a change, make it in the plugin, or in a skill of your own under another name.
+**Edits.** A plugin's parts belong to the plugin. An edit to a linked skill through Kiro changes agt's mirror, never the plugin. The next sync or watcher run moves the edited mirror to the backups and builds it again from the plugin; an edit made while agt rebuilds the mirror goes to the backups too. To keep a change, make it in the plugin, or in a skill of your own under another name.
 
 **Choosing where they go.** Each part is an item named `plugin-parts/<name>`:
 
@@ -290,11 +295,11 @@ agt share pick plugin-parts/aws-setup --not-in kiro  # agt's link goes to the ba
 agt share pick plugin-parts/aws-setup --in kiro      # back again
 ```
 
-A link agt made that you delete stops that part going to that Kiro folder, as with every copy agt makes; `--in` brings it back. A pick names Kiro folders only. `agt share list --json` lists each part with a cell per folder: Claude Code and Codex folders load it from the plugin.
+A link agt made that you delete stops that part going to that Kiro folder, as with every copy agt makes; `--in` brings it back, even before a sync has seen the link go. A pick names Kiro folders only. `agt share list --json` lists each part with a cell per folder: Claude Code and Codex folders load it from the plugin.
 
 **Backups.** Links go to `backups/<run>/plugin-parts/links/<label>/` and mirrors to `backups/<run>/plugin-parts/mirrors/<marketplace>/<plugin>`, under `~/.agents-router/state/share/`, with that run's `plugin-parts/manifest.json`. `agt share undo` doesn't cover plugin parts.
 
-**Turning them off.** `agt share kinds remove plugin-parts` asks what happens to the links agt made in Kiro, like the other kinds: `--keep-copies` leaves them as your own files, and agt stops updating them; `--remove-copies` moves the links and agt's mirrors to the backups. Without either, a terminal asks, and an agent gets the question back (exit 3). `agt share disable --remove-copies` removes them too, and `agt share cli remove kiro` keeps or removes that folder's links with the same answer as its other copies.
+**Turning them off.** `agt share kinds remove plugin-parts` asks what happens to the links agt made in Kiro, like the other kinds: `--keep-copies` leaves them as your own files, and agt stops updating them; `--remove-copies` moves the links and agt's mirrors to the backups. Without either, a terminal asks, and an agent gets the question back (exit 3). `agt share disable --remove-copies` removes them too, and `agt share cli remove kiro` keeps or removes that folder's links with the same answer as its other copies. There, `--keep-copies` makes each link a folder of your own, a copy of the skill it led to, so it never changes or breaks with a mirror agt goes on updating for other Kiro folders; a kept skill still names its plugin's scripts in agt's mirror.
 
 ## What a copy holds
 
@@ -481,6 +486,7 @@ Every run that writes is one line in agt's log, with each write and backup: see 
 | A plugin install that failed | you fix it, or keep it out | `agt share pick plugins/<id> --in <label>` (tries again) or `--not-in <label>` |
 | Two plugins with a skill or command of one name, so neither goes to Kiro | you choose | turn one plugin off in Claude Code, or `agt share pick plugin-parts/<name> --not-in <label>` |
 | A plugin's parts agt couldn't build for Kiro | you fix it | `agt share sync` (tries again) |
+| A Kiro skills folder that is another CLI's folder, or agt's, under another name | you fix it | make it a folder of its own, then `agt share sync` |
 | `plugin-parts.json` damaged, or written by a newer agt | you fix it | remove the file (the next sync builds the mirrors again), or update agt |
 | The background watcher stopped | an agent can do it | `agt doctor --fix` |
 

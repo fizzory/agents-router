@@ -411,16 +411,18 @@ def _plan(args: argparse.Namespace, current: state.State, saved: settings.Settin
     return plan
 
 
-def _parts_run(saved: settings.Settings, included: list[providers.Provider],
-               trigger: str = "command") -> tuple[str, plugin_parts.Result | None]:
+def _parts_run(saved: settings.Settings, included: list[providers.Provider], trigger: str = "command",
+               restore: dict[str, list[str]] | None = None) -> tuple[str, plugin_parts.Result | None]:
     """This run's id, and the plugin-parts pass it makes first, holding the lock after `replay` and before `_plan`, so a
     link that steps aside for your skill is gone when the plan links yours. A session start or a save builds no mirror:
-    it leaves that to the watcher and `agt share sync`. In a repo, or with the kind off, there's no pass."""
+    it leaves that to the watcher and `agt share sync`. In a repo, or with the kind off, there's no pass. `restore`
+    (`pick --in`): skill identity -> the Kiro labels where a link you deleted is wanted again."""
 
     run_id = apply.new_run_id()
     if not saved.plugin_parts or scope.current().project:
         return run_id, None
-    return run_id, plugin_parts.run(included, run_id, build=trigger not in MCP_LATER_TRIGGERS, picks=saved)
+    return run_id, plugin_parts.run(included, run_id, build=trigger not in MCP_LATER_TRIGGERS, picks=saved,
+                                    restore=restore)
 
 
 def _part_outcomes(parts: plugin_parts.Result | None) -> list[apply.Outcome]:
@@ -537,7 +539,7 @@ def _needs_choice(plan: planner.Plan, command: str, as_json: bool) -> int:
 
 
 MARKS = {"copy": "+", "link": "+", "update": "~", "relink": "~", "migrate": "~", "remove": "-", "rename": ">",
-         "rebuild": "~", "backup": "~",
+         "rebuild": "~", "backup": "~", "detach": "~",
          "rename-folder": ">", "rename-link": ">"}
 MARK_STYLES = {"+": "ok", "~": "warn", "-": "muted", ">": "warn"}
 _verbose = False  # -v: each item line is followed by the file of each copy written
@@ -1943,10 +1945,8 @@ def _pick_plugin_part(args: argparse.Namespace, saved: settings.Settings, plan: 
     with apply.lock([provider.folder for provider in included]):
         current = state.load()
         saved_at = settings.save(saved)
-        back = sorted({*to_in, *(only or [])})
-        if back:
-            plugin_parts.unstop(key, back)  # a link you deleted there is wanted again
-        run_id, parts = _parts_run(saved, included)
+        back = sorted({*to_in, *(only or [])})  # a link you deleted there is wanted again, even one deleted just now
+        run_id, parts = _parts_run(saved, included, restore={key: back} if back else None)
         after = _plan(args, current, saved, parts=parts)
         locked = after.restricted(set())
         result = apply.apply(locked, current, op="pick", run=run_id, prior=_part_outcomes(parts))
@@ -2726,8 +2726,10 @@ def _turn_off_writes(args: argparse.Namespace, part: _Part, op: str, what: str, 
                 # Its plugin-part links follow the same answer, and the plugin-parts state forgets the folder.
                 if choice == "remove":
                     result.outcomes += _part_outcomes(plugin_parts.remove(included, result.run, labels=part.labels))
-                else:
-                    plugin_parts.forget_label(part.labels)
+                else:  # kept as folders of your own, never links into a mirror agt goes on changing elsewhere
+                    detached = plugin_parts.detach(included, result.run, part.labels)
+                    result.outcomes += [outcome for outcome in _part_outcomes(detached)
+                                        if not outcome.ok or outcome.action == "remove"]
             if not result.failed and op == "disable" and choice == "remove" and not part.target.project and saved.plugin_parts:
                 # Every plugin-part link and agt's mirrors go to the backups too, and the plugin-parts state goes.
                 result.outcomes += _part_outcomes(plugin_parts.remove(included, result.run))

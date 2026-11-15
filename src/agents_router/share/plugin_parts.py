@@ -12,11 +12,11 @@ mirror of it in agt's state:
 | Rule | Choice |
 |---|---|
 | Source | Newest enabled (`enabledPlugins` true) user-scope install of a plugin id; ties go to folder order. agents-router, turned off everywhere or project scope only: none. |
-| Mirror | A copy of the plugin tree with its layout kept, `.git` left out, built next to the mirror and swapped in by rename. The plugin cache is only read. |
+| Mirror | A copy of the plugin tree with its layout kept, `.git` left out, built next to the mirror and swapped in by rename. The plugin cache is only read: a link inside the plugin leads to the same place in the mirror, and one out of it is left out. |
 | Variables | `${CLAUDE_PLUGIN_ROOT}`, `$CLAUDE_PLUGIN_ROOT`, `${CLAUDE_SKILL_DIR}` and `$CLAUDE_SKILL_DIR` in markdown files under `skills/`; shell forms like `${CLAUDE_SKILL_DIR:+…}` stay. |
-| Paths | In those files, `./x` and `../x` read from the file's folder become absolute mirror paths when they name something inside the mirror; a command skill also takes bare plugin-root paths (`skills/x/…`, first segment a top-level entry). Other paths and URLs stay. |
+| Paths | In those files, `./x` and `../x` read from the file's folder become absolute mirror paths when they name something inside the mirror; a command skill also takes bare plugin-root paths (`skills/x/…`, first segment a top-level entry). Other paths and URLs (their queries too) stay. |
 | Commands | `commands/<name>.md` becomes a skill unless a skill of the plugin has that name (two skills that clash over it keep it too) or the name isn't valid; both are reported. |
-| Keeping current | A run that finds the same source, version and source mtimes, and an unchanged mirror, rebuilds and hashes nothing. A mirror changed since agt built it is handed to `backup`, then rebuilt. |
+| Keeping current | A run that finds the same source, version and source mtimes, and an unchanged mirror, rebuilds and hashes nothing. A mirror changed since agt built it, before or during the rebuild, is handed to `backup`. |
 | Kiro | `<kiro>/skills/<name>` is an absolute link to the mirror skill folder, a path with no version in it. Only Kiro gets them: Claude and Codex load plugins themselves. |
 
 `select`, `refresh` and `project` change only the mirror folders. `run` is the whole pass a sync makes: it keeps
@@ -52,9 +52,10 @@ TOKEN_RE = re.compile(r"\$\{(CLAUDE_PLUGIN_ROOT|CLAUDE_SKILL_DIR)\}|\$(CLAUDE_PL
 SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")  # a marketplace or plugin name, as one folder name
 # `./x` or `../x` at the start of a word, a link target or a code span.
 RELATIVE_RE = re.compile(r"(?<![^\s(\[<`'\"=])(\.\.?/[^\s)\]>`'\"#?]*)")
-# The same, or a bare `first/rest` (command skills: `first` must be a top-level entry of the mirror). A URL is one
-# bare match whose first segment (`https:`) is no entry, so the `../` inside it is never read on its own.
+# The same, or a bare `first/rest` (command skills: `first` must be a top-level entry of the mirror).
 COMMAND_PATH_RE = re.compile(r"(?<![^\s(\[<`'\"=])(\.\.?/[^\s)\]>`'\"#?]*|[^\s/()\[\]<>`'\"=#?]+/[^\s()\[\]<>`'\"=#?]+)")
+# A URL, up to the next space: no path inside it, its query included, is rewritten.
+URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S*")
 ARGUMENT_RE = re.compile(r"\$ARGUMENTS\b|\$\d")
 VERSION_RE = re.compile(r"^v?(\d+(?:\.\d+)*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$")
 ARGUMENT_NOTE = ("`$ARGUMENTS` below stands for everything asked along with this command, "
@@ -176,6 +177,8 @@ LEFT_OUT = {
                            "{n} commands not made skills, they have no description and no text"),
     ("file", "raw"): ("1 file copied as it is, it isn't UTF-8, so its paths and variables stay as written",
                       "{n} files copied as they are, they aren't UTF-8, so their paths and variables stay as written"),
+    ("link", "outside"): ("1 link left out, it leads out of the plugin",
+                          "{n} links left out, they lead out of the plugin"),
 }
 
 
@@ -408,7 +411,7 @@ def _dot_segment_end(path: str) -> bool:
 def _absolute_paths(text: str, build: Path, final: Path, base: str, top: frozenset[str] | None = None) -> str:
     """`./x` and `../x` read from `base` (a folder in the plugin) become absolute mirror paths when they exist
     inside the mirror. With `top` (the mirror's top-level entries), a bare `first/rest` whose `first` is one of
-    them is read from the plugin root the same way."""
+    them is read from the plugin root the same way. URLs stay as written, their queries included."""
 
     def replace(match: re.Match[str]) -> str:
         path = match.group(1)
@@ -429,7 +432,12 @@ def _absolute_paths(text: str, build: Path, final: Path, base: str, top: frozens
         absolute = (final / joined).as_posix() if joined != "." else final.as_posix()
         return absolute + ("/" if path.endswith("/") and not absolute.endswith("/") else "") + trail
 
-    return (COMMAND_PATH_RE if top is not None else RELATIVE_RE).sub(replace, text)
+    pattern = COMMAND_PATH_RE if top is not None else RELATIVE_RE
+    pieces, last = [], 0
+    for url in URL_RE.finditer(text):  # a URL stays as written
+        pieces += [pattern.sub(replace, text[last:url.start()]), url.group(0)]
+        last = url.end()
+    return "".join([*pieces, pattern.sub(replace, text[last:])])
 
 
 def _rewrite(text: str, build: Path, final: Path, base: str, skill_dir: str | None,
@@ -505,6 +513,32 @@ def _commands(build: Path, final: Path, plugin: str, skills: list[Part], clashes
     return parts
 
 
+def _inside(path: str, base: str) -> bool:
+    return path == base or path.startswith(base.rstrip(os.sep) + os.sep)
+
+
+def _rebase_links(source: Path, build: Path, reports: _Reports) -> None:
+    """The plugin's links, as copied into `build`: one that leads inside the plugin, by an absolute path too, now
+    leads to the same place in the mirror by a relative one, so nothing read or written through it reaches the
+    plugin cache. One that leads out of the plugin (another version's folder, anywhere else) is left out."""
+
+    real_root = os.path.realpath(source)
+    for relative, info, _ in _entries(build):
+        if not stat.S_ISLNK(info.st_mode):
+            continue
+        path = build / relative
+        leads = os.path.realpath(source / relative)  # copytree went into no link, so only this one is followed
+        inside = os.path.relpath(leads, real_root) if _inside(leads, real_root) else None
+        if inside is None or inside.split(os.sep, 1)[0] in SKIPPED:
+            os.unlink(path)
+            reports.leave(f"{relative}: left out, it's a link out of the plugin", "link", relative, "outside")
+            continue
+        target = os.path.relpath(build / inside, path.parent)
+        if os.readlink(path) != target:
+            os.unlink(path)
+            os.symlink(target, path, target_is_directory=(build / inside).is_dir())
+
+
 def _render(source: Source, build: Path, final: Path) -> tuple[list[Part], list[Part], _Reports]:
     """Copy the plugin into `build` and turn it into the mirror that will live at `final`."""
 
@@ -522,6 +556,7 @@ def _render(source: Source, build: Path, final: Path) -> tuple[list[Part], list[
                 os.chmod(path, stat.S_IMODE(os.lstat(path).st_mode) | stat.S_IRWXU)
     os.chmod(build, stat.S_IMODE(os.lstat(build).st_mode) | stat.S_IRWXU)
     reports = _Reports()
+    _rebase_links(source.root, build, reports)  # before anything reads through them
     _render_skills(build, final, reports)
     skills, clashes = _skills(build, final, reports)
     commands = _commands(build, final, source.name, skills, clashes, reports)
@@ -632,7 +667,6 @@ def refresh(source: Source, root: Path, previous: dict[str, Any] | None = None, 
         edited = True
     if not build:
         return _deferred(source, mirror, previous)
-    retire = backup if edited else None
     try:
         root.mkdir(parents=True, exist_ok=True)
         mirror.parent.mkdir(parents=True, exist_ok=True)
@@ -653,12 +687,23 @@ def refresh(source: Source, root: Path, previous: dict[str, Any] | None = None, 
     projection = Projection(source.id, source, mirror, skills, commands, reports, record, rebuilt=True, edited=edited)
     if old is not None:
         try:
-            if retire is not None:
-                retire(old)
+            # Read again now: an edit made while agt built the new tree is in the old one, and is kept too.
+            if backup is not None and (edited or _changed(old, previous)):
+                backup(old)
             _remove_tree(old)
         except OSError as exc:  # the next run's sweep tries again
             projection.reports.append(f"agt couldn't put the old mirror away yet ({exc})")
     return projection
+
+
+def _changed(folder: Path, record: dict[str, Any] | None) -> bool:
+    """Whether a mirror set aside differs from the one agt built and recorded."""
+
+    if record is None or os.path.islink(folder):
+        return True
+    entries = _entries(folder)
+    return (_signature(folder, entries) != record.get("mirror_signature")
+            and _digest(folder, entries) != record.get("digest"))
 
 
 def _failed(source: Source, mirror: Path, previous: dict[str, Any] | None, why: str) -> Projection:
@@ -837,7 +882,7 @@ def _user_skills(included: list[providers.Provider], root: Path) -> dict[str, st
 
 
 def run(included: list[providers.Provider], run_id: str, *, root: Path | None = None, build: bool = True,
-        picks: Any = None) -> Result:
+        picks: Any = None, restore: dict[str, list[str]] | None = None) -> Result:
     """One plugin-parts run for your user folders: build or keep each plugin's mirror, then make each Kiro skills
     folder hold a link per mirror skill, and keep `plugin-parts.json`.
 
@@ -853,8 +898,11 @@ def run(included: list[providers.Provider], run_id: str, *, root: Path | None = 
     | A mirror changed since agt built it (an edit through Kiro) | it goes to the backups and is rebuilt from the plugin |
     | A plugin uninstalled, off everywhere or project scope only | its links and mirror go to the backups |
     | A plugin update | the mirror is rebuilt in place; the link path has no version, so it never changes |
-    | A link you delete in a Kiro folder | that skill stops going there (`stopped` in the state file) until `agt share pick plugin-parts/<name> --in <label>` |
+    | A link you delete in a Kiro folder | that skill stops going there (`stopped` in the state file) until `agt share pick plugin-parts/<name> --in <label>` (`restore`: skill identity -> those labels) |
     | `picks` (your share settings) keep a skill out of a Kiro folder | its link there goes to the backups |
+    | A link agt can't move away | its mirror and record stay until the link is gone |
+    | A Kiro skills folder agt linked or shared skills into before, missing now | nothing is linked or removed there, and its records stay, until it's back |
+    | A Kiro skills folder that is another CLI's folder, or agt's, under another name (a link either way) | nothing is linked or removed there, and it's an attention entry |
 
     Without `build` (a session start or a save), no mirror is built or hashed: those plugins keep their earlier
     mirror and links, and their ids are in `Result.deferred` for the next sync.
@@ -878,16 +926,22 @@ def run(included: list[providers.Provider], run_id: str, *, root: Path | None = 
     previous = {plugin_id: record for plugin_id, record in (saved.get("plugins") or {}).items()
                 if isinstance(record, dict) and _valid_id(plugin_id)}
     stopped = _stopped(saved)
+    waiting = _waiting(targets, included, previous, result)
     # A link agt made that you deleted since: that skill stops going to that Kiro folder. A folder that's gone
-    # altogether stops nothing.
+    # altogether stops nothing, and neither does one agt left alone last run (missing, or another CLI's folder under
+    # another name): back as a folder of its own, it gets its links again.
+    was_waiting = set(saved.get("waiting") or []) if isinstance(saved.get("waiting"), list) else set()
     for provider in targets:
         folder = provider.writable("skills").path
-        if not folder.is_dir():
+        if provider.label in waiting or provider.label in was_waiting or not folder.is_dir():
             continue
         for record in previous.values():
             for name in (record.get("links") or {}).get(provider.label) or []:
                 if not os.path.lexists(folder / str(name)):
                     stopped.setdefault(names.identity(str(name)), set()).add(provider.label)
+    for key, labels in (restore or {}).items():  # `pick --in`: wanted there again, a link deleted just now too
+        if key in stopped:
+            stopped[key] -= set(labels)
 
     def kept_out(key: str, label: str) -> str | None:
         return _kept_out(picks, stopped, key, label)
@@ -960,6 +1014,12 @@ def run(included: list[providers.Provider], run_id: str, *, root: Path | None = 
     for provider in targets:
         folder = provider.writable("skills").path
         label = provider.label
+        if label in waiting:  # left alone: the links recorded there stay recorded
+            for plugin_id, record in previous.items():
+                held = (record.get("links") or {}).get(label)
+                if isinstance(held, list) and held:
+                    linked.setdefault(plugin_id, {})[label] = [str(name) for name in held]
+            continue
         present = {}
         if folder.is_dir():
             present = {entry.name: entry for entry in sorted(folder.iterdir())
@@ -979,6 +1039,8 @@ def run(included: list[providers.Provider], run_id: str, *, root: Path | None = 
                 if change.ok:
                     have.add(key)
                     linked.setdefault(offer[0], {}).setdefault(label, []).append(name)
+                else:
+                    _still(entry, name, label, root, outcome, linked)
                 continue
             why = out or why_not.get(key) or (f"agt links it as {offer[1].name} now" if offer is not None
                                               else "its plugin isn't projected any more")
@@ -986,6 +1048,8 @@ def run(included: list[providers.Provider], run_id: str, *, root: Path | None = 
             result.changes.append(change)
             if change.ok:
                 removed.append(entry)
+            else:
+                _still(entry, name, label, root, outcome, linked)
         for key, (plugin_id, part) in sorted(wanted.items()):
             if key in have or kept_out(key, label):
                 continue
@@ -998,10 +1062,16 @@ def run(included: list[providers.Provider], run_id: str, *, root: Path | None = 
                 result.changes.pop()
                 result.reports.append(f"{part.name} ({plugin_id}): not linked in {label}, {change.message[len(NOT_NOW):]}")
 
-    # Mirrors of plugins that aren't projected any more go to the backups (their links went above).
+    # Mirrors of plugins that aren't projected any more go to the backups (their links went above), unless a link
+    # still leads into one: it and its record stay until the link is gone.
     records: dict[str, dict[str, Any]] = {}
     for plugin_id in sorted(set(previous) - set(outcome.projections)):
         mirror = mirror_path(root, plugin_id)
+        if linked.get(plugin_id):
+            records[plugin_id] = {**previous[plugin_id], "links": _sorted_links(linked[plugin_id])}
+            result.reports.append(f"{plugin_id}: its mirror stays while agt's links to it in "
+                                  f"{_and(sorted(linked[plugin_id]))} do")
+            continue
         if not os.path.lexists(mirror):
             continue
         name, _, market = plugin_id.partition("@")
@@ -1015,10 +1085,10 @@ def run(included: list[providers.Provider], run_id: str, *, root: Path | None = 
         result.changes.append(Written(plugin_id, "", "remove", mirror, True, "its plugin isn't projected any more", moved))
     for plugin_id, projection in outcome.projections.items():
         if projection.record is not None:
-            records[plugin_id] = {**projection.record,
-                                  "links": {label: sorted(found) for label, found in sorted(linked.get(plugin_id, {}).items())}}
+            records[plugin_id] = {**projection.record, "links": _sorted_links(linked.get(plugin_id, {}))}
     kept = {"schema": STATE_SCHEMA, "plugins": records, "reports": result.reports, "issues": result.issues,
-            "stopped": {key: sorted(found) for key, found in sorted(stopped.items()) if found}}
+            "stopped": {key: sorted(found) for key, found in sorted(stopped.items()) if found},
+            **({"waiting": sorted(waiting)} if waiting else {})}
     if kept != saved:  # the watcher runs every minute: a run that changed nothing writes nothing
         fsutil.write_json(state_path(), kept)
     result.state = kept
@@ -1036,6 +1106,76 @@ NOT_NOW = "skipped this run: "
 def _valid_id(plugin_id: str) -> bool:
     name, _, market = plugin_id.partition("@")
     return bool(SEGMENT_RE.match(name) and SEGMENT_RE.match(market))
+
+
+def _sorted_links(found: dict[str, list[str]]) -> dict[str, list[str]]:
+    return {label: sorted(set(held)) for label, held in sorted(found.items()) if held}
+
+
+def _still(entry: Path, name: str, label: str, root: Path, outcome: Outcome,
+           linked: dict[str, dict[str, list[str]]]) -> None:
+    """A link agt couldn't move away that still leads into the mirror of a plugin no longer projected: that plugin's
+    mirror and record stay, holding it."""
+
+    owner = exclude.plugin_part(entry, root) if os.path.lexists(entry) else None
+    if owner and owner not in outcome.projections and _valid_id(owner):
+        linked.setdefault(owner, {}).setdefault(label, []).append(name)
+
+
+def _aliased(provider: providers.Provider, included: list[providers.Provider]) -> str | None:
+    """Why a Kiro skills folder is another CLI's folder, or agt's, under another name (a link either way), or None:
+    what agt linked there would land in that folder too."""
+
+    from agents_router.share import scope
+
+    folder = provider.writable("skills").path
+    real = os.path.realpath(folder)
+    others = [other for other in included if other.cli != "kiro"]
+    places = [(other.label, location.path) for other in others
+              for found in other.locations.values() for location in found]
+    places += [(other.label, other.folder) for other in others] + [("agt", scope.share_root())]  # the closest first
+    for label, path in places:
+        there = os.path.realpath(path)
+        if there == real:
+            return f"{folder} is {path} ({label}'s) under another name"
+        if _inside(real, there):
+            return f"{folder} is a folder inside {path} ({label}'s) under another name"
+        if _inside(there, real):
+            return f"{path} ({label}'s) is a folder inside {folder} under another name"
+    return None
+
+
+def _synced(label: str, previous: dict[str, dict[str, Any]]) -> bool:
+    """Whether agt linked plugin parts or shared skills into this Kiro label before."""
+
+    if any(isinstance(record.get("links"), dict) and record["links"].get(label) for record in previous.values()):
+        return True
+    try:
+        current = state.load()
+    except state.StateError:
+        return True  # unknown, so the folder isn't made again
+    return any(key.startswith("skills/") and label in (record.get("copies") or {})
+               for key, record in current.items.items() if isinstance(record, dict))
+
+
+def _waiting(targets: list[providers.Provider], included: list[providers.Provider], previous: dict[str, dict[str, Any]],
+             result: Result) -> dict[str, str]:
+    """The Kiro labels this run leaves alone, label -> why."""
+
+    waiting: dict[str, str] = {}
+    for provider in targets:
+        label, folder = provider.label, provider.writable("skills").path
+        if why := _aliased(provider, included):
+            waiting[label] = why
+            message = (f"agt links no plugin parts into {label}: {why}, so they'd land there too; "
+                       f"make {folder} a folder of its own, then sync")
+            result.reports.append(message)
+            result.issues.append({"kind": "part-failed", "item": KIND, "name": "", "label": label, "message": message,
+                                  "fix": ["agt share sync"]})
+        elif not folder.is_dir() and _synced(label, previous):
+            waiting[label] = f"{label}'s skills folder is missing: nothing is linked or removed there until it's back"
+            result.reports.append(waiting[label])
+    return waiting
 
 
 def _link(path: Path, part: Part, label: str) -> Written:
@@ -1131,19 +1271,6 @@ def _write_state(data: dict[str, Any]) -> None:
     fsutil.write_json(state_path(), data)
 
 
-def unstop(key: str, labels: list[str]) -> None:
-    """`agt share pick plugin-parts/<name> --in <label>`: a link you deleted there is wanted again. Call it holding
-    the lock, before `run`."""
-
-    saved = load_state()
-    stopped = _stopped(saved)
-    if not stopped.get(key, set()) & set(labels):
-        return
-    stopped[key] -= set(labels)
-    saved["stopped"] = {name: sorted(found) for name, found in sorted(stopped.items()) if found}
-    _write_state(saved)
-
-
 def recorded_labels() -> list[str]:
     """The Kiro labels the state file holds links for."""
 
@@ -1171,6 +1298,54 @@ def forget_label(labels: set[str], *, stops: bool = True) -> None:
     stopped = {key: found - labels if stops else found for key, found in _stopped(saved).items()}
     saved["stopped"] = {key: sorted(found) for key, found in sorted(stopped.items()) if found}
     _write_state(saved)
+
+
+def detach(included: list[providers.Provider], run_id: str, labels: set[str], *, root: Path | None = None) -> Result:
+    """`agt share cli remove <kiro> --keep-copies`: agt's links in those Kiro folders become folders of your own, each a
+    copy of what its link led to, so none follows or loses a mirror agt goes on changing for the Kiro folders still
+    sharing. The state file forgets those folders once every link is a folder. A kept copy names its plugin's other
+    files (its scripts) by their mirror paths, as the link did. Call it holding the lock."""
+
+    from agents_router.share import scope
+
+    result = Result(run_id)
+    if scope.current().project:
+        return result
+    root = root if root is not None else default_root()
+    backups = _Backups(run_id)
+    # A Kiro folder that is another CLI's under another name: a copy there would be that CLI's skill too, so agt's link
+    # goes to the backups instead.
+    aliased = {provider.label for provider in included if provider.cli == "kiro" and provider.label in labels
+               and provider.writable("skills") is not None and _aliased(provider, included)}
+    for label, path, _ in links(included, labels, root):
+        result.changes.append(_take_away(path, path.name, label, "it would land in another CLI's folder too", backups,
+                                         root) if label in aliased else _detach(path, label))
+    if not result.failed:
+        forget_label(labels)
+    _manifest(backups, result)
+    return result
+
+
+def _detach(path: Path, label: str) -> Written:
+    """Swap one link for a copy of the folder it leads to: copied next to it, then put in its place by rename."""
+
+    copy = fsutil.temp_sibling(path)
+    aside = path.with_name(f".{path.name}.{secrets.token_hex(6)}.old")
+    try:
+        shutil.copytree(path, copy, symlinks=False, ignore_dangling_symlinks=True, copy_function=_copy_file)
+        os.rename(path, aside)
+        try:
+            os.rename(copy, path)
+        except OSError:
+            os.rename(aside, path)
+            raise
+        fsutil.remove_link(aside)
+    except (OSError, shutil.Error, RecursionError) as exc:
+        if os.path.lexists(copy):
+            _remove_tree(copy)
+        return Written(path.name, label, "detach", path, False,
+                       f"couldn't make it a folder of its own ({exc}); run it again to finish")
+    return Written(path.name, label, "detach", path, True, "a folder of your own now")
 
 
 def links(included: list[providers.Provider], labels: set[str] | None = None,
@@ -1351,7 +1526,7 @@ def attention(shown: View) -> list[dict[str, Any]]:
 
     who = {"part-conflict": "choice", "part-failed": "action"}
     found = [listed._entry(issue["kind"], issue["item"], who[issue["kind"]], str(issue.get("message") or ""),
-                           [str(fix) for fix in issue.get("fix") or []])
+                           [str(fix) for fix in issue.get("fix") or []], str(issue.get("label") or ""))
              for issue in shown.issues if issue.get("kind") in who]
     if shown.problem:
         found.append(listed._entry("part-failed", KIND, "action", shown.problem, []))

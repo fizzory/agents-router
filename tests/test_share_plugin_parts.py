@@ -346,6 +346,57 @@ class MirrorTests(PartsBase):
         self.build(first.record)
         self.assertFalse(stale.exists())
 
+    def test_links_inside_the_plugin_lead_into_the_mirror_and_links_out_are_left_out(self):
+        outside = self.root / "outside.md"
+        outside.write_text("Not the plugin's.\n")
+        sibling = self.cache.parent / "6.0.0" / "old.md"  # an older version's folder next to this one
+        sibling.parent.mkdir(parents=True)
+        sibling.write_text("Old.\n")
+        links = {"skills/s/abs.sh": self.cache / "scripts" / "a.sh", "skills/s/rel.sh": "../../scripts/a.sh",
+                 "skills/s/out.md": outside, "skills/s/sibling.md": "../../../6.0.0/old.md"}
+        try:
+            for relative, target in links.items():
+                os.symlink(target, self.cache / relative)
+        except OSError:
+            self.skipTest("symlinks need extra rights on this system")
+        before = tree_hashes(self.cache)
+        result = self.build()
+        self.assertIsNone(result.failed)
+        mirror = result.mirror.resolve()
+        absolute = result.mirror / "skills" / "s" / "abs.sh"
+        self.assertTrue(absolute.is_symlink())
+        self.assertTrue(absolute.resolve().is_relative_to(mirror), os.readlink(absolute))  # never into the cache
+        self.assertEqual(absolute.read_text(), "#!/bin/sh\n")
+        self.assertEqual(os.readlink(result.mirror / "skills" / "s" / "rel.sh"), "../../scripts/a.sh")  # as it was
+        for name in ("out.md", "sibling.md"):  # out of the plugin: left out, and said so
+            self.assertFalse(os.path.lexists(result.mirror / "skills" / "s" / name), name)
+            self.assertTrue(any(f"skills/s/{name}" in line for line in result.reports), result.reports)
+        self.assertEqual(sorted(entry["name"] for entry in result.record["left_out"] if entry["part"] == "link"),
+                         ["skills/s/out.md", "skills/s/sibling.md"])
+        absolute.write_text("edited in Kiro\n")  # an edit through the link stays in the mirror
+        self.assertEqual(tree_hashes(self.cache), before)
+
+    def test_an_edit_made_during_a_rebuild_is_backed_up(self):
+        first = self.build()
+        skill = first.mirror / "skills" / "s" / "SKILL.md"
+        (self.cache / "scripts" / "a.sh").write_text("#!/bin/sh\necho new\n")
+        set_times(self.cache / "scripts" / "a.sh", 2_000_000)
+        copy = plugin_parts._copy_file
+        kept = []
+
+        def editing(source, destination):
+            if not kept and skill.read_text() != "edited during the build\n":
+                skill.write_text("edited during the build\n")  # through Kiro, while agt copies the plugin
+            return copy(source, destination)
+
+        def backup(folder):
+            kept.append((folder / "skills" / "s" / "SKILL.md").read_text())
+
+        with patch.object(plugin_parts, "_copy_file", editing):
+            second = self.build(first.record, backup=backup)
+        self.assertTrue(second.rebuilt)
+        self.assertEqual(kept, ["edited during the build\n"])
+
 
 COMMAND = """---
 description: Export a diagram to .svg and .png
@@ -482,6 +533,21 @@ class CommandTests(PartsBase):
             "diagram@other: 1 command not made a skill, its skills that clash over the name keep it (dup).",
         ])
         self.assertTrue(shown.left_out()[2].startswith("diagram@studio: 2 commands not made skills"))
+
+    def test_a_url_stays_as_written_even_its_query(self):
+        url = "https://example.com/?next=../x/ref.md"
+        self.install(self.ntb, "links@studio", "1.0.0", files={
+            "skills/x/SKILL.md": f"---\nname: x\ndescription: Draws.\n---\nSee {url} and ./ref.md.\n",
+            "skills/x/ref.md": "How to export.\n",
+            "scripts/export.py": "print('ok')\n",
+            "commands/go.md": "---\ndescription: Go\n---\nOpen https://example.com/?file=skills/x/ref.md&up=../skills/x/ref.md"
+                              " and skills/x/ref.md.\n",
+        })
+        result = plugin_parts.refresh(plugin_parts.select(self.folders).sources["links@studio"], self.state)
+        mirror = result.mirror.as_posix()
+        self.assertIn(f"See {url} and {mirror}/skills/x/ref.md.", (result.mirror / "skills" / "x" / "SKILL.md").read_text())
+        self.assertIn(f"Open https://example.com/?file=skills/x/ref.md&up=../skills/x/ref.md and {mirror}/skills/x/ref.md.",
+                      (result.mirror / ".agt-commands" / "go" / "SKILL.md").read_text())
 
 
 class ProjectTests(PartsBase):
@@ -737,6 +803,107 @@ class LinkTests(PartsBase):
         self.assertEqual(self.run_parts(self.folders).changes, [])
         self.assertFalse(self.state.exists())
 
+    def uninstall(self):
+        (self.ntb / "plugins" / "installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {}}))
+
+    def test_kept_copies_in_a_kiro_folder_that_stops_sharing_never_dangle(self):
+        other = self.folder(".kiro-b")
+        second = providers.Provider(cli="kiro", folder=other, label="kiro-b", installed=True,
+                                    locations=providers.locations("kiro", other, self.user))
+        self.run_parts([*self.included, second])
+        self.assertTrue((other / "skills" / "fmt").is_symlink())
+        with apply.lock([provider.folder for provider in [*self.included, second]]):
+            result = plugin_parts.detach([*self.included, second], apply.new_run_id(), {"kiro"})
+        self.assertEqual(result.failed, [])
+        kept = self.link("fmt")
+        self.assertFalse(kept.is_symlink())  # a folder of your own now, not a link into agt's mirror
+        self.assertEqual((kept / "SKILL.md").read_text(), (self.mirror / "skills" / "fmt" / "SKILL.md").read_text())
+        self.assertEqual(self.saved()["plugins"]["infra@ntbx"]["links"], {"kiro-b": ["fmt", "tidy"]})
+        # The plugin goes: kiro-b's links and the mirror go to the backups, and the copies kept in kiro stay whole.
+        self.uninstall()
+        self.run_parts([*self.folders, second])
+        self.assertFalse(self.mirror.exists())
+        self.assertFalse(os.path.lexists(other / "skills" / "fmt"))
+        self.assertTrue((kept / "SKILL.md").is_file())
+        self.assertTrue((self.link("tidy") / "SKILL.md").is_file())
+
+    def test_an_uninstall_keeps_the_mirror_while_a_link_to_it_stays(self):
+        self.run_parts()
+        self.uninstall()
+        move = plugin_parts._Backups.move
+
+        def failing(backups, path, *parts):
+            if parts[0] == "links":
+                raise PermissionError("the Kiro folder is read-only")
+            return move(backups, path, *parts)
+
+        with patch.object(plugin_parts._Backups, "move", failing):
+            result = self.run_parts()
+        self.assertIn(("remove", "kiro", "fmt", False), self.changes(result))
+        self.assertTrue(self.mirror.is_dir())
+        self.assertTrue((self.link("fmt") / "SKILL.md").is_file())  # the link still leads somewhere
+        self.assertEqual(self.saved()["plugins"]["infra@ntbx"]["links"], {"kiro": ["fmt", "tidy"]})
+        # The next run finishes it.
+        self.run_parts()
+        self.assertFalse(os.path.lexists(self.link("fmt")))
+        self.assertFalse(self.mirror.exists())
+        self.assertEqual(self.saved()["plugins"], {})
+
+    def test_a_kiro_skills_folder_that_disappears_is_not_made_again(self):
+        self.run_parts()
+        shutil.rmtree(self.kiro / "skills")
+        result = self.run_parts()
+        self.assertFalse((self.kiro / "skills").exists())
+        self.assertTrue(any("kiro's skills folder is missing" in line for line in result.reports), result.reports)
+        self.assertEqual(self.saved()["plugins"]["infra@ntbx"]["links"], {"kiro": ["fmt", "tidy"]})
+        self.assertEqual(self.saved()["stopped"], {})
+        # Back, empty: the links come back, and none counts as one you deleted.
+        (self.kiro / "skills").mkdir()
+        self.run_parts()
+        self.assertTrue(self.link("fmt").is_symlink() and self.link("tidy").is_symlink())
+        self.assertEqual(self.saved()["stopped"], {})
+
+    def test_a_kiro_skills_folder_that_is_a_claude_skills_folder_is_left_alone(self):
+        claude_skills = self.claude / "skills"
+        claude_skills.mkdir()
+        os.symlink(claude_skills, self.kiro / "skills", target_is_directory=True)
+        result = self.run_parts()
+        self.assertEqual(list(claude_skills.iterdir()), [])  # nothing lands in Claude
+        [issue] = [issue for issue in result.issues if issue["kind"] == "part-failed"]
+        self.assertIn(str(claude_skills), issue["message"])
+        [entry] = plugin_parts.attention(plugin_parts.view(self.included))
+        self.assertEqual((entry["kind"], entry["id"]), ("part-failed", "part-failed:plugin-parts:kiro"))
+
+    def test_a_kiro_skills_folder_made_its_own_again_gets_its_links_back(self):
+        self.run_parts()
+        claude_skills = self.claude / "skills"
+        claude_skills.mkdir()
+        shutil.rmtree(self.kiro / "skills")
+        os.symlink(claude_skills, self.kiro / "skills", target_is_directory=True)
+        self.run_parts()
+        self.assertEqual(list(claude_skills.iterdir()), [])
+        (self.kiro / "skills").unlink()
+        (self.kiro / "skills").mkdir()  # fixed, as the attention entry says: a folder of its own, empty
+        self.run_parts()
+        self.assertTrue(self.link("fmt").is_symlink() and self.link("tidy").is_symlink())
+        self.assertEqual(self.saved()["stopped"], {})
+
+    def test_kept_copies_never_land_in_a_claude_folder_that_is_kiros(self):
+        self.run_parts()
+        os.symlink(self.kiro / "skills", self.ntb / "skills", target_is_directory=True)  # after agt linked there
+        with apply.lock([provider.folder for provider in self.included]):
+            result = plugin_parts.detach(self.included, apply.new_run_id(), {"kiro"})
+        self.assertEqual(self.changes(result), [("remove", "kiro", "fmt", True), ("remove", "kiro", "tidy", True)])
+        self.assertEqual(list((self.kiro / "skills").iterdir()), [])
+
+    def test_a_claude_skills_folder_that_is_kiros_is_left_alone(self):
+        kiro_skills = self.kiro / "skills"
+        kiro_skills.mkdir()
+        os.symlink(kiro_skills, self.ntb / "skills", target_is_directory=True)
+        result = self.run_parts()
+        self.assertEqual(list(kiro_skills.iterdir()), [])
+        self.assertEqual([issue["kind"] for issue in result.issues], ["part-failed"])
+
 
 class OrdinarySharingTests(Installs, MacCopy):
     """Step 5: the agents and skills sharing never shares a projection.
@@ -934,6 +1101,35 @@ class WiringTests(Installs, MacCopy):
         self.share_json("pick", "plugin-parts/fmt", "--in", "kiro")
         self.assertEqual(self.links(), ["fmt", "tidy"])
         self.assertEqual(json.loads(self.state_file.read_text())["stopped"], {})
+
+    def test_pick_in_right_after_deleting_a_link_brings_it_back(self):
+        self.turn_on()
+        (self.kiro_skills / "fmt").unlink()
+        self.share_json("pick", "plugin-parts/fmt", "--in", "kiro")  # no sync in between
+        self.assertEqual(self.links(), ["fmt", "tidy"])
+        self.assertEqual(json.loads(self.state_file.read_text())["stopped"], {})
+
+    def test_cli_remove_of_kiro_keep_copies_leaves_folders_of_your_own(self):
+        self.turn_on()
+        self.share_json("cli", "remove", "kiro", "--keep-copies")
+        for name in ("fmt", "tidy"):
+            kept = self.kiro_skills / name
+            self.assertFalse(kept.is_symlink(), name)  # never a link into a mirror agt goes on changing
+            self.assertTrue((kept / "SKILL.md").is_file(), name)
+        self.assertEqual(self.links(), [])
+        self.assertTrue(all(not record.get("links") for record in json.loads(self.state_file.read_text())["plugins"].values()))
+
+    def test_a_missing_kiro_skills_folder_stays_missing_and_its_copies_wait(self):
+        from agents_router.share import state
+
+        self.turn_on()
+        self.assertTrue((self.kiro_skills / "ask-simply" / "SKILL.md").is_file())  # an ordinary skill in Kiro too
+        shutil.rmtree(self.kiro_skills)
+        code, out = self.run_share("sync")
+        self.assertEqual(code, 0, out)
+        self.assertFalse(self.kiro_skills.exists())  # neither pass makes it again
+        record = state.load().items["skills/ask-simply"]
+        self.assertNotIn("kiro", record.get("stopped") or [])
 
     def test_pick_not_in_keeps_it_out_and_in_takes_it_back(self):
         self.turn_on()
