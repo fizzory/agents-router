@@ -273,6 +273,88 @@ class MirrorTests(PartsBase):
         self.assertEqual((second.mirror / "scripts" / "a.sh").read_text(), "#!/bin/sh\necho new\n")
         self.assertNotEqual(second.record["digest"], first.record["digest"])
 
+    def test_session_markers_stay_out_of_the_mirror(self):
+        """Claude Code marks each session using a plugin with `.in_use/<pid>` in the plugin's folder."""
+
+        (self.cache / ".in_use").mkdir()
+        (self.cache / ".in_use" / "4242").write_text("4242\n")
+        (self.cache / "skills" / "s" / ".in_use").mkdir()
+        (self.cache / "skills" / "s" / ".in_use" / "4243").write_text("")
+        result = self.build()
+        self.assertIsNone(result.failed)
+        self.assertTrue(result.rebuilt)
+        self.assertFalse(os.path.lexists(result.mirror / ".in_use"))
+        self.assertFalse(os.path.lexists(result.mirror / "skills" / "s" / ".in_use"))
+        self.assertTrue((result.mirror / "skills" / "s" / "SKILL.md").is_file())
+
+    def test_a_link_into_a_left_out_folder_at_any_depth_is_left_out(self):
+        (self.cache / "skills" / "s" / ".in_use").mkdir()
+        (self.cache / "skills" / "s" / ".in_use" / "4243").write_text("")
+        try:
+            os.symlink("../skills/s/.in_use/4243", self.cache / "scripts" / "session")
+        except OSError:
+            self.skipTest("symlinks need extra rights on this system")
+        result = self.build()
+        self.assertIsNone(result.failed)
+        self.assertFalse(os.path.lexists(result.mirror / "scripts" / "session"))  # never a link to nothing
+        self.assertIn({"part": "link", "name": "scripts/session", "why": "outside"}, result.record["left_out"])
+
+    def test_a_session_starting_or_ending_builds_and_writes_nothing(self):
+        first = self.build()
+        before = tree_hashes(first.mirror)
+        marker = self.cache / ".in_use" / "4242"
+
+        def start():
+            marker.parent.mkdir()
+            marker.write_text("4242\n")
+            set_times(marker, 3_000_000)
+
+        def change():
+            marker.write_text("4242 resumed\n")
+            set_times(marker, 3_100_000)
+
+        def another():
+            (marker.parent / "4243").write_text("")
+
+        def end():
+            marker.unlink()
+            (marker.parent / "4243").unlink()
+            marker.parent.rmdir()
+
+        record = first.record
+        for step in (start, change, another, end):
+            step()
+            session_pass = self.build(record, build=False)  # a session start's own pass
+            self.assertIsNone(session_pass.failed, step.__name__)
+            self.assertFalse(session_pass.deferred, step.__name__)
+            with patch.object(plugin_parts, "_digest", wraps=plugin_parts._digest) as digest, \
+                    patch.object(plugin_parts, "_copy_file", wraps=plugin_parts._copy_file) as copy, \
+                    patch.object(plugin_parts, "_write_new", wraps=plugin_parts._write_new) as write:
+                result = self.build(record, backup=lambda folder: self.fail("nothing was edited"))
+            self.assertIsNone(result.failed, step.__name__)
+            self.assertFalse(result.rebuilt, step.__name__)
+            digest.assert_not_called()
+            copy.assert_not_called()
+            write.assert_not_called()
+            self.assertEqual(result.record, first.record, step.__name__)
+            self.assertEqual(tree_hashes(result.mirror), before, step.__name__)
+            record = result.record
+
+    def test_a_change_beside_session_markers_still_rebuilds(self):
+        (self.cache / ".in_use").mkdir()
+        (self.cache / ".in_use" / "4242").write_text("4242\n")
+        first = self.build()
+        self.assertIsNone(first.failed)
+        (self.cache / "scripts" / "a.sh").write_text("#!/bin/sh\necho new\n")
+        set_times(self.cache / "scripts" / "a.sh", 2_000_000)
+        (self.cache / ".in_use" / "4243").write_text("4243\n")
+        second = self.build(first.record)
+        self.assertIsNone(second.failed)
+        self.assertTrue(second.rebuilt)
+        self.assertFalse(second.edited)
+        self.assertEqual((second.mirror / "scripts" / "a.sh").read_text(), "#!/bin/sh\necho new\n")
+        self.assertNotEqual(second.record["digest"], first.record["digest"])
+
     def test_a_version_bump_with_the_old_folder_deleted_keeps_the_path(self):
         first = self.build()
         files = {"skills/s/SKILL.md": SKILL.replace("Plans things.", "Plans better."), "hooks/x.sh": "#!/bin/sh\n",
