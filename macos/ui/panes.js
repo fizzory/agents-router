@@ -323,7 +323,8 @@ export class SettingsPanes {
     this.inlineError(node, row.key); return node;
   }
   fixedCommand(key) {
-    return { 'share.enabled': 'agt share enable --dry-run', 'share.kinds': 'agt share kinds --help', 'share.plugins': 'agt share kinds add plugins --dry-run' }[key];
+    return { 'share.enabled': 'agt share enable --dry-run', 'share.kinds': 'agt share kinds --help', 'share.plugins': 'agt share kinds add plugins --dry-run',
+      'share.plugin_parts': 'agt share kinds add plugin-parts --dry-run' }[key];
   }
   saveShared(row, value) {
     return this.mutate(row.key, () => this.host.history.commit({ key: row.key, value, level: 'user', workspace: null, revision: row.levels.user.revision }, { pane: 'sharing', level: 'user', workspace: null }), 'sharing');

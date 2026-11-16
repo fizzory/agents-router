@@ -130,6 +130,7 @@ class Excluded:
     labels: list[str]
     reason: str
     item: Item | None = None  # its copies, when agt read them (a name field that doesn't match, say)
+    origin_kind: str | None = None  # the kind of item that stands for it instead (`plugin-parts`: a link to a plugin's mirror)
 
 
 @dataclass
@@ -147,6 +148,7 @@ class Plan:
     mcp: Any = None  # the MCP servers' plan (mcp.Plan) when they share
     hooks: Any = None  # the hooks' plan (hooks.Plan) when they share
     plugins: Any = None  # the plugins' plan (plugins.Plan) when they share
+    plugin_parts: Any = None  # what the last plugin-parts run left (plugin_parts.View) when they share
     claude_import: Any = None  # a listed repo's `CLAUDE.md` holding `@AGENTS.md` (instructions.Import), when it changes
 
     @property
@@ -252,10 +254,12 @@ def read_items(included: list[Provider], options: Options, now: float, disabled:
                 name = model.agent_name(cli, entry) if kind == "agents" else entry.name
                 if name.startswith("."):
                     continue  # hidden entries (.trash, .system, .DS_Store) aren't items at all
-                reason = (exclude.agent(cli, name, entry, _kiro_data(entry) if cli == "kiro" else None) if kind == "agents"
-                          else exclude.skill(name, entry, disabled))
+                if kind == "agents":
+                    reason, origin = exclude.agent(cli, name, entry, _kiro_data(entry) if cli == "kiro" else None), None
+                else:
+                    reason, origin = exclude.skill_exclusion(name, entry, disabled) or (None, None)
                 if reason:
-                    excluded.append(Excluded(kind, name, labels, reason))
+                    excluded.append(Excluded(kind, name, labels, reason, origin_kind=origin))
                     continue
                 physical = _read(kind, cli, entry, labels, now, own)
                 key = f"{kind}/{names.identity(name)}"

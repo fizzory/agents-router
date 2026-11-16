@@ -64,8 +64,11 @@ def update(paths: list[Path], *, remove: bool = False) -> list[tuple[Path, list[
     """Add (or remove) these paths in their repos' exclude blocks. Returns (exclude file, lines changed)."""
 
     by_file: dict[Path, tuple[Path, list[str]]] = {}
+    repos: dict[Path, tuple[Path, Path] | None] = {}  # parent folder -> its repo, misses too: one `git` per folder
     for path in paths:
-        found = repo_of(path)
+        if path.parent not in repos:
+            repos[path.parent] = repo_of(path)
+        found = repos[path.parent]
         if not found:
             continue
         top, exclude = found

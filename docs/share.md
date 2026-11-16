@@ -11,7 +11,7 @@ It covers your user folders today:
 | Antigravity | `~/.gemini` | `config/agents/<name>.md` | `antigravity-cli/skills/<name>/` |
 | Kiro | `~/.kiro` | `agents/<name>.json` | `skills/<name>/` |
 
-It can share [your instruction files](#sharing-instructions), [your MCP servers](#sharing-mcp-servers), [your hooks](#sharing-hooks) and [your plugins](#sharing-plugins) too, when you turn them on, and share [a repo's own agents and skills](#repos) between that repo's CLI folders. Commands come later. Sharing the extra accounts of one CLI is a separate thing that needs no setup: see [How the shared setup works](../README.md#how-the-shared-setup-works).
+It can share [your instruction files](#sharing-instructions), [your MCP servers](#sharing-mcp-servers), [your hooks](#sharing-hooks), [your plugins](#sharing-plugins) and [your plugins' skills and commands for Kiro](#sharing-plugin-parts) too, when you turn them on, and share [a repo's own agents and skills](#repos) between that repo's CLI folders. Your own commands come later; your plugins' commands reach Kiro as skills. Sharing the extra accounts of one CLI is a separate thing that needs no setup: see [How the shared setup works](../README.md#how-the-shared-setup-works).
 
 ## Turning it on
 
@@ -192,7 +192,7 @@ Each plugin is an item named `plugins/<name>@<marketplace>`:
 Before a plugin goes to a folder, agt checks that the CLI can add the plugin's marketplace and load its parts. Then one of three things happens:
 
 - **It goes.** The next sync installs it. The session hook and a save leave installs to the background watcher, because an install clones a repo. A plugin's server that may log in with OAuth needs that login once in each CLI, and the sync says so.
-- **It stays put**, and the sync's report and `agt share status` say why. Either the CLI can't add the marketplace, or the CLI would load nothing of the plugin (a Claude Code mod in Codex, say), or the plugin comes with Codex (`openai-bundled`, for example). Kiro and Antigravity install no plugins.
+- **It stays put**, and the sync's report and `agt share status` say why. Either the CLI can't add the marketplace, or the CLI would load nothing of the plugin (a Claude Code mod in Codex, say), or the plugin comes with Codex (`openai-bundled`, for example). Kiro installs no plugins; [plugin parts](#sharing-plugin-parts) bring their skills and commands to it. Antigravity has its own plugins, which agt doesn't share to yet.
 - **It waits for your answer**, because installing it there would leave parts out or run its hooks without asking, or because it's already installed there for a project. The sync's report and `agt share status` list it with the commands that answer it, and the watcher sends a notification. `agt share pick plugins/<id> --in <label>` installs it as it is now. Your yes holds that list of gaps, so a later version that adds to them asks again. `--not-in <label>` keeps it out.
 
 What each CLI loads from the other's plugins (checked against Claude Code 2.1 and Codex 0.164):
@@ -220,6 +220,87 @@ agt share plugins apply formatter@tools:codex --yes  # installs the ones you nam
 
 In a terminal, `apply` asks about each plugin, with the commands it would run and the parts it would leave out (`x` means "never offer it": it isn't offered again in any CLI, saved as `"plugins/<id>" = "off"` under `[share.targets]`; `agt share plugins apply <id>:<label> --yes` installs it and offers it again). Without a terminal, it lists them and exits 3 until you name them with `--yes`.
 
+## Sharing plugin parts
+
+Kiro installs no plugins, so the skills and commands inside your Claude Code plugins don't reach it. Plugin parts bring them there. They're off unless you turn them on with `agt share kinds add plugin-parts`, and they don't depend on [plugins](#sharing-plugins). That command runs a sync, which links them at once. `agt share enable` keeps that answer and leaves the build to the next sync or watcher run.
+
+| Part of a plugin | In Kiro |
+|---|---|
+| A skill, `skills/<folder>/SKILL.md` | `~/.kiro/skills/<name>`, a link named after the skill's frontmatter `name` (its folder name when it has none) |
+| A command, `commands/<name>.md` | a skill `<name>`, unless a skill of the same plugin has that name |
+| Hooks, agents, MCP servers and the rest | nothing |
+
+Only Kiro folders get them. Claude Code and Codex load the plugins themselves, and plugin parts don't go to Antigravity yet. They go to your user folders only, not repos. agt's own plugin is left out, since `agt setup` installs it. A Kiro custom agent sees a part only when its `resources` list it ([What a copy holds](#what-a-copy-holds)).
+
+**Which install.** For each plugin, agt takes the newest version (by semver) that's on (`enabledPlugins`) and installed for the user, across the Claude folders sharing. Equal versions go to the folder listed first. A plugin turned off in every Claude folder, or installed only for a project, doesn't go.
+
+**agt's copy.** agt only reads a plugin's installed files. It keeps a copy of each plugin, the mirror, with the plugin's layout and without `.git`:
+
+```text
+~/.agents-router/state/share/plugin-parts/<marketplace>/<plugin>/
+├── skills/<skill>/                   the plugin's skills, with the changes below
+├── .agt-commands/<command>/SKILL.md  a skill made from commands/<command>.md
+└── hooks/, scripts/, …               copied as they are, so the paths the skills name exist
+```
+
+A link inside the plugin that leads elsewhere in the plugin leads to the same place in the mirror, so nothing read or written through it reaches the plugin's installed files. A link that leads out of the plugin, such as into another version's folder, is left out, and `agt share status` notes it.
+
+Each Kiro link leads to a skill folder in the mirror. The link's path holds no version, so it stays the same when the plugin updates. `~/.agents-router/state/share/plugin-parts.json` records each plugin's source, version and links.
+
+In the markdown files under `skills/`:
+
+- `${CLAUDE_PLUGIN_ROOT}` and `$CLAUDE_PLUGIN_ROOT` become the mirror's path, and `${CLAUDE_SKILL_DIR}` and `$CLAUDE_SKILL_DIR` the skill's folder in the mirror. Shell forms such as `${CLAUDE_SKILL_DIR:+…}` stay as written.
+- A path that starts with `./` or `../` becomes an absolute path in the mirror when it names something there, so it works wherever Kiro reads the skill from. A path of dots only, such as `cd ../..`, stays: it means the reader's own folder.
+- Other paths stay as written, and so do URLs, their queries included.
+
+**Commands.** A command becomes a skill like this:
+
+| In the command | In the skill |
+|---|---|
+| Its file name | `name` |
+| `description` | `description`; without one, the command's first line of text |
+| `argument-hint` | a line `Arguments: …`, and a note that `$ARGUMENTS` stands for everything asked along with the command and `$1` for its first word |
+| `allowed-tools` | left out |
+| Its text | kept, after a line naming the command and its plugin; variables and paths change as in skills, and so do paths from the plugin's root, such as `skills/x/run.py` |
+
+A command whose name Kiro doesn't accept, or that has neither a description nor text, isn't made a skill. One with a description and no text is.
+
+**What's left out.** `agt share sync` and `agt share status` note what each plugin leaves out, one line per plugin and reason, such as `loom: 5 commands not made skills, its skills of the same names cover them.` `-v` adds the names, and `--json` notes always have them. They're notes, not something that [waits for you](#what-waits-for-you), so `status` still exits 0.
+
+**Same names.** agt never adds a prefix to make names unique.
+
+| Case | What happens |
+|---|---|
+| Your own skill of that name in any folder sharing, or anything else at its Kiro path | Yours wins. The plugin's isn't linked, and `agt share status` notes it. When yours appears after agt's link, the link goes to the backups. Rename yours to get both. |
+| Two plugins with a skill or command of one name | A conflict: neither is linked, and it [waits for you](#what-waits-for-you). |
+| A skill and a command of one name in one plugin | The skill goes; the command doesn't, and `agt share status` notes it. |
+| Two skills of one name in one plugin | Neither goes, and a command of that name doesn't either; `agt share status` notes it. |
+
+**Keeping current.** While plugin parts are on, the watcher reads each Claude folder's `plugins/installed_plugins.json` and `settings.json`, so an install, an update or turning a plugin on or off reaches Kiro within a minute. A plugin whose version, install or files changed gets a new mirror, built next to the old one and swapped in by rename: Kiro never reads a half-written skill. A run where nothing changed builds and hashes nothing.
+
+- **Session starts, saves and MCP server starts** never build a mirror, since a plugin can hold thousands of files. They keep the links as they are and leave the build to the watcher and `agt share sync`.
+- **A plugin uninstalled, off everywhere or installed only for a project now:** its links and its mirror go to the backups.
+- **A Claude folder whose plugin files agt can't read now** (Claude Code in the middle of an update, say): its plugins keep their mirrors and links as they were.
+- **A link agt can't move to the backups** (a Kiro folder you can't write to, say): its mirror stays, so the link still works, and the next run tries again.
+- **A Kiro skills folder that's missing now**, after agt linked parts or shared skills into it: agt doesn't make it again, and links or removes nothing there until it's back. Back, it gets its links again; none counts as one you deleted.
+- **A Kiro skills folder that is another CLI's folder, or agt's, under another name** (a link either way, such as `~/.kiro/skills` leading to `~/.claude/skills`): agt links nothing there, since the links would land in that CLI too, and it [waits for you](#what-waits-for-you). Made a folder of its own again, it gets its links again; none counts as one you deleted.
+
+**Edits.** A plugin's parts belong to the plugin. An edit to a linked skill through Kiro changes agt's mirror, never the plugin. The next sync or watcher run moves the edited mirror to the backups and builds it again from the plugin; an edit made while agt rebuilds the mirror goes to the backups too. To keep a change, make it in the plugin, or in a skill of your own under another name.
+
+**Choosing where they go.** Each part is an item named `plugin-parts/<name>`:
+
+```bash
+agt share pick plugin-parts/aws-setup                # where it goes now
+agt share pick plugin-parts/aws-setup --not-in kiro  # agt's link goes to the backups
+agt share pick plugin-parts/aws-setup --in kiro      # back again
+```
+
+A link agt made that you delete stops that part going to that Kiro folder, as with every copy agt makes; `--in` brings it back, even before a sync has seen the link go. A pick names Kiro folders only. `agt share list --json` lists each part with a cell per folder: Claude Code and Codex folders load it from the plugin.
+
+**Backups.** Links go to `backups/<run>/plugin-parts/links/<label>/` and mirrors to `backups/<run>/plugin-parts/mirrors/<marketplace>/<plugin>`, under `~/.agents-router/state/share/`, with that run's `plugin-parts/manifest.json`. `agt share undo` doesn't cover plugin parts.
+
+**Turning them off.** `agt share kinds remove plugin-parts` asks what happens to the links agt made in Kiro, like the other kinds: `--keep-copies` leaves them as your own files, and agt stops updating them; `--remove-copies` moves the links and agt's mirrors to the backups. Without either, a terminal asks, and an agent gets the question back (exit 3). `agt share disable --remove-copies` removes them too, and `agt share cli remove kiro` keeps or removes that folder's links with the same answer as its other copies. There, `--keep-copies` makes each link a folder of your own, a copy of the skill it led to, so it never changes or breaks with a mirror agt goes on updating for other Kiro folders; a kept skill still names its plugin's scripts in agt's mirror.
+
 ## What a copy holds
 
 An agent's `name`, `description` and instructions are shared, and its tools where the other CLI has a counterpart. Its `model` never is, because model names differ between CLIs. A copy to another folder of the same CLI, such as `~/.claude` to `~/.claude-work`, is the file byte for byte, so it keeps its `model`.
@@ -242,9 +323,10 @@ An agent's `name`, `description` and instructions are shared, and its tools wher
   - **A copy Kiro upgraded itself** (it has `kiroUpgrade`) keeps its `tools` and `permissions`; changes to its description still reach it.
   - **Checked on kiro-cli 2.37.1:** `kiro-cli agent upgrade --dry-run` calls tag files "already universal", and V2 honours the tags. Not checked yet: whether V3 loads `~/.kiro/settings/mcp.json`, where MCP servers go.
 - **Skills** aren't copied: each CLI gets a link to the skill's one real folder, so an edit anywhere is an edit everywhere.
+- **Kiro custom agents** see a shared skill only when their `resources` list it as a `skill://` entry. Kiro's default agent sees every skill in `~/.kiro/skills`.
 - **Names.** An item is its file or folder name, compared without regard to case. A name only some CLIs accept goes only to those, and two names that differ only in case are refused. An agent named like one of Codex's built-in agents (`default`, `explorer`, `worker`, `awaiter`) isn't copied to Codex.
 
-These are never shared, and `agt share status` counts them as "not shared": hidden files and folders, agt's own relay agents and skill, KiroCrew agents and the agents that rely on its tools, a Kiro agent whose prompt is a `file://` link, a skill folder without `SKILL.md`, a skill turned off in Codex, and `skills/synced`.
+These are never shared, and `agt share status` counts them as "not shared": hidden files and folders, agt's own relay agents and skill, KiroCrew agents and the agents that rely on its tools, a Kiro agent whose prompt is a `file://` link, a skill folder without `SKILL.md`, a skill turned off in Codex, `skills/synced`, and a Kiro skill that links into agt's [plugin-parts](#sharing-plugin-parts) mirror.
 
 ## Everyday use
 
@@ -297,7 +379,7 @@ Waiting for you
 It returns `schema_version: 1`, `enabled`, `folders`, and `items`. Each item has a stable `id` (the kind and
 agt's normalized identity), `kind`, `name`, and a `cells` map keyed by CLI folder label. Each cell carries its
 planner `state`, `note`, `editable`, and a `reason` when editing is unavailable. Agents, skills, MCP servers,
-hooks, plugins and instructions use their own planner decisions; no commands or secret values are included.
+hooks, plugins, plugin parts and instructions use their own planner decisions; no commands or secret values are included.
 `--repo PATH` lists a listed repo's items; inside a listed repo, that scope is the default. `share status --json`
 keeps its attention exit code, and `share pick --json` still exits 3 when it returns `needs_choice`.
 
@@ -370,7 +452,7 @@ agt share disable                       # stop sharing; every copy stays, the wa
 agt share disable --remove-copies       # also remove the copies agt made
 ```
 
-Turning off a CLI or a kind asks what happens to the copies agt made there: they stay as your own files and agt stops updating them (`--keep-copies`), or they go to the backups (`--remove-copies`). Without either, a terminal asks, and an agent gets the question back (exit 3). The answer covers your [listed repos](#repos) too: a kind you stop sharing leaves them, and so does a CLI whose last folder stops sharing (with two Claude folders, removing one leaves the repos as they are). While git is in the middle of a merge or rebase in one of them, nothing changes until it's finished. Copies that hold an edit not yet shared, and your originals, stay either way. `disable --remove-copies` also puts back any skill folder of yours that `resolve` replaced with a link. `agt share enable` turns sharing on again with your saved answers.
+Turning off a CLI or a kind asks what happens to the copies agt made there: they stay as your own files and agt stops updating them (`--keep-copies`), or they go to the backups (`--remove-copies`). Without either, a terminal asks, and an agent gets the question back (exit 3). The answer covers your [listed repos](#repos) too: a kind you stop sharing leaves them, and so does a CLI whose last folder stops sharing (with two Claude folders, removing one leaves the repos as they are). While git is in the middle of a merge or rebase in one of them, nothing changes until it's finished. Copies that hold an edit not yet shared, and your originals, stay either way. `disable --remove-copies` also puts back any skill folder of yours that `resolve` replaced with a link, and moves agt's [plugin-part](#sharing-plugin-parts) links and mirrors to the backups. `agt share enable` turns sharing on again with your saved answers.
 
 A turn-off that arrives by editing the settings file has nobody to answer, so agt keeps the copies, stops updating them and lists each one in the [log](configuration.md#the-log).
 
@@ -402,6 +484,10 @@ Every run that writes is one line in agt's log, with each write and backup: see 
 | An instruction file without agt's block, while instructions share | you choose | `agt share adopt <label>` |
 | A plugin waiting for your answer before it goes to a folder | you choose | `agt share pick plugins/<id> --in <label>` or `--not-in <label>` |
 | A plugin install that failed | you fix it, or keep it out | `agt share pick plugins/<id> --in <label>` (tries again) or `--not-in <label>` |
+| Two plugins with a skill or command of one name, so neither goes to Kiro | you choose | turn one plugin off in Claude Code, or `agt share pick plugin-parts/<name> --not-in <label>` |
+| A plugin's parts agt couldn't build for Kiro | you fix it | `agt share sync` (tries again) |
+| A Kiro skills folder that is another CLI's folder, or agt's, under another name | you fix it | make it a folder of its own, then `agt share sync` |
+| `plugin-parts.json` damaged, or written by a newer agt | you fix it | remove the file (the next sync builds the mirrors again), or update agt |
 | The background watcher stopped | an agent can do it | `agt doctor --fix` |
 
 The same list is in `agt share status --json` (`attention`, each entry with `kind`, `item`, `who`, `message` and `fix`) and in `~/.agents-router/state/share/attention.json`, which each writing run updates.
@@ -427,6 +513,7 @@ Your answers live in the `[share]` tables of `~/.agt/settings.toml`:
 [share]
 enabled = true
 kinds = ["agents", "skills"]
+plugin_parts = true                   # your plugins' skills and commands linked into Kiro (agt share kinds add plugin-parts)
 tool_widening = "allow-if-shell"
 auto_copy = true                      # or false, or a list of kinds
 codex_session = true                  # the switches are written only when they differ from the default
@@ -442,6 +529,7 @@ path = "/Users/you/.claude-work"
 "skills/old-notes" = "off"            # not shared: every copy stays as it is
 "mcp/notes" = { only = ["claude"] }   # an MCP server stays in that Claude folder
 "plugins/deck@tools" = { not_in = ["codex"] }
+"plugin-parts/aws-setup" = { not_in = ["kiro"] }  # a plugin's skill kept out of a Kiro folder
 
 [share.plugin_approvals]               # your yes to a plugin that waited for it, per folder
 "deck@tools" = { codex = "3f2a9c1e7b04" }

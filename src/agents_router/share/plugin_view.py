@@ -164,8 +164,11 @@ def page(plan: Any, shared: plugins.Plan) -> list[ui.Line]:
         lines += ["", ui.bold("Installed for one project only, so not shared"),
                   *ui.columns([[label, ui.muted(", ".join(names))] for label, names in narrow.items()], gap=3)]
     if shared.others:
-        many = len(shared.others) > 1
-        lines += ["", ui.muted(f"{_and(shared.others)} install{'' if many else 's'} no plugins; plugins go between "
+        none, own = shared.others_split()
+        said = [f"{_and(none)} install{'' if len(none) > 1 else 's'} no plugins"] if none else []
+        said += [f"{_and(own)} {'have their' if len(own) > 1 else 'has its'} own plugins, which agt doesn't share to yet"] \
+            if own else []
+        lines += ["", ui.muted(f"{'; '.join(said)}; plugins go between "
                                "Claude Code and Codex folders only.")]
     return lines
 
@@ -243,7 +246,8 @@ def pick_lines(entry: plugins.Entry, shared: plugins.Plan) -> list[ui.Line]:
         else:
             state = ui.muted("doesn't have it")
         rows.append([label, state])
-    rows += [[label, ui.muted("installs no plugins")] for label in shared.others]
+    rows += [[label, ui.muted("has its own plugins; agt doesn't share to them yet" if shared.has_own(label)
+                              else "installs no plugins")] for label in shared.others]
     lines: list[ui.Line] = [[ui.bold(f"agt share pick {entry.key}"), "  ", ui.muted("where it goes; nothing changed")], "",
                             *ui.columns(rows, gap=3)]
     if entry.held:

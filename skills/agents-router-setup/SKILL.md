@@ -20,7 +20,7 @@ If you can't run commands, follow the copy below. It matches the version this sk
 
 # Set up Agents Router (steps for an agent)
 
-You are installing, updating, repairing or removing Agents Router (`agt`) for the person you work with. Do the routine steps yourself. Ask them once, in one message, about the choices. At the end, tell them only what's left for them: logins and reloads. This guide is for agt 0.17.0 or newer; `agt guide setup` prints the copy that matches the installed version.
+You are installing, updating, repairing or removing Agents Router (`agt`) for the person you work with. Do the routine steps yourself. Ask them once, in one message, about the choices. At the end, tell them only what's left for them: logins and reloads. This guide is for agt 0.18.0 or newer; `agt guide setup` prints the copy that matches the installed version.
 
 ## 0. Before you start
 
@@ -66,7 +66,7 @@ agt setup --dry-run --json
    - the role table. Open it with one line on what a role is: a named job your agent hands to its `agt-<role>` agent, and agt picks the provider from the role's settings. Then one bullet per role: **<name>** (<access>; <providers>): <use_when>. Join a read role's providers with " + "; give an edit role's in order, joined with ", then ". Quote `use_when` word for word: it says what the role does and when your agent calls it. Say that the `agt-<role>` agents are for this CLI only, and that they can later change when a role is called or give it standing rules by asking (the orchestrator-customize skill);
    - each `needs_answer` item.
 
-   Offer these answers: **Approve** (as proposed), **Change a role** (or another item), **Skip roles**, or **Cancel**. If `roles.state` is `set`, the roles stay as they are and there is nothing to ask about them. When `roles.custom` is there (a first setup), end the message with its `ask`: "Want a role of your own too? Tell me its name, what it does, read, edit or full access, and its providers."
+   Offer these answers: **Approve** (as proposed), **Change a role** (or another item), **Skip roles**, or **Cancel**. If `roles.state` is `set`, the roles stay as they are and there is nothing to ask about them. When `roles.custom` is there (a first setup), end the message with its `ask`, word for word: "Want a role of your own too? Tell me its name, what it does, read, edit or full access, and its providers."
 2. **Put the answers in flags** and run the dry run again.
 3. **Run the new proposal's `command` exactly as given.** It includes `--yes --if-plan <id>`, which refuses when anything changed since the dry run.
 
@@ -94,7 +94,7 @@ agt setup --dry-run --json
 - **A role of your own.** Setup writes only the base roles. Add each custom role after `command` succeeds, with `roles.custom.command`: `agt roles config <name> --access read|edit|full --only <providers> --description "<what it does>"` (full is edit plus the shell, with no sandbox or permission prompts). A role made before that changes the plan: `--if-plan` refuses, and setup stops proposing the base roles.
   - The description is the person's: what the role does and when their agent should call it, in their words. If they didn't say, ask. Never write it yourself; agt refuses a new custom role without one.
   - An edit or full role also needs `--user-said "<their words>"`.
-  - When their request already approved the proposal, run `command` first. After it succeeds, list each role it wrote in your final message as in step 1: **<name>** (<access>; <providers>): <use_when>, quoting `use_when` word for word. Then, if `roles.custom` is there, end with `roles.custom.ask` as a question.
+  - When their request already approved the proposal, run `command` first. After it succeeds, list each role it wrote in your final message as in step 1: **<name>** (<access>; <providers>): <use_when>, quoting `use_when` word for word. Then, if `roles.custom` is there, end the message with `roles.custom.ask` word for word, as the question it is: "Want a role of your own too? Tell me its name, what it does, read, edit or full access, and its providers." Don't reword it or turn it into a statement.
 - Roles are changed later with `agt roles config`, never by editing `[roles.*]` by hand.
 - **Role agents go to the CLI you run in.** agt can't tell Antigravity from a plain terminal, so an agent running in Antigravity adds `--host antigravity` to the dry run and to `agt update`. With `--host`, the role agents go to each CLI it names.
 

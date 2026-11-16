@@ -57,6 +57,7 @@
   "mcp": "MCP servers: 1 the same everywhere they go.\n  Staying where they are: private (a literal secret: API_KEY holds a literal value).",
   "hooks": "Hooks: 1 found, 0 copies running in other CLIs.\n  Waiting for your approval (`agt share pick hooks/<name> --in <label>`): pretooluse-echo.",
   "plugins": "Plugins: 1 where they go.",
+  "plugin_parts": null,
   "repos": [],
   "diffs": null
 }

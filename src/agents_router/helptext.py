@@ -103,7 +103,7 @@ SHARE = {
         ]),
         ("Choose what shares", [
             ("cli", "The CLI folders that share: list, add or remove one"),
-            ("kinds", "Share more than agents and skills: instructions, mcp, hooks, plugins"),
+            ("kinds", "Share more than agents and skills: instructions, mcp, hooks, plugins, plugin-parts"),
             ("repo", "The repos that share their own agents and skills: list, add or remove one"),
             ("adopt", "Add agt's block to CLIs' instruction files, so they share instructions"),
         ]),
@@ -113,9 +113,10 @@ SHARE = {
         ("agt share pick dana --not-in kiro", "Take one agent out of one CLI"),
         ("agt share undo dana --in kiro", "Bring that copy back"),
         ("agt share kinds add plugins", "Install plugins between Claude Code and Codex"),
+        ("agt share kinds add plugin-parts", "Link your plugins' skills and commands into Kiro"),
     ],
     "footer": [
-        [ui.bold("Names"), "  dana, or agents/<name>, skills/<name>, plugins/<name>@<marketplace>"],
+        [ui.bold("Names"), "  dana, or agents/<name>, skills/<name>, plugins/<name>@<marketplace>, plugin-parts/<name>"],
         [ui.muted("Your CLIs and the watcher run these, not you:"), " session, saved, watch. ",
          ui.muted("For a status line:"), " badge"],
     ],

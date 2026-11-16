@@ -111,6 +111,11 @@ test('Activity lines carry time, schema label, old → new, scope and attributio
   assert.equal(row.time, '08:00'); assert.equal(row.label, 'Max depth'); assert.equal(row.change, 'Not set → 2'); assert.equal(row.level, 'User');
   assert.match(row.tooltip, /max_depth\nby command/); assert.match(row.tooltip, /settings.toml/);
 });
+test('Turning plugin parts on or off reads as Plugin parts in Activity', () => {
+  const row = activityModel({ type: 'setting', key: 'share.plugin_parts', old: true, new: null, level: 'user', time: '2026-01-01T08:00:00Z' },
+    fixture('config-show').settings, { locale: 'en-GB', timeZone: 'UTC' });
+  assert.equal(row.label, 'Plugin parts'); assert.equal(row.change, 'true → Not set');
+});
 test('Activity distinguishes failed counts and refused markers and Search only filters its input events', () => {
   const entries = fixture('activity-log').entries;
   const failed = filterActivity(entries, 'failed 1'); assert.equal(failed.length, 1); assert.equal(failed[0].marker, 'failed 1');

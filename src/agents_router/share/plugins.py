@@ -12,7 +12,8 @@ and CLI ends one of three ways:
 - it goes: the sync runs `plugin marketplace add` when the CLI doesn't know the marketplace yet, then `claude
   plugin install` or `codex plugin add`, and checks `plugin list` shows it;
 - it stays put, and `agt share status` says why: the CLI can't add its marketplace, would load nothing of it,
-  or the plugin comes with Codex. Kiro and Antigravity install no plugins;
+  or the plugin comes with Codex. Kiro installs no plugins (plugin_parts.py links their skills and commands
+  into it), and Antigravity has plugins of its own, which agt doesn't share to yet;
 - it waits for your answer, as an attention item with the commands that answer it: the CLI would load only part
   of it, would run its hooks without asking, or already has it for a project. `agt share pick plugins/<id> --in
   <label>` installs it as it is now (a later version that changes what's missing asks again); `--not-in
@@ -63,6 +64,7 @@ from agents_router.share.state import State, share_dir
 KIND = "plugins"
 OWN = "agents-router"
 NATIVE = ("claude", "codex")  # CLIs that install the same plugin packages
+OWN_PLUGINS = ("antigravity",)  # CLIs with plugins of their own, which agt doesn't share to yet
 CLI_NAMES = {"claude": "Claude Code", "codex": "Codex", "kiro": "Kiro", "antigravity": "Antigravity"}
 # Parts only one CLI loads, as a message names them.
 CLAUDE_ONLY = {"agents": "agents", "modules": "interface mods", "lsp": "LSP servers", "output-styles": "output styles",
@@ -446,9 +448,15 @@ class Plan:
     problems: list[str] = field(default_factory=list)
     by_label: dict[str, providers.Provider] = field(default_factory=dict)  # the Claude Code and Codex folders
     holdings: dict[str, Holding] = field(default_factory=dict)
-    others: list[str] = field(default_factory=list)  # folders of CLIs that install no plugins
+    other_clis: dict[str, str] = field(default_factory=dict)  # label -> cli of each folder agt installs no plugins in
     later: set[str] = field(default_factory=set)  # labels whose installs wait for the next run
     removing: dict[str, set[str] | None] = field(default_factory=dict)  # id -> labels to uninstall it from (None: all)
+
+    @property
+    def others(self) -> list[str]:
+        """The folders of CLIs that agt installs no plugins in."""
+
+        return list(self.other_clis)
 
     @property
     def writes(self) -> list[tuple[Entry, str]]:
@@ -514,11 +522,23 @@ class Plan:
                 lines.append(f"  Installed only for a project in {label}, so not shared: {len(names)} ("
                              + ", ".join(names[:5]) + (", …" if len(names) > 5 else "") + ").")
         if self.others:
-            lines.append(f"  {', '.join(self.others)}: {'they install' if len(self.others) > 1 else 'it installs'} no "
-                         "plugins; plugins go between Claude Code and Codex folders only.")
+            none, own = self.others_split()
+            said = [f"{', '.join(none)}: {'they install' if len(none) > 1 else 'it installs'} no plugins"] if none else []
+            said += [f"{', '.join(own)}: {'they have their' if len(own) > 1 else 'it has its'} own plugins, which agt "
+                     "doesn't share to yet"] if own else []
+            lines.append(f"  {'; '.join(said)}; plugins go between Claude Code and Codex folders only.")
         lines += [f"  {note}" for note in self.notes()]
         lines += [f"  {problem}" for problem in self.problems]
         return "\n".join(lines)
+
+    def others_split(self) -> tuple[list[str], list[str]]:
+        """The folders in `others` that install no plugins (Kiro), and those with plugins of their own (Antigravity)."""
+
+        own = [label for label in self.others if self.other_clis.get(label) in OWN_PLUGINS]
+        return [label for label in self.others if label not in own], own
+
+    def has_own(self, label: str) -> bool:
+        return self.other_clis.get(label) in OWN_PLUGINS
 
     def digest_content(self) -> list[Any]:
         return sorted([entry.id, entry.decision.action if entry.decision else "",
@@ -566,7 +586,7 @@ def build(included: list[providers.Provider], current: State, options: Any, appr
 
     native = [provider for provider in included if provider.cli in NATIVE]
     plan = Plan(by_label={provider.label: provider for provider in native},
-                others=[provider.label for provider in included if provider.cli not in NATIVE],
+                other_clis={provider.label: provider.cli for provider in included if provider.cli not in NATIVE},
                 later={provider.label for provider in native if provider.cli in later})
     entries: dict[str, Entry] = {}
     unreadable = set()

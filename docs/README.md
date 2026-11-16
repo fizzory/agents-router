@@ -19,6 +19,7 @@ Guides for Agents Router (`agt`): sharing agents, skills, instructions, MCP serv
 ## Design and research
 
 - [Design and build plan](design.md): goals, architecture, the shared setup per account, and what was verified.
+- [Tech stack](tech-stack.md): the parts of agt, the languages and libraries each uses, and how they connect.
 - Research: what the design rests on.
   - CLIs: [permissions and headless modes compared](research/cli-permissions-and-headless.md), [Claude Code as a headless worker](research/claude-code-headless.md), [what a Claude Code session knows](research/claude-code-context-inventory.md), [exit codes](research/exit-codes.md), [model capacity errors](research/capacity-errors.md), [read access command safety](research/read-safety.md).
   - Accounts and terms: [provider terms](research/provider-terms.md), [Claude](research/claude-multi-account.md), [Codex](research/codex-multi-account.md) and [Antigravity](research/antigravity-multi-account.md) with several accounts, [limits](research/limits.md).
