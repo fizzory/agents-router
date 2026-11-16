@@ -57,7 +57,7 @@ export class SettingsHistory {
         }
         await this.reload();
         if (result.error || result.needs_user_words) this.report(step.key, /changed since|changed elsewhere/i.test(errorMessage(result))
-          ? 'Changed elsewhere. Showing current value.' : errorMessage(result));
+          ? 'Changed elsewhere. Showing the current value.' : errorMessage(result));
         return result;
       }
       const args = { key: step.key, level: step.previous.level, workspace: step.workspace,
@@ -75,7 +75,7 @@ export class SettingsHistory {
       }
       await this.reload();
       if (!result.ok) this.report(step.key, /changed since|changed elsewhere/i.test(errorMessage(result))
-        ? 'Changed elsewhere. Showing current value.' : errorMessage(result));
+        ? 'Changed elsewhere. Showing the current value.' : errorMessage(result));
       return result;
     });
   }

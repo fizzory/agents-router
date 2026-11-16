@@ -19,19 +19,19 @@ test('S1: canonical name, fixed status text, and both windows with resets in the
   assert.equal(shown.state, '');
   assert.equal(shown.meters[0].dominant, false);
   assert.equal(shown.meters[1].dominant, true);
-  assert.match(shown.accessibleLabel, /Claude claude-work\. available\. 5h 17%, resets 20:00\. week 86%, resets Wed/);
+  assert.match(shown.accessibleLabel, /Claude claude-work\. Available\. 5h 17%, resets 20:00\. week 86%, resets Wed/);
   assert.equal(shown.tabStops, 1);
 });
 
 test('S2: each generated availability state has its decided row text and accessible reason', () => {
-  const expected = { cooling: 'back 21:40', 'logged-out': 'Log in', unknown: 'Check', busy: 'busy', off: 'off',
-    unhealthy: 'back 19:02', recovering: 'recovering', malformed: 'unknown' };
+  const expected = { cooling: 'Back 21:40', 'logged-out': 'Log in…', unknown: 'Check', busy: '2 of 4 jobs', off: 'Off',
+    unhealthy: 'Back 19:02', recovering: 'Recovering', malformed: 'Unknown' };
   for (const [name, text] of Object.entries(expected)) {
     const shown = row(name);
     assert.equal(shown.slot, text, name);
     assert.equal(shown.tabStops, 1);
     assert.match(shown.accessibleLabel, new RegExp(`claude-${name}`));
-    if (shown.button) assert.ok(shown.accessibleLabel.includes(shown.button));
+    if (shown.button) assert.ok(shown.accessibleLabel.includes(shown.button.replace('…', '')));
     else assert.ok(shown.accessibleLabel.includes(text));
   }
   assert.equal(row('logged-out').action, 'login');
@@ -39,7 +39,11 @@ test('S2: each generated availability state has its decided row text and accessi
   assert.equal(row('malformed').action, null);
   assert.match(row('malformed').tooltip, /malformed usage windows/);
   assert.match(row('busy').tooltip, /2 of 4 jobs/);
-  assert.equal(row('busy').slot, 'busy');
+  assert.equal(row('busy').slot, '2 of 4 jobs');
+  assert.equal((row('busy').tooltip.match(/2 of 4 jobs/g) || []).length, 1);
+  assert.equal(row('logged-out').busyLabel, 'Opening Terminal for claude-logged-out');
+  assert.equal(row('unknown').busyLabel, 'Checking claude-unknown');
+  assert.match(row('work').linkLabel, /\. Open in Settings\.$/);
   assert.match(row('cooling').tooltip, /usage limit/);
 });
 
@@ -78,7 +82,7 @@ test('S1/S2 no figure for Kiro and Antigravity; healthy means a dot only', () =>
     assert.equal(shown.slot, '');
     assert.equal(shown.figure, '');
     assert.equal(shown.hasWindows, false);
-    assert.match(shown.accessibleLabel, /available/);
+    assert.match(shown.accessibleLabel, /Available/);
     // Even an invalid upstream figure must never invent usage for these providers.
     assert.equal(accountRow(provider, { ...account, windows: data.providers[0].accounts[0].windows }, data.generated_at).hasWindows, false);
   }
@@ -86,7 +90,7 @@ test('S1/S2 no figure for Kiro and Antigravity; healthy means a dot only', () =>
 
 test('S2h: nothing usable names the earliest return in the header', () => {
   const data = load('app/usage-nothing.json');
-  assert.equal(popoverModel({ usage: data }, data.generated_at, options).header, 'Back 20:15');
+  assert.equal(popoverModel({ usage: data }, data.generated_at, options).header, 'No account ready until 20:15');
   assert.equal(popoverModel({ usage: data, error: 'agt not found' }, data.generated_at, options).header, 'Agents Router');
 });
 
@@ -100,14 +104,16 @@ test('S1d/S6: generated native envelopes preserve the last snapshot, first read,
   assert.equal(models.reading.rows[0].slot, '86% Wed');
   assert.equal(models.first.first, true);
   assert.equal(models.empty.empty, true);
-  assert.equal(models.unreadable.footer.text, "Can't read agt");
+  assert.equal(models.unreadable.footer.text, "Can't read agt.");
+  assert.equal(models.unreadable.footer.detail, "Can't read agt: timed out");
   assert.equal(models.unreadable.footer.button, 'Retry');
-  for (const [name, text, button] of [['missing', 'agt not found', 'Install'], ['old', 'agt 0.16 is too old', 'Repair']]) {
+  for (const [name, text, button] of [['missing', "agt isn't installed.", 'Install'], ['old', 'agt 0.16 is too old.', 'Repair']]) {
     assert.equal(models[name].footer.text, text);
     assert.equal(models[name].footer.button, button);
     assert.doesNotMatch(JSON.stringify(models[name].footer), /Update to/);
   }
-  assert.equal(models.update.footer.text, 'Update to 0.17.1');
+  assert.equal(models.update.footer.text, 'Update to 0.17.1…');
+  assert.equal(lastRow({ error: "Can't read agt." }).detail, '');
   assert.equal(lastRow({}), null);
   assert.equal(ageText(null, data.generated_at), 'age unknown');
 });

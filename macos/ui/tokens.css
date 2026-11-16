@@ -1,30 +1,76 @@
+/* Design tokens for both windows. Light and dark switch with the media query,
+   never light-dark(): Safari 17 is the floor. */
 :root {
   color-scheme: light dark;
   font: 13px/1.3 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
   color: CanvasText;
-  --text: CanvasText;
-  --muted: #595961;
-  --panel: #f5f5f7;
-  --surface: #fff;
-  --sidebar: #e7e7eb;
-  --field: #fff;
-  --selection: color-mix(in srgb, AccentColor 24%, transparent);
-  --line: #a1a1aa;
-  --track: #a1a1aa;
+
+  /* Colour */
+  --ink: CanvasText;
+  --ink-muted: #595961;
+  --ground: #f5f5f7;
+  --ground-raised: #ffffff;
+  --ground-field: #ffffff;
+  --ground-sidebar: #e8e8ec;
+  --edge: #8e8e96;
+  --hairline: color-mix(in srgb, CanvasText 9%, transparent);
+  --signal-ok: #18843c;
+  --signal-warn: #835000;
+  --signal-bad: #b52d23;
   --accent: AccentColor;
-  --available: #18843c;
-  --attention: #835000;
-  --unavailable: #b52d23;
-  --radius: 6px;
-  --row-height: 22px;
-  --provider-width: 66px;
-  --slot-width: 86px;
-  --meter-width: 56px;
-  --icon-size: 14px;
-  --icon-hit: 22px;
+  /* White text on a fill, and accent text on a ground, need 4.5:1: the system
+     blue gives about 4:1 on its own, so both are a darker (dark: lighter) accent. */
+  --accent-fill: color-mix(in srgb, AccentColor 82%, black);
+  --accent-text: color-mix(in srgb, AccentColor 82%, black);
+  --selection: color-mix(in srgb, AccentColor 24%, transparent);
+  --hover-tint: color-mix(in srgb, CanvasText 8%, transparent);
+  --gauge-track: color-mix(in srgb, CanvasText 14%, transparent);
+  --gauge-other: color-mix(in srgb, CanvasText 40%, transparent);
+  --gauge-main: color-mix(in srgb, CanvasText 85%, transparent);
+  /* Sheet backdrop: ink at 12% darkens light mode; dark mode needs black to dim. */
+  --sheet-backdrop: color-mix(in srgb, CanvasText 12%, transparent);
+
+  /* Type: size/line-height pairs */
+  --type-title: 600 13px/16px -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --type-body: 400 13px/16px -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --type-row: 400 12px/16px -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --type-small: 400 11px/14px -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+
+  /* Spacing, radius, sizes */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 24px;
+  --r-s: 4px;
+  --r-m: 6px;
+  --r-l: 10px;
+  --hit: 24px;
+  --icon: 14px;
+  --gauge-width: 56px;
+  --gauge-bar: 4px;
+  --focus-ring: 2px solid var(--accent);
 }
 @media (prefers-color-scheme: dark) {
-  :root { --muted: #b3b3bc; --panel: #252529; --surface: #303034; --sidebar: #202024; --field: #3c3c43; --selection: color-mix(in srgb, AccentColor 55%, transparent); --line: #5c5c65; --track: #5c5c65;
-    --available: #3bc865; --attention: #ffb12b; --unavailable: #ff453a; }
+  :root {
+    --ink-muted: #b3b3bc;
+    --ground: #252529;
+    --ground-raised: #303034;
+    --ground-field: #3c3c43;
+    --ground-sidebar: #1f1f23;
+    --edge: #74747e;
+    --hairline: color-mix(in srgb, CanvasText 12%, transparent);
+    --signal-ok: #3bc865;
+    --signal-warn: #ffb12b;
+    --signal-bad: #ff453a;
+    --accent-text: color-mix(in srgb, AccentColor 70%, white);
+    --selection: color-mix(in srgb, AccentColor 55%, transparent);
+    --sheet-backdrop: rgb(0 0 0 / 30%);
+  }
+}
+@media (prefers-contrast: more) {
+  :root { --hairline: var(--edge); }
 }

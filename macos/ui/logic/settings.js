@@ -9,7 +9,34 @@ export function labelFor(key) {
   const text = names[key] || names[word] || word.replaceAll('_', ' ');
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
-export const paneFor = (row) => row.key.startsWith('share.') ? 'sharing' : 'general';
+// Panes: General, Roles, Accounts, Sharing, Activity, then one per provider.
+export const PANES = { general: 'General', roles: 'Roles', accounts: 'Accounts', sharing: 'Sharing', activity: 'Activity',
+  claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', kiro: 'Kiro' };
+// A key's pane from its prefix: provider keys go to that provider, share.* to
+// Sharing, roles.* to Roles, everything else (subagents.prefer_roles too) to General.
+export function paneForKey(key = '') {
+  const [prefix, ...rest] = key.split('.');
+  if (!rest.length) return 'general';
+  return PROVIDERS[prefix] ? prefix : prefix === 'share' ? 'sharing' : prefix === 'roles' ? 'roles' : 'general';
+}
+export const paneFor = (row) => paneForKey(row.key);
+// Provider pane groups by key suffix. A frontend constant: unknown keys go to Other.
+export const GROUPS = {
+  Accounts: ['primary', 'binary', 'accounts', 'include_primary', 'order', 'ignore'],
+  Limits: ['max_jobs', 'max_jobs_per_account', 'primary_max_jobs', 'usage_ceiling', 'when_full', 'failover'],
+  Models: ['plan', 'default_model', 'primary_models', 'primary_max_effort', 'edit_permission_mode', 'connectors'],
+  'Retries and health': ['cooldown_minutes', 'capacity_retries', 'capacity_retry_seconds'],
+  Runtime: ['share_parent_mcp', 'network_access', 'web_search', 'windows_sandbox', 'reasoning_summary', 'reviewer', 'reviewer_model', 'reviewer_account', 'sandbox', 'engine'],
+};
+export const GROUP_ORDER = [...Object.keys(GROUPS), 'Other'];
+export const FILE_ONLY = 'File only';
+export function groupFor(row) {
+  if (row.kind === 'fixed') return FILE_ONLY;
+  if (paneFor(row) === 'general') return 'Jobs';
+  const suffix = row.key.split('.').slice(1).join('.');
+  if (suffix.startsWith('circuit_')) return 'Retries and health';
+  return Object.keys(GROUPS).find(group => GROUPS[group].includes(suffix)) || 'Other';
+}
 export const displayValue = (value) => value == null ? '' : Array.isArray(value) ? value.join(', ') : typeof value === 'object' ? JSON.stringify(value) : String(value);
 export function cliValue(value) {
   return Array.isArray(value) ? value.length ? value.join(',') : '[]' : String(value);
@@ -35,8 +62,8 @@ export function rowState(row, level, document = {}) {
 export function matches(row, query) {
   return `${PROVIDERS[row.key.split('.')[0]] || ''} ${labelFor(row.key)} ${row.key} ${row.description}`.toLowerCase().includes(query.trim().toLowerCase());
 }
-export function generalRows(document, query = '') {
-  return document.settings.filter(row => paneFor(row) === 'general' && matches(row, query));
+export function paneRows(document, pane, query = '') {
+  return document.settings.filter(row => paneFor(row) === pane && matches(row, query));
 }
 export function fileTarget(row, level) {
   const own = row.levels[level];
@@ -56,13 +83,13 @@ export function errorMessage(result) {
 }
 export function installState(snapshot = {}) {
   const error = snapshot.error || '';
-  const problem = /not found/i.test(error) ? { message: 'agt not found', action: 'Install' }
-    : /too old|unsupported.*schema/i.test(error) ? { message: error, action: 'Repair' } : null;
+  const problem = /not found/i.test(error) ? { message: "agt isn't installed.", action: 'Install' }
+    : /too old|unsupported.*schema/i.test(error) ? { message: /[.!]$/.test(error) ? error : `${error}.`, action: 'Repair' } : null;
   const blockers = snapshot.usage?.uninstall_blockers;
   const count = blockers?.length ?? null;
   return { problem, version: snapshot.usage?.agt_version || error.match(/\bagt\s+(\d+\.\d+(?:\.\d+)?)/)?.[1] || null,
     owned: snapshot.usage?.install?.source === 'app', uninstallDisabled: count !== 0,
-    uninstallTooltip: count == null ? 'Checking running jobs…' : count ? `${count} job${count === 1 ? '' : 's'} running` : 'Uninstall command line tool…' };
+    uninstallReason: count == null ? 'Checking running jobs…' : count ? `Wait for ${count} running job${count === 1 ? '' : 's'} to finish.` : '' };
 }
 export const isTextField = (element) => !!element?.matches?.('input:not([type=checkbox]):not([type=button]), textarea, [contenteditable=true]');
 export function dispatchEdit(action, { activeElement, editField, history }) {

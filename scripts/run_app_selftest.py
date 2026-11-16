@@ -18,7 +18,7 @@ from app_env import scratch_env, without_agt
 ROOT = Path(__file__).resolve().parents[1]
 PROBES = {"css-has", "css-color-mix", "css-container", "css-custom-property", "css-grid",
           "js-es-modules", "js-resize-observer", "js-structured-clone", "js-array-at", "js-queue-microtask"}
-PANES = {"general", "roles", "accounts", "sharing", "activity"}
+PANES = {"general", "roles", "accounts", "sharing", "activity", "claude", "codex", "antigravity", "kiro"}
 
 
 def validate_report(report):

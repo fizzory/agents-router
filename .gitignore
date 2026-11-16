@@ -40,5 +40,8 @@ work/
 build/
 dist/
 
+# App UI packages: macos/ui/node_modules is a link into build/ (no trailing slash: it matches the link)
+node_modules
+
 # Private planning notes
 plans.md

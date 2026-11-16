@@ -52,6 +52,8 @@ class BuildAppTests(unittest.TestCase):
         sys.path.insert(0, str(ROOT / "scripts"))
         from run_app_selftest import validate_report, PROBES, PANES
         import copy
+        self.assertEqual(PANES, {"general", "roles", "accounts", "sharing", "activity",
+                                 "claude", "codex", "antigravity", "kiro"})
         pane = {"width": 400, "height": 200, "count": 1, "ok": True, "fixture": True, "rows": True}
         page = {"ready": True, "errors": [], "fixture": {"ok": True}, "probes": dict.fromkeys(PROBES, True), "layout": {"ok": True}}
         report = {"schema_version": 1, "pass": True, "os_version": "26.6.2", "os_build": "25G83", "architecture": "arm64",
@@ -62,7 +64,10 @@ class BuildAppTests(unittest.TestCase):
         for mutate in (lambda r: r.update({"pass": False}), lambda r: r["loads"].update(settings=2),
                        lambda r: r["pages"]["popover"].update(errors=[{"kind":"csp"}]),
                        lambda r: r["pages"]["settings"]["panes"]["roles"].update(width=0),
-                       lambda r: r["pages"]["settings"]["probes"].pop("css-has")):
+                       lambda r: r["pages"]["settings"]["probes"].pop("css-has"),
+                       lambda r: r["pages"]["settings"]["panes"].pop("kiro"),
+                       lambda r: r["pages"]["settings"]["fixture"].update(ok=False),
+                       lambda r: r["pages"]["settings"]["panes"]["codex"].update(fixture=False)):
             broken = copy.deepcopy(report)
             mutate(broken)
             with self.assertRaises(ValueError):
@@ -145,6 +150,35 @@ Load command 5
                 self.assertIn("build/tools/bin/cargo-tauri" if rustc else "rustc is missing", result.stderr)
                 self.assertEqual(listing(), before, "tool gate changed the before/after listing")
                 self.assertEqual(list((root / "build/tools").iterdir()), [])
+
+    def test_ui_build_without_tools_stops_and_installs_nothing(self):
+        for arguments in ([], ["--typecheck"], ["--test"], ["--watch"]):
+            with self.subTest(arguments=arguments), tempfile.TemporaryDirectory(prefix="agt-ui-gate-") as folder:
+                root = Path(folder)
+                (root / "scripts").mkdir()
+                (root / "macos/ui").mkdir(parents=True)
+                for name in ("build_app_ui.py", "app_node.py", "node-runtime.lock"):
+                    shutil.copy2(ROOT / "scripts" / name, root / "scripts" / name)
+                fake = root / "fake-bin"
+                fake.mkdir()
+                for name in ("node", "npm", "npx", "curl", "cargo"):
+                    path = fake / name
+                    path.write_text('#!/bin/sh\necho unexpected > "$HOME/UNEXPECTED-INSTALL"\nexit 99\n')
+                    path.chmod(0o700)
+                result = subprocess.run([sys.executable, str(root / "scripts/build_app_ui.py"), *arguments],
+                                        env={"PATH": str(fake), "HOME": str(root)},
+                                        text=True, capture_output=True, check=False)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("pinned Node v", result.stderr)
+                self.assertIn("prepare_app_tools.sh --yes", result.stderr)
+                self.assertFalse((root / "build").exists())
+                self.assertFalse((root / "UNEXPECTED-INSTALL").exists())
+
+    def test_update_rehearsal_embeds_this_checkouts_ui_build(self):
+        script = (ROOT / "scripts/check_app_update.py").read_text()
+        self.assertIn('ignore=shutil.ignore_patterns("target", "gen", "node_modules")', script)
+        self.assertIn('run(sys.executable, ROOT / "scripts/build_app_ui.py")', script)
+        self.assertIn('config["build"].update(frontendDist=str(BUILD / "ui-dist"), beforeBuildCommand="")', script)
 
     def test_release_overlay_restores_the_release_identity_over_the_test_base(self):
         module = build_module()

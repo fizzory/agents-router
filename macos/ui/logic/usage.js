@@ -1,7 +1,8 @@
 // Pure presentation rules. Times in the agt contracts are Unix seconds.
+// Frontend-owned words, shared by the popover and Settings > Accounts.
 const STATES = Object.freeze({
-  off: "off", logged_out: "logged out", unhealthy: "unhealthy", cooling: "cooling",
-  recovering: "recovering", busy: "busy", ok: "", unknown: "unknown",
+  off: "Off", logged_out: "Logged out", unhealthy: "Unhealthy", cooling: "Cooling down",
+  recovering: "Recovering", busy: "Busy", ok: "", unknown: "Unknown",
 });
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 const optionalTime = (value) => value === null || finite(value);
@@ -70,10 +71,15 @@ export function stateWord(availability) {
   return Object.hasOwn(STATES, availability) ? STATES[availability] : STATES.unknown;
 }
 
-export function backText(until, now, { timeZone } = {}) {
+/** A future return time as a 24-hour clock ("14:20"); empty when it has passed. */
+export function clockText(until, now, { timeZone } = {}) {
   if (!finite(until) || !finite(now) || until <= now) return "";
-  const clock = new Intl.DateTimeFormat("en-GB", {
+  return new Intl.DateTimeFormat("en-GB", {
     timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   }).format(new Date(until * 1000));
-  return `back ${clock}`;
+}
+
+export function backText(until, now, options = {}) {
+  const clock = clockText(until, now, options);
+  return clock ? `Back ${clock}` : "";
 }

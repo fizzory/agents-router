@@ -1,0 +1,122 @@
+/* The Settings window: 150px sidebar, 38px toolbar, the selected pane. Opaque. */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { color: var(--ink); background: var(--ground); font: var(--type-body); }
+#root { display: grid; grid-template-columns: 150px minmax(0, 1fr); height: 100%; }
+button { font: inherit; color: inherit; cursor: default; }
+[hidden] { display: none !important; }
+mark { border-radius: 2px; background: var(--selection); color: inherit; }
+h2 { margin: 0; }
+
+/* Sidebar */
+.sidebar { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; border-right: 1px solid var(--hairline); background: var(--ground-sidebar); }
+.window-drag { flex: 0 0 38px; }
+.search-field { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); height: 24px; margin: 0 var(--space-4) var(--space-4); padding: 0 var(--space-3); border: 1px solid var(--edge); border-radius: var(--r-m); background: var(--ground-field); color: var(--ink-muted); }
+.search-field:focus-within { outline: var(--focus-ring); outline-offset: 0; }
+.search-field input { flex: 1 1 auto; min-width: 0; padding: 0; border: 0; outline: none; background: transparent; color: var(--ink); font: var(--type-body); }
+.search-field input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.sidebar-nav { display: flex; flex-direction: column; padding: 0 var(--space-4) var(--space-4); }
+.nav-item { display: flex; align-items: center; gap: var(--space-3); width: 100%; height: 28px; padding: 0 var(--space-4); border: 0; border-radius: var(--r-m); background: transparent; font: var(--type-body); text-align: left; transition: background-color var(--hover-time) var(--ease-out); }
+.nav-item:hover { background: var(--hover-tint); }
+.nav-item[aria-current="page"] { background: var(--selection); }
+.nav-item:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.nav-item.is-empty { color: var(--ink-muted); }
+.nav-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-count { color: var(--ink-muted); font: var(--type-small); }
+/* Muted ink is under 4.5:1 on the selection fill: the selected item's count and empty label use ink. */
+.nav-item[aria-current="page"], .nav-item[aria-current="page"] .nav-count { color: var(--ink); }
+.attention-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--signal-warn); }
+.nav-divider { margin: var(--space-3) var(--space-4); border: 0; border-top: 1px solid var(--hairline); }
+
+/* Toolbar and pane */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.toolbar { display: flex; flex: 0 0 38px; align-items: center; gap: var(--space-4); padding: 0 var(--space-6); border-bottom: 1px solid var(--hairline); }
+.toolbar-title { min-width: 0; margin: 0 auto 0 0; overflow: hidden; font: var(--type-title); text-overflow: ellipsis; white-space: nowrap; }
+.toolbar-title:focus { outline: none; }
+.scope-button { width: auto; max-width: 220px; }
+.pane-content { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--space-4) var(--space-5) var(--space-7); }
+.settings-group { margin-bottom: var(--space-4); }
+.pane-content .group-heading { height: 24px; margin-top: var(--space-2); }
+
+/* Setting rows: label | control column | slot 84. One control column per pane:
+   140px, or up to 240px when the pane has text fields, shrinking first so labels
+   up to 200px stay whole; labels truncate only near the 560px minimum. */
+.pane-content { --control-max: 140px; }
+.pane-content:has(.setting-row.is-wide) { --control-max: 240px; }
+.setting-row { --control-column: clamp(140px, calc(100% - 200px - 84px - 2 * var(--space-4)), var(--control-max));
+  display: grid; grid-template-columns: minmax(0, 1fr) var(--control-column) 84px; align-items: center; column-gap: var(--space-4); min-height: 32px; padding: 0 var(--space-4); border-radius: var(--r-m); }
+.setting-row:focus { outline: none; }
+.setting-row:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.setting-label { min-width: 0; overflow: hidden; font: var(--type-body); text-overflow: ellipsis; white-space: nowrap; }
+.setting-control { display: flex; align-items: center; min-width: 0; }
+.setting-slot { display: flex; align-items: center; justify-content: flex-end; min-width: 0; }
+.slot-lock { display: flex; color: var(--ink-muted); }
+.fixed-value { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--ink-muted); font: var(--type-row); }
+.fixed-value output { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fixed-value .icon { width: 12px; height: 12px; flex-basis: 12px; }
+.cli-control { grid-column: 2 / -1; flex-wrap: wrap; column-gap: var(--space-3); font: var(--type-row); }
+.cli-control .button-text { margin-left: calc(-1 * var(--space-1)); }
+.path-value { gap: var(--space-2); font: var(--type-row); }
+.path-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Roles */
+.role-row { display: grid; grid-template-columns: auto minmax(72px, 128px) minmax(0, 1fr) 84px; align-items: center; column-gap: var(--space-4); min-height: 36px; padding: var(--space-1) var(--space-4); border-radius: var(--r-m); }
+.role-row:focus { outline: none; }
+.role-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); min-width: 0; }
+.provider-chip { display: inline-flex; align-items: center; gap: var(--space-2); height: 24px; padding: 0 var(--space-3); border: 1px solid var(--edge); border-radius: var(--r-m); background: var(--ground-raised); font: var(--type-small); }
+.provider-chip:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
+.provider-chip[aria-disabled="true"] { color: var(--ink-muted); }
+.chip-order { font-weight: 600; color: var(--ink-muted); }
+.chip-alert { width: 11px; height: 11px; flex-basis: 11px; color: var(--signal-warn); }
+.chip-moving { transition: transform var(--travel-time) var(--travel-curve); }
+
+/* Accounts: the popover's row, plus the switch or badge and ⋯ */
+.settings-accounts { margin: 0; padding: 0; list-style: none; }
+/* A grid, not a wrapping flex row: every row puts the gauge, slot and trailing at the same x, and the reason line spans below. */
+.settings-account { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; height: auto; min-height: 28px; }
+.settings-account:focus { outline: none; }
+.account-trailing { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-3); margin-left: var(--space-4); }
+.account-toggle { display: flex; flex: none; width: 76px; justify-content: flex-end; }
+.account-trailing > .account-more { flex: none; }
+/* The badge looks 20px tall; the ::after gives it a 24px hit target. */
+.account-badge { position: relative; display: inline-flex; align-items: center; height: 20px; padding: 0 var(--space-3); border: 1px solid var(--hairline); border-radius: var(--r-s); color: var(--ink-muted); font: var(--type-small); }
+.account-badge::after { content: ""; position: absolute; inset: -3px -1px; }
+.account-badge:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
+.account-reason { grid-column: 1 / -1; padding: 0 0 var(--space-2) 14px; overflow: hidden; color: var(--ink-muted); font: var(--type-small); text-overflow: ellipsis; white-space: nowrap; }
+.settings-account .inline-message { grid-column: 1 / -1; padding-left: 14px; }
+.add-account { margin: var(--space-4) var(--space-4) 0; }
+
+/* Sharing */
+.pane-divider { margin: var(--space-3) var(--space-4); border: 0; border-top: 1px solid var(--hairline); }
+.waiting-row { display: flex; align-items: center; gap: var(--space-4); min-height: 32px; padding: 0 var(--space-4); }
+.waiting-message { flex: 1 1 auto; min-width: 0; font: var(--type-row); }
+.share-grid-scroll { margin: var(--space-4) 0; overflow-x: auto; }
+.share-grid { min-width: 100%; border-collapse: collapse; font: var(--type-row); }
+.share-grid th, .share-grid td { height: 28px; min-width: 64px; padding: 0 var(--space-3); text-align: center; white-space: nowrap; }
+.share-grid td > * { margin: 0 auto; }
+.share-grid thead th { color: var(--ink-muted); font: var(--type-small); font-weight: 600; }
+.share-grid .share-name-head, .share-grid .share-item-name { min-width: 120px; max-width: 200px; overflow: hidden; text-align: left; text-overflow: ellipsis; font-weight: 400; }
+.share-grid .share-kind th { text-align: left; }
+.share-grid tbody tr.share-item:hover { background: var(--hover-tint); }
+
+/* Activity: time 40 | setting | old → new | scope 64 */
+.activity-day { margin-top: var(--space-4); }
+.activity-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) var(--hit); align-items: center; min-height: 28px; border-radius: var(--r-m); }
+.activity-main { display: grid; grid-template-columns: 40px minmax(0, 5fr) minmax(0, 7fr) 64px; align-items: center; column-gap: var(--space-3); min-width: 0; height: 28px; padding: 0 var(--space-4); border: 0; border-radius: var(--r-m); background: transparent; font: var(--type-row); text-align: left; }
+button.activity-main:hover { background: var(--hover-tint); }
+button.activity-main:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.activity-main > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-time, .activity-level { color: var(--ink-muted); }
+.activity-marker { display: flex; grid-column: 3 / 5; align-items: center; gap: var(--space-2); color: var(--signal-bad); }
+.activity-marker .icon { width: 12px; height: 12px; flex-basis: 12px; }
+.activity-more { opacity: 0; transition: opacity var(--hover-time) var(--ease-out); }
+.activity-row:hover .activity-more, .activity-row:focus-within .activity-more { opacity: 1; }
+.activity-row .inline-message { grid-column: 1 / -1; padding-left: var(--space-4); }
+/* old → new: each value ellipsizes in its middle, the arrow stays. */
+.activity-change { display: flex; }
+.middle-text { display: flex; flex: 0 1 auto; min-width: 0; }
+.middle-text.is-old { flex-shrink: 3; }
+.middle-start { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.middle-end, .activity-arrow { flex: none; white-space: pre; }
+.activity-more-note { color: var(--ink-muted); }

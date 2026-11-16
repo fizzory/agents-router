@@ -23,4 +23,8 @@ if [ ! -x "$repo/build/tools/bin/cargo-tauri" ]; then
     echo 'App build needs build/tools/bin/cargo-tauri. After consent, run scripts/prepare_app_tools.sh --yes.' >&2
     exit 1
 fi
-echo "App tools ready (rustc $version; repo-local cargo-tauri)."
+if [ ! -x "$repo/build/node/bin/node" ] || [ ! -f "$repo/macos/ui/node_modules/.package-lock.json" ]; then
+    echo 'App build needs the pinned Node in build/node and the UI packages. After consent, run scripts/prepare_app_tools.sh --yes.' >&2
+    exit 1
+fi
+echo "App tools ready (rustc $version; repo-local cargo-tauri, Node and UI packages)."
