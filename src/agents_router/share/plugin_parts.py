@@ -12,7 +12,7 @@ mirror of it in agt's state:
 | Rule | Choice |
 |---|---|
 | Source | Newest enabled (`enabledPlugins` true) user-scope install of a plugin id; ties go to folder order. agents-router, turned off everywhere or project scope only: none. |
-| Mirror | A copy of the plugin tree with its layout kept, `.git` left out, built next to the mirror and swapped in by rename. The plugin cache is only read: a link inside the plugin leads to the same place in the mirror, and one out of it is left out. |
+| Mirror | A copy of the plugin tree with its layout kept, `.git` and `.in_use` (Claude Code's session markers) left out, built next to the mirror and swapped in by rename. The plugin cache is only read: a link inside the plugin leads to the same place in the mirror, and one out of it is left out. |
 | Variables | `${CLAUDE_PLUGIN_ROOT}`, `$CLAUDE_PLUGIN_ROOT`, `${CLAUDE_SKILL_DIR}` and `$CLAUDE_SKILL_DIR` in markdown files under `skills/`; shell forms like `${CLAUDE_SKILL_DIR:+…}` stay. |
 | Paths | In those files, `./x` and `../x` read from the file's folder become absolute mirror paths when they name something inside the mirror; a command skill also takes bare plugin-root paths (`skills/x/…`, first segment a top-level entry). Other paths and URLs (their queries too) stay. |
 | Commands | `commands/<name>.md` becomes a skill unless a skill of the plugin has that name (two skills that clash over it keep it too) or the name isn't valid; both are reported. |
@@ -46,7 +46,9 @@ from agents_router.share import exclude, frontmatter, gitexclude, names, plugins
 
 KIND = exclude.PLUGIN_PARTS
 COMMANDS = ".agt-commands"  # the command skills' folder inside a mirror
-SKIPPED = frozenset({".git"})
+# Left out of the mirror and its fingerprints at any depth. Claude Code writes `.in_use/<pid>` in a plugin's folder
+# for each session using it: copied or counted, every session start or end would rebuild the mirror.
+SKIPPED = frozenset({".git", ".in_use"})
 MARKDOWN = frozenset({".md", ".markdown"})
 TOKEN_RE = re.compile(r"\$\{(CLAUDE_PLUGIN_ROOT|CLAUDE_SKILL_DIR)\}|\$(CLAUDE_PLUGIN_ROOT|CLAUDE_SKILL_DIR)(?![A-Za-z0-9_])")
 SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")  # a marketplace or plugin name, as one folder name
@@ -232,7 +234,7 @@ Entries = list[tuple[str, os.stat_result, bool]]  # (relative path, lstat, is a 
 
 
 def _entries(folder: Path) -> Entries:
-    """(relative path, lstat, is a folder) for everything under `folder`, `.git` left out, links not followed."""
+    """(relative path, lstat, is a folder) for everything under `folder`, `SKIPPED` left out, links not followed."""
 
     found = []
     stack = [(folder, "")]
@@ -267,7 +269,7 @@ def _signature(folder: Path, entries: Entries | None = None) -> str | None:
 
 
 def _digest(folder: Path, entries: Entries | None = None) -> str:
-    """The mirror's content: every file's bytes and every link's target, dot folders included."""
+    """The mirror's content: every file's bytes and every link's target, dot folders included (not `SKIPPED`)."""
 
     digest = hashlib.sha256()
     for relative, info, is_folder in entries if entries is not None else _entries(folder):
@@ -529,7 +531,7 @@ def _rebase_links(source: Path, build: Path, reports: _Reports) -> None:
         path = build / relative
         leads = os.path.realpath(source / relative)  # copytree went into no link, so only this one is followed
         inside = os.path.relpath(leads, real_root) if _inside(leads, real_root) else None
-        if inside is None or inside.split(os.sep, 1)[0] in SKIPPED:
+        if inside is None or any(segment in SKIPPED for segment in inside.split(os.sep)):  # not in the mirror
             os.unlink(path)
             reports.leave(f"{relative}: left out, it's a link out of the plugin", "link", relative, "outside")
             continue

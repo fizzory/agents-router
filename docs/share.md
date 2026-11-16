@@ -234,7 +234,7 @@ Only Kiro folders get them. Claude Code and Codex load the plugins themselves, a
 
 **Which install.** For each plugin, agt takes the newest version (by semver) that's on (`enabledPlugins`) and installed for the user, across the Claude folders sharing. Equal versions go to the folder listed first. A plugin turned off in every Claude folder, or installed only for a project, doesn't go.
 
-**agt's copy.** agt only reads a plugin's installed files. It keeps a copy of each plugin, the mirror, with the plugin's layout and without `.git`:
+**agt's copy.** agt only reads a plugin's installed files. It keeps a copy of each plugin, the mirror, with the plugin's layout and without `.git` or `.in_use` (the markers Claude Code writes for each session using the plugin, so a session starting or ending doesn't rebuild the mirror):
 
 ```text
 ~/.agents-router/state/share/plugin-parts/<marketplace>/<plugin>/
