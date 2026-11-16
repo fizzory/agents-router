@@ -80,22 +80,22 @@ test("reset text uses local clock today, weekday later, and nothing after reset"
 });
 
 test("all fixture availability states have plain row words; a healthy row has only its dot", () => {
-  const expected = { off: "off", logged_out: "logged out", unhealthy: "unhealthy", cooling: "cooling",
-    recovering: "recovering", busy: "busy", ok: "", unknown: "unknown" };
+  const expected = { off: "Off", logged_out: "Logged out", unhealthy: "Unhealthy", cooling: "Cooling down",
+    recovering: "Recovering", busy: "Busy", ok: "", unknown: "Unknown" };
   const seen = new Set();
   for (const item of accounts(fixture())) {
     seen.add(item.availability);
     assert.equal(stateWord(item.availability), expected[item.availability]);
   }
   assert.deepEqual([...seen].sort(), Object.keys(expected).sort());
-  assert.equal(stateWord("future-state"), "unknown");
+  assert.equal(stateWord("future-state"), "Unknown");
 });
 
 test("back text uses 24-hour local time and never invents a return time", () => {
   const raw = fixture();
   const until = account(raw, "cooling").until;
-  assert.equal(backText(until, raw.generated_at, { timeZone: "UTC" }), "back 08:10");
-  assert.equal(backText(until, raw.generated_at, { timeZone: "Asia/Bangkok" }), "back 15:10");
+  assert.equal(backText(until, raw.generated_at, { timeZone: "UTC" }), "Back 08:10");
+  assert.equal(backText(until, raw.generated_at, { timeZone: "Asia/Bangkok" }), "Back 15:10");
   assert.equal(backText(account(raw, "recovering").until, raw.generated_at), "");
   assert.equal(backText(account(raw, "unknown").until, raw.generated_at), "");
   assert.equal(backText(until, until), "");

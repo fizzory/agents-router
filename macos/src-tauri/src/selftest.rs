@@ -61,6 +61,41 @@ fn enabled() -> bool {
     std::env::var_os("AGT_APP_SELFTEST").is_some()
 }
 
+/// Every Settings pane the self-test visits, in visiting order.
+const PANES: [&str; 9] = [
+    "general",
+    "roles",
+    "accounts",
+    "sharing",
+    "activity",
+    "claude",
+    "codex",
+    "antigravity",
+    "kiro",
+];
+
+/// The Settings pane that shows a config key's row.
+fn settings_pane(key: &str) -> &'static str {
+    match key.split('.').next().unwrap_or_default() {
+        "claude" => "claude",
+        "codex" => "codex",
+        "antigravity" => "antigravity",
+        "kiro" => "kiro",
+        "share" => "sharing",
+        _ => "general",
+    }
+}
+
+/// The fixture's config keys per pane; panes without config rows get none.
+fn pane_keys(config: &Value) -> BTreeMap<&'static str, Vec<String>> {
+    let mut keys: BTreeMap<_, Vec<String>> = PANES.iter().map(|p| (*p, Vec::new())).collect();
+    for row in config["settings"].as_array().unwrap() {
+        let key = row["key"].as_str().unwrap();
+        keys.get_mut(settings_pane(key)).unwrap().push(key.into());
+    }
+    keys
+}
+
 pub fn instrument(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     if !enabled() {
         return builder;
@@ -89,8 +124,7 @@ pub fn instrument(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::
     .unwrap();
     let expected = json!({
         "popover": usage["providers"].as_array().unwrap().iter().flat_map(|p| p["accounts"].as_array().unwrap()).map(|a| a["name"].clone()).collect::<Vec<_>>(),
-        "general": config["settings"].as_array().unwrap().len(),
-        "generalVisible": config["settings"].as_array().unwrap().iter().filter(|r| r["kind"] != "fixed" && !r["key"].as_str().unwrap().starts_with("share.")).count(),
+        "keys": pane_keys(&config),
         "roles": roles["roles"].as_array().unwrap().iter().map(|r| r["name"].clone()).collect::<Vec<_>>(),
         "accounts": accounts["runtimes"].as_array().unwrap().iter().map(|r| r["accounts"].as_array().unwrap().len()).sum::<usize>(),
         "sharing": sharing["items"].as_array().unwrap().iter().map(|i| i["name"].clone()).collect::<Vec<_>>(),
@@ -231,15 +265,13 @@ fn valid_page(page: &Value, settings: bool) -> bool {
             .as_object()
             .is_some_and(|v| v.len() == 10 && v.values().all(|v| *v == true))
         && if settings {
-            ["general", "roles", "accounts", "sharing", "activity"]
-                .iter()
-                .all(|pane| {
-                    let p = &page["panes"][pane];
-                    p["ok"] == true
-                        && p["fixture"] == true
-                        && p["rows"] == true
-                        && p["count"].as_u64().is_some_and(|n| n > 0)
-                })
+            PANES.iter().all(|pane| {
+                let p = &page["panes"][pane];
+                p["ok"] == true
+                    && p["fixture"] == true
+                    && p["rows"] == true
+                    && p["count"].as_u64().is_some_and(|n| n > 0)
+            })
         } else {
             page["layout"]["ok"] == true
         }
@@ -411,5 +443,77 @@ mod tests {
         assert!(error.contains("channel closed"));
         assert!(error.contains("dropped the evaluation callback without a reply"));
         assert!(error.contains("first navigation commit"));
+    }
+
+    #[test]
+    fn fixture_keys_split_into_their_panes_once_each() {
+        let config: Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/app/config-show.json"))
+                .unwrap();
+        let keys = pane_keys(&config);
+        assert_eq!(keys.keys().copied().collect::<Vec<_>>(), {
+            let mut panes = PANES.to_vec();
+            panes.sort();
+            panes
+        });
+        let all: Vec<&String> = keys.values().flatten().collect();
+        let unique: std::collections::BTreeSet<_> = all.iter().collect();
+        assert_eq!(all.len(), config["settings"].as_array().unwrap().len());
+        assert_eq!(unique.len(), all.len());
+        for pane in ["roles", "accounts", "activity"] {
+            assert!(keys[pane].is_empty(), "{pane} has config rows");
+        }
+        for pane in [
+            "general",
+            "sharing",
+            "claude",
+            "codex",
+            "antigravity",
+            "kiro",
+        ] {
+            assert!(!keys[pane].is_empty(), "{pane} has no config rows");
+        }
+        for provider in ["claude", "codex", "antigravity", "kiro"] {
+            let prefix = format!("{provider}.");
+            assert!(keys[provider].iter().all(|k| k.starts_with(&prefix)));
+            assert!(keys[provider].contains(&format!("{provider}.max_jobs")));
+        }
+        assert!(keys["sharing"].iter().all(|k| k.starts_with("share.")));
+        for key in ["max_jobs", "subagents.prefer_roles"] {
+            assert_eq!(settings_pane(key), "general");
+        }
+        assert_eq!(settings_pane("share.enabled"), "sharing");
+        assert_eq!(settings_pane("kiro.max_jobs"), "kiro");
+        assert_eq!(settings_pane("claudette.x"), "general");
+    }
+
+    #[test]
+    fn settings_page_needs_every_pane_with_rows_and_fixture() {
+        let pane = json!({"ok": true, "fixture": true, "rows": true, "count": 1,
+            "width": 400, "height": 200, "keys": 1});
+        let mut page = json!({"ready": true, "fixture": {"ok": true, "count": 1}, "errors": [],
+            "probes": {}, "panes": {}});
+        for i in 0..10 {
+            page["probes"][format!("probe-{i}")] = json!(true);
+        }
+        for name in PANES {
+            page["panes"][name] = pane.clone();
+        }
+        assert!(valid_page(&page, true));
+        let mut missing = page.clone();
+        missing["panes"].as_object_mut().unwrap().remove("kiro");
+        assert!(!valid_page(&missing, true));
+        for (name, field, value) in [
+            ("codex", "fixture", json!(false)),
+            ("claude", "rows", json!(false)),
+            ("antigravity", "count", json!(0)),
+        ] {
+            let mut broken = page.clone();
+            broken["panes"][name][field] = value;
+            assert!(!valid_page(&broken, true), "{name}.{field}");
+        }
+        let mut fixture = page.clone();
+        fixture["fixture"]["ok"] = json!(false);
+        assert!(!valid_page(&fixture, true));
     }
 }

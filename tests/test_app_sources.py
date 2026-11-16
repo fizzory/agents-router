@@ -35,6 +35,10 @@ from agents_router.config_cli import KEYS
 ROOT = Path(__file__).resolve().parents[1]
 TAURI = Path("macos/src-tauri")
 UI = Path("macos/ui")
+# App sources the regex rules read. Vendor code (node_modules) and build output
+# (build/ui-dist) are never scanned with them; build_app_ui.check_dist covers the output.
+UI_SOURCES = (".css", ".js", ".html", ".ts", ".tsx", ".jsx", ".mjs")
+VENDOR = "node_modules"
 
 # Each entry has an executable bad example below. Features already in Safari
 # 17.0 (:has, color-mix, @property, @container) remain allowed.
@@ -150,7 +154,27 @@ def check_sources(root, *, release=False):
     elif any(item.get("name") == "tauri-plugin-shell" for item in tomllib.loads(lock.read_text()).get("package", [])):
         fail("shell", "tauri-plugin-shell in Cargo.lock")
 
+    package = load_json(root / UI / "package.json")
+    for group in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
+        for name, version in package.get(group, {}).items():
+            if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+(?:-[\w.]+)?", version):
+                fail("pins", f"macos/ui/package.json: {name} needs an exact version")
+    npm_lock = root / UI / "package-lock.json"
+    if package.get("dependencies") or package.get("devDependencies"):
+        locked = load_json(npm_lock).get("packages", {}) if npm_lock.is_file() else {}
+        if not npm_lock.is_file():
+            fail("lock", "macos/ui/package-lock.json is missing")
+        for name, version in {**package.get("dependencies", {}), **package.get("devDependencies", {})}.items():
+            if npm_lock.is_file() and locked.get(f"node_modules/{name}", {}).get("version") != version:
+                fail("lock", f"macos/ui/package-lock.json does not lock {name} {version}")
+
     config = load_json(cargo / "tauri.conf.json")
+    # Tauri embeds the Vite build, never the source folder (it holds node_modules).
+    build = config.get("build", {})
+    hook = build.get("beforeBuildCommand")
+    if (build.get("frontendDist") != "../../build/ui-dist" or not isinstance(hook, dict)
+            or hook.get("script") != "python3 ../../scripts/build_app_ui.py" or hook.get("cwd") != "."):
+        fail("ui-build", "tauri.conf.json must embed ../../build/ui-dist, built by scripts/build_app_ui.py")
     updater_spec = importlib.util.spec_from_file_location("app_updater", ROOT / "scripts/app_updater.py")
     updater_rules = importlib.util.module_from_spec(updater_spec)
     updater_spec.loader.exec_module(updater_rules)
@@ -185,10 +209,16 @@ def check_sources(root, *, release=False):
     app_run = uncomment((cargo / "src/app.rs").read_text(encoding="utf-8")).split("pub fn run()", 1)[-1]
     if "AppPaths::from_process" not in app_run or app_run.index("AppPaths::from_process") > app_run.find("tauri::Builder::default()"):
         fail("test-build", "app.rs must resolve AppPaths before building the app")
-    html = (root / UI / "settings.html").read_text(encoding="utf-8")
-    footer = html.split('id="general-footer"', 1)[-1].split('<div id="pane-content"', 1)[0]
-    if not re.search(r'<details id="test-build" hidden>\s*<summary>Test build</summary>', footer) or footer.find('id="test-build"') < footer.find('id="install-group"'):
-        fail("test-build", "settings.html needs a hidden Test build disclosure as the last item of #general-footer")
+    # Settings › General renders the Test build disclosure only when test_build_paths
+    # returned rows (the release gets null), as the last item of its footer.
+    general = root / UI / "src/settings/panes/GeneralPane.tsx"
+    source = general.read_text(encoding="utf-8") if general.is_file() else ""
+    footer = source.split('<footer id="general-footer"', 1)[-1].split("</footer>", 1)[0] if '<footer id="general-footer"' in source else ""
+    test_build = re.search(r'\{testRows\.length > 0 && [^?]*\?\s*\(\s*<Disclosure id="test-build"[^>]*summary="Test build"'
+                           r'[\s\S]*?</Disclosure>\s*\)\s*:\s*null\}\s*$', footer)
+    install_group = footer.find('id="install-group"')
+    if not test_build or install_group < 0 or install_group > footer.find('id="test-build"'):
+        fail("test-build", "GeneralPane.tsx needs the Test build disclosure, shown only with returned rows, as the last item of #general-footer")
 
     # The app checks swap HOME, so the app's production check no longer covers
     # the caller's folders: an inherited AGT_APP_SUPPORT once reached the real
@@ -310,10 +340,11 @@ def check_sources(root, *, release=False):
                 fail("settings-inventory", f"{name}: expected {expected}")
 
     for path in sorted((root / UI).rglob("*")):
-        if path.suffix not in (".css", ".js", ".html"):
+        if path.suffix not in UI_SOURCES or VENDOR in path.relative_to(root / UI).parts:
             continue
         text = uncomment(path.read_text(encoding="utf-8"))
-        if re.search(r'''import \* as api from ['"]\./tauri.js['"]''', text):
+        # Any relative import of the adapter (./tauri.js, ../../tauri.js) is checked.
+        if re.search(r'''import \* as api from ['"](?:\.\.?/)+tauri\.js['"]''', text):
             adapter = uncomment((root / UI / "tauri.js").read_text())
             exports = set(re.findall(r"export (?:const|function) (\w+)", adapter))
             missing = set(re.findall(r"\bapi\.(\w+)\s*\(", text)) - exports
@@ -332,11 +363,11 @@ def check_sources(root, *, release=False):
             fail("safari", f"{path.relative_to(root)} uses CSS nesting")
 
     for path in sorted((root / "macos").rglob("*")):
-        if any(part in ("target", "gen") for part in path.relative_to(root / "macos").parts):
+        if any(part in ("target", "gen", VENDOR) for part in path.relative_to(root / "macos").parts):
             continue
         if re.search(r"(?:sf[ -_]?symbols?|\.symbolset|\.symbol\.svg)", path.name, re.I):
             fail("symbols", f"SF Symbol asset: {path.relative_to(root)}")
-        if not path.is_file() or path.suffix not in (".rs", ".js", ".html", ".svg", ".json", ".toml"):
+        if not path.is_file() or path.suffix not in (".rs", ".js", ".ts", ".tsx", ".jsx", ".mjs", ".html", ".svg", ".json", ".toml"):
             continue
         text = uncomment(path.read_text(encoding="utf-8"))
         if re.search(r"\bset_title\s*(?:::<[^>]+>)?\s*\(", text):
@@ -477,7 +508,7 @@ class AppSourceTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="agt-app-sources-")
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
-        shutil.copytree(ROOT / "macos", root / "macos", ignore=shutil.ignore_patterns("target", "gen"))
+        shutil.copytree(ROOT / "macos", root / "macos", ignore=shutil.ignore_patterns("target", "gen", VENDOR))
         shutil.copytree(ROOT / "tests/fixtures/app", root / "tests/fixtures/app")
         for name in ("build_app.sh", "build_app.py", "app_env.py", *SCRATCH_ENV_SCRIPTS):
             path = root / "scripts" / name
@@ -660,18 +691,21 @@ class AppSourceTests(unittest.TestCase):
             edit('"io.github.watcharagorn.agents-router.test"', '"io.github.watcharagorn.agents-router.dev"'),
             edit("identifier != RELEASE_IDENTIFIER", "identifier.ends_with(\".test\")"),
             edit("pub fn is_test_build(", "#[cfg(debug_assertions)]\npub fn is_test_build("),
-            edit('<details id="test-build" hidden>', '<details id="test-build">', UI / "settings.html"),
+            edit("{testRows.length > 0 && (!searching || testMatch) ? (", "{(!searching || testMatch) ? (", UI / "src/settings/panes/GeneralPane.tsx"),
             edit("let paths = AppPaths::from_process", "let _later = tauri::Builder::default();\n    let paths = AppPaths::from_process", TAURI / "src/app.rs"),
         ]
         for mutate in cases:
             with self.subTest(mutate=cases.index(mutate)):
                 self.reject("test-build", mutate)
         def move_block(root):
-            text = (root / UI / "settings.html").read_text()
-            block = '        <details id="test-build" hidden><summary>Test build</summary><div id="test-build-rows"></div></details>\n'
-            self.assertIn(block, text)
-            text = text.replace(block, "").replace('<div id="general-footer">\n', '<div id="general-footer">\n' + block)
-            self.write(root, UI / "settings.html", text)
+            relative = UI / "src/settings/panes/GeneralPane.tsx"
+            text = (root / relative).read_text()
+            start = text.index("          {testRows.length > 0")
+            end = text.index("          ) : null}\n        </footer>") + len("          ) : null}\n")
+            block = text[start:end]
+            text = text[:start] + text[end:]
+            text = text.replace('<footer id="general-footer" className="settings-group">\n', '<footer id="general-footer" className="settings-group">\n' + block, 1)
+            self.write(root, relative, text)
         self.reject("test-build", move_block)
 
     def test_rejects_app_checks_that_pass_the_callers_agt_folders(self):
@@ -780,6 +814,119 @@ class AppSourceTests(unittest.TestCase):
             with self.subTest(addition=addition):
                 self.reject("fixtures", lambda root: self.write(root, TAURI / "src/models.rs",
                     (root / TAURI / "src/models.rs").read_text() + "\n" + addition))
+
+
+    def test_typescript_sources_get_the_same_rules(self):
+        for name in ("bad.ts", "src/popover/bad.tsx"):
+            with self.subTest(name=name):
+                self.reject("motion", lambda root: self.write(root, UI / name, "row.animate([], {duration: 240});"))
+                self.reject("safari", lambda root: self.write(root, UI / name, "document.startViewTransition(update);"))
+                self.reject("adapter", lambda root: self.write(root, UI / name,
+                    "import * as api from './tauri.js'; api.onUpdateRequested(() => {});"))
+        self.reject("adapter", lambda root: self.write(root, UI / "src/popover/deep.tsx",
+            "import * as api from '../../tauri.js'; api.onUpdateRequested(() => {});"))
+        self.reject("title", lambda root: self.write(root, UI / "src/bad.tsx", "tray.set_title('86%');"))
+
+    def test_vendor_packages_are_not_app_sources(self):
+        root = self.temp_tree()
+        for name in ("bad.css", "bad.js", "bad.ts"):
+            self.write(root, UI / "node_modules/pkg" / name,
+                       ".row { transition: opacity 100ms; } document.startViewTransition(); tray.set_title('x');")
+        self.assertEqual(check_sources(root), [])
+
+    def test_tauri_embeds_only_the_ui_build(self):
+        def build(**changes):
+            def mutate(root):
+                path = TAURI / "tauri.conf.json"
+                config = json.loads((root / path).read_text())
+                config["build"].update(changes)
+                self.write(root, path, json.dumps({**config, "build": {k: v for k, v in config["build"].items() if v is not None}}))
+            return mutate
+        for changes in ({"frontendDist": "../ui"}, {"beforeBuildCommand": None}, {"beforeBuildCommand": "python3 ../../scripts/build_app_ui.py"},
+                        {"beforeBuildCommand": {"script": "npm run build", "cwd": "."}}):
+            with self.subTest(changes=changes):
+                self.reject("ui-build", build(**changes))
+
+    def test_ui_packages_are_pinned_exactly_and_locked(self):
+        def package(name, version):
+            def mutate(root):
+                path = UI / "package.json"
+                data = json.loads((root / path).read_text())
+                data["devDependencies"][name] = version
+                self.write(root, path, json.dumps(data))
+            return mutate
+        self.reject("pins", package("vite", "^8.3.5"))
+        self.reject("pins", package("vite", "latest"))
+        self.reject("lock", package("vite", "8.3.4"))
+        self.reject("lock", lambda root: (root / UI / "package-lock.json").unlink())
+
+    def test_node_modules_is_ignored_including_the_link(self):
+        lines = (ROOT / ".gitignore").read_text().splitlines()
+        self.assertTrue({"node_modules", "/macos/ui/node_modules"} & set(lines), "a link needs a pattern without /")
+        self.assertIn("build/", lines)
+
+
+def build_ui_module():
+    sys.path.insert(0, str(ROOT / "scripts"))
+    spec = importlib.util.spec_from_file_location("build_app_ui", ROOT / "scripts/build_app_ui.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class UiDistTests(unittest.TestCase):
+    """build_app_ui.check_dist runs after every UI build; these feed it known output."""
+
+    PAGE = '<!doctype html><html><head><script type="module" crossorigin src="./assets/{name}.js"></script>' \
+           '<link rel="stylesheet" crossorigin href="./assets/{name}.css"></head><body><p id="x">ok</p></body></html>'
+
+    def dist(self, replace=None):
+        temporary = tempfile.TemporaryDirectory(prefix="agt-ui-dist-")
+        self.addCleanup(temporary.cleanup)
+        dist = Path(temporary.name)
+        (dist / "assets").mkdir()
+        for name in ("index", "popover", "settings"):
+            (dist / f"{name}.html").write_text(self.PAGE.format(name=name))
+            (dist / f"assets/{name}.js").write_text("export {};")
+            (dist / f"assets/{name}.css").write_text(":root { --panel-time: 120ms; }")
+        for relative, text in (replace or {}).items():
+            (dist / relative).write_text(text)
+        return dist
+
+    def test_clean_build_passes(self):
+        self.assertEqual(build_ui_module().check_dist(self.dist()), [])
+
+    def test_rejects_what_the_csp_or_tauri_would_refuse(self):
+        check = build_ui_module().check_dist
+        page = self.PAGE.format(name="popover")
+        cases = {
+            "inline <script>": page.replace("<p id", "<script>alert(1)</script><p id"),
+            "inline <script> ": page.replace('src="./assets/popover.js"></script>', 'src="./assets/popover.js">x()</script>'),
+            "inline <style>": page.replace("</head>", "<style>p{}</style></head>"),
+            "style= attribute": page.replace('<p id="x">', '<p id="x" style="color:red">'),
+            "inline event handler": page.replace('<p id="x">', '<p id="x" onclick="go()">'),
+            "non-local reference": page.replace("./assets/popover.css", "https://example.com/a.css"),
+            "data: reference": page.replace("./assets/popover.css", "data:text/css,p{}"),
+            "is not a file": page.replace("./assets/popover.js", "./assets/missing.js"),
+            "outside": page.replace("./assets/popover.js", "../outside.js"),
+        }
+        for label, text in cases.items():
+            with self.subTest(label=label):
+                self.assertTrue(check(self.dist({"popover.html": text})), label)
+        with self.subTest(label="css data: url"):
+            self.assertTrue(check(self.dist({"assets/popover.css": "p { background: url(data:image/png;base64,AA); }"})))
+        missing = self.dist()
+        (missing / "settings.html").unlink()
+        self.assertTrue(any("settings.html is missing" in error for error in check(missing)))
+        vendored = self.dist()
+        (vendored / "node_modules").mkdir()
+        self.assertTrue(check(vendored))
+
+    def test_current_ui_build_when_present(self):
+        dist = ROOT / "build/ui-dist"
+        if not dist.is_dir():
+            self.skipTest("no UI build here; run python3 scripts/build_app_ui.py")
+        self.assertEqual(build_ui_module().check_dist(dist), [])
 
 
 if __name__ == "__main__":

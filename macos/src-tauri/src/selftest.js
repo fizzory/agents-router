@@ -36,29 +36,49 @@
       } else {
         // The retained webview may load before Rust opens Settings at General.
         await wait(() => window.__AGT_CI_BEGIN === true);
-        await wait(() => {
-          result.progress.actual = document.querySelectorAll('.setting-row').length;
-          return result.progress.actual === expected.general;
-        });
-        result.fixture = { count: document.querySelectorAll('.setting-row').length, ok: !!document.querySelector('[data-key="max_jobs"]') };
+        const keyNodes = () => [...document.querySelectorAll('#pane-content [data-setting-key]')];
+        const keyOf = node => node.getAttribute('data-setting-key');
+        const sameKeys = (keys, want) => {
+          const wanted = new Set(want);
+          return keys.length === want.length && new Set(keys).size === keys.length && keys.every(key => wanted.has(key));
+        };
+        const providers = ['claude', 'codex', 'antigravity', 'kiro'];
+        const seen = [];
         for (const [pane, selector, count, texts] of [
-          ['general', '#settings .setting-row:not([hidden])', expected.generalVisible, ['Max jobs']],
-          ['roles', '#pane-content .role-row', expected.roles.length, expected.roles],
-          ['accounts', '#pane-content .settings-account', expected.accounts, ['work']],
-          ['sharing', '#pane-content .share-item', expected.sharing.length, expected.sharing],
-          ['activity', '#pane-content .activity-row', expected.activity, ['Example invalid setting']],
+          ['general', '[data-setting-key]', expected.keys.general.length, ['Max jobs']],
+          ['roles', '.role-row', expected.roles.length, expected.roles],
+          ['accounts', '.settings-account', expected.accounts, ['work']],
+          ['sharing', '.share-item', expected.sharing.length, expected.sharing],
+          ['activity', '.activity-row', expected.activity, ['Example invalid setting']],
+          ...providers.map(provider => [provider, '[data-setting-key]', expected.keys[provider].length, ['Max jobs']]),
         ]) {
-          result.progress = { stage: pane, selector, expected: count };
-          document.querySelector(`nav button[data-pane="${pane}"]`).click();
+          const want = expected.keys[pane], button = `nav button[data-pane="${pane}"]`;
+          result.progress = { stage: pane, selector, expected: count, keys: want.length };
+          await wait(() => document.querySelector(button));
+          document.querySelector(button).click();
           await wait(() => {
-            result.progress.actual = document.querySelectorAll(selector).length;
-            return result.progress.actual === count;
+            const nav = document.querySelector(button), keys = keyNodes().map(keyOf);
+            Object.assign(result.progress, {
+              pane: document.body.dataset.pane, current: nav && nav.getAttribute('aria-current'),
+              actual: document.querySelectorAll(`#pane-content ${selector}`).length, actualKeys: keys.length,
+            });
+            return result.progress.pane === pane && result.progress.current === 'page'
+              && sameKeys(keys, want) && result.progress.actual === count;
           });
-          const host = document.querySelector(pane === 'general' ? '#settings' : '#pane-content');
+          // File-only rows sit in closed <details> with zero size until opened.
+          for (const details of document.querySelectorAll('#pane-content details')) details.open = true;
           await sleep();
-          const box = layout(host), nodes = [...document.querySelectorAll(selector)];
-          result.panes[pane] = { ...box, count: nodes.length, fixture: texts.every(text => host.textContent.toLowerCase().includes(text.toLowerCase())), rows: nodes.every(node => layout(node).ok) };
+          const host = document.querySelector('#pane-content'), box = layout(host);
+          const keyed = keyNodes(), nodes = [...document.querySelectorAll(`#pane-content ${selector}`)];
+          seen.push(...keyed.map(keyOf));
+          result.panes[pane] = {
+            ...box, count: nodes.length, keys: keyed.length,
+            fixture: texts.every(text => host.textContent.toLowerCase().includes(text.toLowerCase())),
+            rows: [...new Set([...keyed, ...nodes])].every(node => layout(node).ok),
+          };
         }
+        const all = Object.values(expected.keys).flat();
+        result.fixture = { count: seen.length, ok: sameKeys(seen, all) };
       }
       result.ready = true;
     } catch (cause) { error('probe', cause.stack || cause); }

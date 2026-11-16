@@ -29,6 +29,12 @@ jobs:
         env:
           PYTHONPATH: src:tests
         run: python3 -m unittest test_app_sources test_build_app
+      - name: Frontend typecheck
+        run: python3 scripts/build_app_ui.py --typecheck
+      - name: Frontend component tests
+        run: python3 scripts/build_app_ui.py --test
+      - name: Frontend build (the Rust crate embeds build/ui-dist)
+        run: python3 scripts/build_app_ui.py
       - name: Rust tests
         working-directory: macos/src-tauri
         run: cargo test --locked --features ci-selftest

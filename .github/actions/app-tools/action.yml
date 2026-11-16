@@ -1,5 +1,5 @@
 name: Prepare macOS app tools
-description: Select CLT, provision pinned Rust, and cache repo-local app tools.
+description: Select CLT, provision pinned Rust and Node, and cache repo-local app tools.
 runs:
   using: composite
   steps:
@@ -23,15 +23,21 @@ runs:
           build/downloads
           build/pip-cache
         key: app-tools-${{ runner.os }}-${{ runner.arch }}-rust-1.95.0-${{ hashFiles('scripts/prepare_app_tools.sh', 'scripts/python-runtime.lock') }}
+    - uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: |
+          build/node
+          build/npm-cache
+        key: app-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/node-runtime.lock', 'macos/ui/package-lock.json') }}
     - uses: Swatinem/rust-cache@bc2d2e71bd35c5549942babaa51a89c586b981d1 # v2.8.1
       with:
         workspaces: macos/src-tauri -> ../../build/app-target
         cache-directories: build/cargo-home
         shared-key: app-rust-1.95.0
-    - name: Prepare repo-local Tauri CLI
+    - name: Prepare repo-local Tauri CLI, Node and UI packages
       shell: bash
+      # Every run: npm ci links macos/ui/node_modules; the script skips a cached
+      # tauri-cli and Node.
       run: |
-        if [ ! -x build/tools/bin/cargo-tauri ]; then
-          scripts/prepare_app_tools.sh --yes
-        fi
+        scripts/prepare_app_tools.sh --yes
         scripts/check_app_tools.sh

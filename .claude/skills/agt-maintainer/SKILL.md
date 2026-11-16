@@ -46,7 +46,7 @@ python3 -m unittest test_setup test_guide             # one or a few modules
 - **Unsure a failure is yours?** Run the same module on a clean tree with `git stash`, the test, then `git stash pop`.
 - **A failure a rerun clears** is unexplained, not green. Before calling it flaky, rerunning or merging past it, answer: can the product hit this timing window? Presume a failure in code the change added is a product race until shown otherwise. Fix the product, then the test.
 - **macOS app build names:** every build you make is `Agents Router Test.app`; only `scripts/build_app.sh` makes `Agents Router.app`. Locations and cleanup, data folders and login item included: `macos/README.md`, "Test and release builds".
-- **macOS app:** the commands in `macos/README.md`. Every cargo call uses `CARGO_HOME=$PWD/build/cargo-home` (set from the repository root) and `--locked`. Run `cargo test --locked` in `macos/src-tauri` and `node --test macos/ui/logic`. Installing a toolchain (Rust, or tauri-cli through `scripts/prepare_app_tools.sh`) needs the person's yes.
+- **macOS app:** the commands in `macos/README.md`. Every cargo call uses `CARGO_HOME=$PWD/build/cargo-home` (set from the repository root) and `--locked`. Build the UI first (`python3 scripts/build_app_ui.py`; the crate embeds `build/ui-dist`), then run `cargo test --locked` in `macos/src-tauri`, `node --test macos/ui/logic` and `python3 scripts/build_app_ui.py --test`. Installing a toolchain (Rust, or tauri-cli, Node and the UI's npm packages through `scripts/prepare_app_tools.sh`) needs the person's yes.
 
 ## 4. A change the plugin ships
 

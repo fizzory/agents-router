@@ -55,7 +55,13 @@ def main():
             value = json.loads(match[1])
             return json.loads(value) if isinstance(value, str) else value
 
-        expected_rows = len(json.loads((ROOT / "tests/fixtures/app/config-show.json").read_text())["settings"])
+        # Settings opens at the account target: one row per fixture account.
+        locked = json.loads((ROOT / "tests/fixtures/app/accounts-list-locked.json").read_text())
+        expected_rows = sum(len(runtime["accounts"]) for runtime in locked["runtimes"])
+        # The fake agt's default usage fixture: every account is one popover row.
+        usage = json.loads((ROOT / "tests/fixtures/app/usage.json").read_text())
+        expected_accounts = sum(len(provider["accounts"]) for provider in usage["providers"])
+        popover = callback_json("self-test popover-content") or {}
         sizes = re.findall(r"resized-to-content requested=(\d+) height=(\d+) cap=(\d+) top=(-?\d+) mode=(\w+)", text)
         checks = [result.returncode == 0,
                   # A test build logs its folders once and keeps them out of the release's.
@@ -70,6 +76,7 @@ def main():
                       for requested, height, cap, _top, _mode in sizes),
                   ("popover reduce-motion=true" in text or
                    any(mode == "animate" for _requested, _height, _cap, _top, mode in sizes)),
+                  popover.get("rows") == expected_accounts,
                   callback_json("self-test settings-content") == {"pane":"accounts", "rows":expected_rows},
                   "settings hidden activation=Accessory; webview retained" in text,
                   "single-instance callback on main thread" in text,

@@ -1,0 +1,26 @@
+/* The menu bar popover: 360 wide, height follows content up to the native cap. */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+/* contentHeight() measures body's padding plus its parts; #root adds no box. */
+body { display: flex; flex-direction: column; padding: 0 var(--space-3) var(--space-3); color: var(--ink); background: color-mix(in srgb, var(--ground) 88%, transparent); }
+#root { display: contents; }
+button { font: inherit; color: inherit; cursor: default; }
+[hidden] { display: none !important; }
+
+.popover-head { display: flex; flex: 0 0 32px; align-items: center; gap: var(--space-1); height: 32px; padding-left: var(--space-4); }
+.popover-title { min-width: 0; margin: 0 auto 0 0; overflow: hidden; font: var(--type-title); text-overflow: ellipsis; white-space: nowrap; }
+.account-scroll { flex: 0 1 auto; min-height: 0; overflow: auto; }
+.account-list { position: relative; margin: 0; padding: 0; list-style: none; }
+.empty-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 28px; padding: 0 var(--space-4); font: var(--type-row); }
+.last-row { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-3); min-height: 28px; margin-top: var(--space-2); padding: var(--space-1) var(--space-4) 0; border-top: 1px solid var(--hairline); font: var(--type-small); }
+.footer-text { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+.footer-message, .footer-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.footer-detail { color: var(--ink-muted); }
+.update-action { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: var(--hit); padding: 0; border: 0; border-radius: var(--r-m); background: transparent; font: var(--type-small); text-align: left; }
+.update-action:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
+.update-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.app-menu { top: 30px; right: var(--space-3); }
+
+@media (prefers-reduced-motion: reduce) {
+  .content-change .empty-row { animation: number-in var(--cross-fade-time) var(--ease-out) both; }
+}

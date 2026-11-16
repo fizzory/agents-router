@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { orderedRole, roleChoices, roleSource, moveProvider, rolesUndo, accountModels, AccountNameCheck,
-  sharingModel, shareCell, shareResult, filterActivity, activityModel } from './panes.js';
+  sharingModel, shareCell, shareResult, shareResultParts, autoCopyKinds, autoCopyValue, autoCopyLabel, filterActivity, activityModel, activityDay, settingName, valueLabel, syncChange } from './panes.js';
 import { SettingsHistory } from './settings-history.js';
 const fixture = name => JSON.parse(readFileSync(new URL(`../../../tests/fixtures/app/${name}.json`, import.meta.url)));
 const roles = fixture('roles-show-panes').roles;
@@ -52,7 +52,7 @@ test('refused role undo keeps the stack and reports a guarded refusal', async ()
   let refuse = false; const errors = [];
   const history = new SettingsHistory({ roles: async () => refuse ? { error: { message: 'Changed since save' } } : fixture('roles-config'), navigate: async () => {}, reload: async () => {}, report: (...e) => errors.push(e) });
   await history.commitRole({}, { key: 'roles.reviewer' }); refuse = true; await history.undo();
-  assert.equal(history.undoSteps.length, 1); assert.equal(errors[0][1], 'Changed elsewhere. Showing current value.');
+  assert.equal(history.undoSteps.length, 1); assert.equal(errors[0][1], 'Changed elsewhere. Showing the current value.');
 });
 test('untogglable accounts get a focusable badge instead of a dead switch', () => {
   const models = accountModels(fixture('accounts-list-locked'), null, 1800000000);
@@ -85,7 +85,7 @@ test('stale name-check replies cannot enable Add after a rename/provider change 
 });
 test('Sharing state row and Waiting count come from status attention, including new items', () => {
   const list = fixture('share-list-kinds');
-  const off = sharingModel(list, fixture('share-status-off')); assert.equal(off.state, 'Sharing off'); assert.equal(off.enabled, false);
+  const off = sharingModel(list, fixture('share-status-off')); assert.equal(off.state, 'Sharing is off.'); assert.equal(off.enabled, false);
   const on = sharingModel(list, fixture('share-status-waiting')); assert.equal(on.state, null); assert.equal(on.waiting.length, 2); assert.ok(on.waiting.every(item => !item.command.includes('<label>')));
   assert.equal(on.waiting[0].command, "agt share pick waiting --in 'codex'");
 });
@@ -103,13 +103,21 @@ test('kinds add/remove result line reflects written, waiting and failed outcomes
     const report = fixture(name); if (name.endsWith('remove')) assert.equal(shareResult(report), 'MCP servers off');
     else assert.match(shareResult(report), new RegExp(`^${report.written?.length || 0} shared`));
   }
-  assert.equal(shareResult({ written: [1, 2, 3, 4], waiting: [1], failed: [1] }), '4 shared · 1 stays · 1 failed');
+  assert.equal(shareResult({ written: [1, 2, 3, 4], waiting: [1], failed: [1] }), '4 shared, 1 stays, 1 failed');
+  assert.deepEqual(shareResultParts({ written: [1], failed: [1], message: 'see log' }).map(part => part.failed), [false, true, false]);
+});
+test('New items reads true/false/lists as agents and skills and writes on, off or the comma list', () => {
+  assert.deepEqual(autoCopyKinds(true), ['agents', 'skills']); assert.deepEqual(autoCopyKinds(false), []);
+  assert.deepEqual(autoCopyKinds(['skills', 'mcp']), ['skills']); assert.deepEqual(autoCopyKinds(null), []);
+  assert.equal(autoCopyValue(['agents', 'skills']), 'on'); assert.equal(autoCopyValue([]), 'off');
+  assert.equal(autoCopyValue(['skills']), 'skills'); assert.equal(autoCopyValue(['skills', 'agents']), 'on');
+  assert.equal(autoCopyLabel(true), 'Every CLI'); assert.equal(autoCopyLabel(false), 'Wait for a choice'); assert.equal(autoCopyLabel(['agents']), 'Agents');
 });
 test('Activity lines carry time, schema label, old → new, scope and attribution tooltip', () => {
   const entry = fixture('activity-log').entries.find(e => e.key === 'max_depth' && e.new === 2);
   const row = activityModel(entry, fixture('config-show').settings, { locale: 'en-GB', timeZone: 'UTC' });
   assert.equal(row.time, '08:00'); assert.equal(row.label, 'Max depth'); assert.equal(row.change, 'Not set → 2'); assert.equal(row.level, 'User');
-  assert.match(row.tooltip, /max_depth\nby command/); assert.match(row.tooltip, /settings.toml/);
+  assert.match(row.tooltip, /max_depth\nNot set → 2\nby command/); assert.match(row.tooltip, /settings.toml/);
 });
 test('Turning plugin parts on or off reads as Plugin parts in Activity', () => {
   const row = activityModel({ type: 'setting', key: 'share.plugin_parts', old: true, new: null, level: 'user', time: '2026-01-01T08:00:00Z' },
@@ -118,11 +126,47 @@ test('Turning plugin parts on or off reads as Plugin parts in Activity', () => {
 });
 test('Activity distinguishes failed counts and refused markers and Search only filters its input events', () => {
   const entries = fixture('activity-log').entries;
-  const failed = filterActivity(entries, 'failed 1'); assert.equal(failed.length, 1); assert.equal(failed[0].marker, 'failed 1');
-  assert.equal(filterActivity(entries, 'refused')[0].marker, 'refused');
+  const failed = filterActivity(entries, '1 failed'); assert.equal(failed.length, 1); assert.equal(failed[0].marker, '1 failed');
+  assert.equal(filterActivity(entries, 'refused')[0].marker, 'Refused');
   assert.ok(filterActivity(entries, 'max_depth').every(row => row.entry.key === 'max_depth'));
   assert.deepEqual(filterActivity(entries, 'this string does not exist'), []);
   assert.equal(entries.length, fixture('activity-log').entries.length);
+});
+
+test('Setting names read as words: provider, role, picks, accounts and unknown keys', () => {
+  assert.equal(settingName('codex.max_jobs'), 'Codex max jobs');
+  assert.equal(settingName('max_jobs'), 'Max jobs');
+  assert.equal(settingName('roles.reviewer'), 'reviewer role');
+  assert.equal(settingName('roles.reviewer.providers'), 'reviewer role providers');
+  assert.equal(settingName('share.targets.agents/example.not_in'), 'example kept out of');
+  assert.equal(settingName('claude.accounts.work.enabled'), 'Claude work account enabled');
+  assert.equal(settingName('share.instructions'), 'Instructions');
+  assert.equal(settingName('share.some_new.thing'), 'Some new thing');
+});
+test('Every Activity label in the fixture is words, never a dotted or underscored key', () => {
+  for (const row of filterActivity(fixture('activity-log').entries, '')) {
+    assert.doesNotMatch(row.label, /[._]/, row.label);
+    assert.equal(row.label, row.label.charAt(0).toUpperCase() + row.label.slice(1));
+  }
+});
+test('Instructions and New items values read as their menu labels', () => {
+  assert.equal(valueLabel('share.instructions', 'off'), 'Not shared');
+  assert.equal(valueLabel('share.instructions', 'block'), 'agt’s block');
+  assert.equal(valueLabel('share.instructions', 'whole'), 'Whole files');
+  assert.equal(valueLabel('share.auto_copy', false), 'Wait for a choice');
+  assert.equal(valueLabel('claude.failover', 'on-limit'), null);
+  const row = activityModel(fixture('activity-log').entries.find(e => e.key === 'share.auto_copy' && e.old === true));
+  assert.equal(row.change, 'Every CLI → Wait for a choice');
+});
+test('Sync entries show what changed where, and their scope', () => {
+  const entries = fixture('activity-log').entries, run = id => activityModel(entries.find(e => e.run === id));
+  assert.equal(run('fixture-run-2').change, 'notes, example@tools → codex');
+  assert.equal(run('fixture-backed-undo').change, 'example restored in codex, claude');
+  assert.equal(run('fixture-run-1').level, 'User');
+  assert.equal(syncChange({ type: 'sync', items: [], changes: [] }), 'Nothing to change');
+  assert.equal(syncChange({ type: 'sync', items: ['a', 'b', 'c'], changes: [] }), 'a, b and 1 more');
+  assert.equal(activityModel({ type: 'sync', workspace: '/r', family: '/r', changes: [], items: [], time: '' }).level, 'Workspace');
+  assert.match(run('fixture-run-2').tooltip, /notes, example@tools → codex\nagt share sync/);
 });
 
 test('Activity preserves structured old/new values without object-to-string coercion', () => {
@@ -130,4 +174,12 @@ test('Activity preserves structured old/new values without object-to-string coer
   const model = activityModel(entry);
   assert.ok(!model.change.includes('[object Object]'));
   assert.match(model.change, /"cli":"claude"/);
+});
+
+test('Activity groups by day: Today, Yesterday, then weekday day month', () => {
+  const now = Date.parse('2026-11-12T10:00:00Z'), options = { now, timeZone: 'UTC' };
+  assert.equal(activityDay('2026-11-12T01:00:00Z', options), 'Today');
+  assert.equal(activityDay('2026-11-11T23:00:00Z', options), 'Yesterday');
+  assert.equal(activityDay('2026-11-10T08:00:00Z', options), 'Tue 10 Nov');
+  assert.equal(activityDay('not a date', options), '');
 });

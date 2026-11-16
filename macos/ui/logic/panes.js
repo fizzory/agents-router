@@ -75,7 +75,7 @@ export function shareCell(item, label, cell) {
 }
 export function sharingModel(list, status) {
   const enabled = status?.enabled === true && list?.enabled === true;
-  return { enabled, state: enabled ? null : 'Sharing off', command: 'agt share enable --dry-run',
+  return { enabled, state: enabled ? null : 'Sharing is off.', command: 'agt share enable --dry-run',
     waiting: (status?.attention || []).map(item => {
       const destination = (list?.folders || []).find(folder => !(item.folders || []).includes(folder.label)) || list?.folders?.[0];
       const command = (item.fix?.[0] || 'agt share status').replaceAll('<label>', destination ? shellQuote(destination.label) : '');
@@ -83,25 +83,100 @@ export function sharingModel(list, status) {
     }), items: (list?.items || []).map(item => ({ ...item,
       cells: Object.entries(item.cells).map(([label, cell]) => shareCell(item, label, cell)) })) };
 }
-export function shareResult(report) {
-  for (const kind of ['mcp', 'hooks']) if (report[kind] === 'off') return `${SHARE_LABELS['share.' + kind]} off`;
-  if (report.unchanged) return `${SHARE_LABELS['share.' + report.kind] || report.kind} ${report.enabled ? 'on' : 'off'}`;
+// "2 shared, 1 stays, 1 failed" plus agt's message. The failed part is marked so the view can colour it.
+export function shareResultParts(report) {
+  for (const kind of ['mcp', 'hooks']) if (report[kind] === 'off') return [{ text: `${SHARE_LABELS['share.' + kind]} off`, failed: false }];
+  if (report.unchanged) return [{ text: `${SHARE_LABELS['share.' + report.kind] || report.kind} ${report.enabled ? 'on' : 'off'}`, failed: false }];
   const shared = report.written?.length || 0, stays = (report.kept?.length || 0) + (report.waiting?.length || 0), failed = report.failed?.length || 0;
-  return [`${shared} shared`, stays ? `${stays} stays` : '', failed ? `${failed} failed` : '',
-    report.message || ''].filter(Boolean).join(' · ');
+  return [{ text: `${shared} shared`, failed: false }, stays ? { text: `${stays} stays`, failed: false } : null,
+    failed ? { text: `${failed} failed`, failed: true } : null, report.message ? { text: report.message, failed: false } : null].filter(Boolean);
+}
+export const shareResult = report => shareResultParts(report).map(part => part.text).join(', ');
+// share.auto_copy: the menu offers agents and skills. true reads as both, false as neither,
+// a list as its kinds; both write `on`, none `off`, otherwise the comma list.
+export const AUTO_COPY_KINDS = ['agents', 'skills'];
+export function autoCopyKinds(value) {
+  return value === true ? [...AUTO_COPY_KINDS] : Array.isArray(value) ? AUTO_COPY_KINDS.filter(kind => value.includes(kind)) : [];
+}
+export function autoCopyValue(kinds) {
+  const chosen = AUTO_COPY_KINDS.filter(kind => kinds.includes(kind));
+  return chosen.length === AUTO_COPY_KINDS.length ? 'on' : chosen.length ? chosen.join(',') : 'off';
+}
+export function autoCopyLabel(value) {
+  const kinds = autoCopyKinds(value);
+  return kinds.length === AUTO_COPY_KINDS.length ? 'Every CLI' : kinds.length ? kinds.map(kind => kind.charAt(0).toUpperCase() + kind.slice(1)).join(', ') : 'Wait for a choice';
+}
+// A setting's name in sentences and Activity: "Claude max jobs", "builder role",
+// "example kept out of". Never a dotted key: unknown parts become words.
+const words = parts => parts.join(' ').replaceAll('_', ' ').replaceAll('.', ' ');
+export function settingName(key = '') {
+  const [prefix = '', ...rest] = key.split('.');
+  if (prefix === 'roles' && rest.length) return `${rest[0].replaceAll('-', ' ')} role${rest.length > 1 ? ` ${words(rest.slice(1))}` : ''}`;
+  if (prefix === 'share') {
+    if (SHARE_LABELS[key]) return SHARE_LABELS[key];
+    if (rest[0] === 'targets' && rest.length > 2) {
+      const field = rest[rest.length - 1], item = rest.slice(1, -1).join('.'), name = item.includes('/') ? item.slice(item.indexOf('/') + 1) : item;
+      return field === 'not_in' ? `${name} kept out of` : field === 'only' ? `${name} only in` : `${name} ${words([field])}`;
+    }
+    return capitalise(words(rest));
+  }
+  const provider = PROVIDERS[prefix];
+  if (provider && rest.length) {
+    if (rest[0] === 'accounts' && rest.length > 2) return `${provider} ${rest[1]} account ${words(rest.slice(2))}`;
+    return `${provider} ${lowerFirst(rest.length === 1 ? labelFor(key) : words(rest))}`;
+  }
+  return rest.length > 1 ? capitalise(words([prefix, ...rest])) : labelFor(key);
+}
+const capitalise = text => text.charAt(0).toUpperCase() + text.slice(1);
+const lowerFirst = text => text.charAt(0).toLowerCase() + text.slice(1);
+// Readable values for settings whose raw values are agt words. The menus show
+// these labels but still write the raw value.
+export const VALUE_LABELS = { 'share.instructions': { off: 'Not shared', block: 'agt’s block', whole: 'Whole files' } };
+export function valueLabel(key, value) {
+  if (value == null) return null;
+  if (key === 'share.auto_copy') return autoCopyLabel(value);
+  const names = VALUE_LABELS[key];
+  return names && typeof value === 'string' && names[value] ? names[value] : null;
+}
+// A sync entry's change: "example → claude, codex", "example restored in codex",
+// "Nothing to change". Scope: the repo it ran in, else User.
+export function syncChange(entry) {
+  const changes = entry.changes || [];
+  const unique = list => [...new Set(list)];
+  const names = unique(changes.map(change => String(change.item || '')).filter(Boolean).map(item => item.includes('/') ? item.slice(item.indexOf('/') + 1) : item));
+  const list = names.length ? names : unique((entry.items || []).map(String));
+  if (!list.length) return 'Nothing to change';
+  const shown = list.length > 2 ? `${list.slice(0, 2).join(', ')} and ${list.length - 2} more` : list.join(', ');
+  const targets = unique(changes.flatMap(change => change.labels || []));
+  if (!targets.length) return shown;
+  return /\bundo\b/.test(entry.command || '') ? `${shown} restored in ${targets.join(', ')}` : `${shown} → ${targets.join(', ')}`;
 }
 export function activityModel(entry, settings = [], options = {}) {
-  const schema = settings.find(row => row.key === entry.key);
   const failed = entry.changes?.filter(change => change.ok === false).length || 0;
-  const label = entry.type === 'setting' ? SHARE_LABELS[entry.key] || (schema ? labelFor(schema.key) : labelFor(entry.key || 'Setting'))
+  const label = entry.type === 'setting' ? capitalise(settingName(entry.key || '') || 'Setting')
     : entry.type === 'sync' ? 'Sharing' : entry.message || 'Setting';
   const date = new Date(entry.time), time = Number.isNaN(date.getTime()) ? entry.time : date.toLocaleTimeString(options.locale, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: options.timeZone });
-  const value = value => value == null ? 'Not set' : Array.isArray(value) && value.some(item => item && typeof item === 'object') ? JSON.stringify(value) : displayValue(value);
-  const change = entry.type === 'setting' ? `${value(entry.old)} → ${value(entry.new)}` : '';
-  const marker = entry.type === 'refused' ? 'refused' : failed ? `failed ${failed}` : '';
-  const tooltip = [entry.key, entry.by && `by ${entry.by}`, entry.file && `${entry.file}:${entry.line || 1}`, entry.message,
+  const value = value => value == null ? 'Not set' : valueLabel(entry.key, value) ?? (Array.isArray(value) && value.some(item => item && typeof item === 'object') ? JSON.stringify(value) : displayValue(value));
+  const change = entry.type === 'setting' ? `${value(entry.old)} → ${value(entry.new)}` : entry.type === 'sync' ? syncChange(entry) : '';
+  const level = entry.type === 'sync' ? (entry.workspace || entry.family ? 'Workspace' : 'User') : LEVELS[entry.level] || '';
+  const marker = entry.type === 'refused' ? 'Refused' : failed ? `${failed} failed` : '';
+  const tooltip = [entry.key, change && !marker ? change : '', entry.by && `by ${entry.by}`, entry.type === 'sync' && entry.command,
+    entry.type === 'sync' && (entry.workspace || entry.family), entry.file && `${entry.file}:${entry.line || 1}`, entry.message,
     ...(entry.changes || []).filter(c => !c.ok).map(c => c.message)].filter(Boolean).join('\n');
-  return { entry, time, label, change, level: LEVELS[entry.level] || '', marker, tooltip,
+  const parts = entry.type === 'setting' ? [value(entry.old), value(entry.new)] : null;
+  return { entry, time, day: activityDay(entry.time, options), label, change, parts, level, marker, tooltip,
     search: `${label} ${entry.key || ''} ${change} ${marker} ${tooltip} ${entry.type} ${entry.command || ''} ${entry.level || ''}`.toLowerCase() };
 }
 export const filterActivity = (entries, query, settings = [], options = {}) => entries.map(e => activityModel(e, settings, options)).filter(row => row.search.includes(query.trim().toLowerCase()));
+// Day headings: "Today", "Yesterday", then "Mon 10 Nov". options.now is Unix milliseconds.
+export function activityDay(time, options = {}) {
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return '';
+  const key = value => value.toLocaleDateString('en-CA', { timeZone: options.timeZone });
+  const now = new Date(options.now ?? Date.now());
+  const yesterday = new Date(now.getTime() - 86400000);
+  if (key(date) === key(now)) return 'Today';
+  if (key(date) === key(yesterday)) return 'Yesterday';
+  const part = type => new Intl.DateTimeFormat('en-GB', { [type]: type === 'day' ? 'numeric' : 'short', timeZone: options.timeZone }).format(date);
+  return `${part('weekday')} ${part('day')} ${part('month')}`;
+}

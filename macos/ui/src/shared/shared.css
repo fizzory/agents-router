@@ -1,0 +1,96 @@
+/* Shared component styles. Times and curves are motion.css tokens only. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.icon { display: block; width: var(--icon); height: var(--icon); flex: 0 0 var(--icon); stroke-width: 1.75; }
+
+/* Button */
+.button { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); font: inherit; color: inherit; white-space: nowrap; border-radius: var(--r-m); cursor: default; transition: background-color var(--hover-time) var(--ease-out); }
+.button:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
+.button[aria-disabled="true"] { color: var(--ink-muted); }
+/* Push and default buttons look 22px tall; the ::after gives them a 24px hit target. */
+.button-push, .button-default { position: relative; min-width: var(--hit); min-height: 22px; padding: 0 var(--space-4); font: var(--type-body); border: 1px solid var(--edge); background: var(--ground-raised); }
+.button-push::after, .button-default::after { content: ""; position: absolute; inset: -2px -1px; }
+.button-default { border-color: transparent; background: var(--accent-fill); color: white; }
+.button-text { min-height: var(--hit); padding: 0 var(--space-2); font: var(--type-row); border: 0; background: transparent; color: var(--accent-text); }
+.button-icon { width: var(--hit); height: var(--hit); padding: 0; border: 0; background: transparent; }
+.button-icon:hover { background: var(--hover-tint); }
+/* Inline buttons look 20px tall; the ::after gives them a 24px hit target. */
+.button-inline { position: relative; height: 20px; padding: 0 var(--space-3); font: var(--type-small); border: 1px solid var(--edge); background: var(--ground-raised); }
+.button-inline::after { content: ""; position: absolute; inset: -3px 0; }
+.button-inline .icon { width: 11px; height: 11px; flex-basis: 11px; }
+
+/* Turning icons: refresh and the inline spinner */
+.is-turning { animation: icon-turn var(--turn-time) var(--turn-curve) infinite; }
+@keyframes icon-turn { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* Status dot: eight availability states */
+.status-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--ink-muted); transition: background-color var(--cross-fade-time) var(--ease-out), opacity var(--cross-fade-time) var(--ease-out); }
+.status-dot[data-state="ok"] { background: var(--signal-ok); }
+.status-dot[data-state="logged_out"], .status-dot[data-state="unhealthy"] { background: var(--signal-bad); }
+.status-dot[data-state="busy"], .status-dot[data-state="recovering"], .status-dot[data-state="cooling"] { background: var(--signal-warn); }
+.status-dot[data-state="unknown"], .status-dot[data-state="off"] { background: transparent; border: 1px solid var(--ink-muted); }
+.status-dot[data-state="off"] { opacity: .5; }
+
+/* Usage gauge: 56 × 10, two 4px bars with a 2px gap */
+.usage-gauge { display: flex; flex-direction: column; gap: 2px; width: var(--gauge-width); flex: 0 0 var(--gauge-width); }
+.usage-gauge.is-hidden { visibility: hidden; }
+.gauge-bar { display: block; height: var(--gauge-bar); overflow: hidden; border-radius: var(--gauge-bar); background: var(--gauge-track); transition: opacity var(--cross-fade-time) var(--ease-out); }
+.gauge-fill { display: block; width: 100%; height: 100%; border-radius: var(--gauge-bar); background: var(--gauge-other); }
+.gauge-bar.is-main .gauge-fill { background: var(--gauge-main); }
+.gauge-bar.is-warn .gauge-fill { background: var(--signal-warn); }
+.gauge-bar.is-stale { opacity: .5; }
+.usage-gauge.is-fresh .gauge-fill { transition: transform var(--travel-time) var(--travel-curve) calc(var(--i, 0) * var(--stagger-step)); }
+
+/* Rolling figure */
+.rolling-figure { position: relative; display: inline-block; white-space: pre; }
+.figure-digit { display: inline-block; width: 1ch; height: 14px; overflow: hidden; vertical-align: top; }
+.figure-strip, .figure-strip > span { display: block; height: 14px; }
+.figure-strip { animation: digit-roll var(--travel-time) var(--travel-curve) both; animation-delay: calc(var(--i, 0) * var(--stagger-step)); }
+.figure-before { position: absolute; inset: 0; animation: number-out var(--cross-fade-time) var(--ease-out) both; }
+.figure-after { animation: number-in var(--cross-fade-time) var(--ease-out) both; }
+
+/* Group heading */
+.group-heading { display: flex; align-items: center; justify-content: space-between; height: 20px; padding: 0 var(--space-4); font: var(--type-small); font-weight: 600; color: var(--ink-muted); }
+.group-heading-count { font-weight: 400; }
+
+/* Account row: 8 | dot 8 | 6 | name | 8 | gauge 56 | 8 | slot 84 | 8 */
+.account-row { position: relative; display: flex; align-items: center; height: 24px; padding: 0 var(--space-4); border-radius: var(--r-m); white-space: nowrap; transition: background-color var(--hover-time) var(--ease-out); }
+.account-row:hover, .account-row:focus-within { background: var(--hover-tint); }
+.account-row.row-enter { animation: number-in var(--cross-fade-time) var(--ease-out) both; animation-delay: calc(var(--i, 0) * var(--stagger-step)); }
+.row-link { position: absolute; inset: 0; z-index: 1; width: 100%; padding: 0; border: 0; border-radius: var(--r-m); background: transparent; cursor: default; }
+/* Inset ring: the scrolling list must never clip it. */
+.row-link:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.account-row .status-dot { margin-right: var(--space-3); }
+.account-name { display: flex; flex: 1 1 auto; min-width: 0; margin-right: var(--space-4); overflow: hidden; font: var(--type-row); }
+.name-start { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.name-end { flex: 0 0 auto; max-width: 50%; overflow: hidden; white-space: pre; }
+.account-row .usage-gauge { margin-right: var(--space-4); }
+.row-slot { display: flex; flex: 0 0 84px; align-items: center; justify-content: flex-end; gap: var(--space-2); width: 84px; font: var(--type-small); }
+.row-slot .figure { flex: 0 0 32px; width: 32px; height: 14px; text-align: right; }
+.row-slot .figure.is-warn { font-weight: 600; color: var(--signal-warn); }
+.reset-time { flex: 0 0 48px; width: 48px; overflow: hidden; color: var(--ink-muted); text-overflow: ellipsis; }
+.state-word { overflow: hidden; color: var(--ink-muted); text-overflow: ellipsis; }
+.row-action { z-index: 2; }
+
+/* Menu */
+.menu { position: absolute; z-index: 10; min-width: 200px; padding: var(--space-2); border: 1px solid var(--hairline); border-radius: var(--r-m); background: var(--ground-raised); box-shadow: 0 6px 18px #0003; }
+.menu:not([hidden]) { animation: number-in var(--hover-time) var(--ease-out) both; }
+.menu-item { display: flex; align-items: center; gap: var(--space-2); width: 100%; height: var(--hit); padding: 0 var(--space-4) 0 var(--space-1); border: 0; border-radius: var(--r-s); background: transparent; color: inherit; font: var(--type-body); text-align: left; }
+.menu-item:is(:hover, :focus) { outline: none; background: var(--accent-fill); color: white; }
+.menu-item[aria-disabled="true"] { color: var(--ink-muted); }
+.menu-check { width: 12px; flex: 0 0 12px; text-align: center; }
+.menu-label { flex: 1 1 auto; }
+.menu-shortcut { color: var(--ink-muted); }
+.menu-item:is(:hover, :focus) .menu-shortcut { color: inherit; }
+.menu-separator { margin: var(--space-2) var(--space-3); border: 0; border-top: 1px solid var(--hairline); }
+.menu-heading { padding: var(--space-1) var(--space-4); font: var(--type-small); font-weight: 600; color: var(--ink-muted); }
+
+/* Tooltip: line breaks kept in both windows */
+.tooltip { position: fixed; z-index: 20; max-width: min(280px, calc(100vw - 12px)); padding: var(--space-2) var(--space-3); font: var(--type-small); white-space: pre-line; color: var(--ink); background: var(--ground-raised); border: 1px solid var(--hairline); border-radius: var(--r-m); box-shadow: 0 2px 8px #0002; pointer-events: none; opacity: 0; transition: opacity var(--tooltip-time) var(--ease-out); }
+.tooltip.visible { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .is-turning { animation: none; }
+  .turning-icon.is-busy { opacity: .55; }
+  .usage-gauge.is-fresh .gauge-fill { transition: none; }
+  .figure-strip { animation: none; transform: translateY(-14px); }
+}

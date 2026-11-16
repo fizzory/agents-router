@@ -17,6 +17,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -94,14 +95,17 @@ def main():
         key.chmod(0o600)
         public = key.with_suffix(".key.pub").read_text().strip()
         source = scratch / "source"
-        shutil.copytree(ROOT / "macos", source, ignore=shutil.ignore_patterns("target", "gen"))
+        shutil.copytree(ROOT / "macos", source, ignore=shutil.ignore_patterns("target", "gen", "node_modules"))
         cargo = source / "src-tauri"
+        # The copy embeds this checkout's UI build: built once here, then no hook.
+        run(sys.executable, ROOT / "scripts/build_app_ui.py")
         # A test-named bundle with its own identifier: a running development app
         # can't receive this test's single-instance activation or claim its relaunch.
         identifier = f"{TEST_IDENTIFIER}.update-{os.getpid()}"
         config = json.loads((cargo / "tauri.conf.json").read_text())
         config["productName"] = TEST_NAME
         config["identifier"] = identifier
+        config["build"].update(frontendDist=str(BUILD / "ui-dist"), beforeBuildCommand="")
         (cargo / "tauri.conf.json").write_text(json.dumps(config))
         feed = scratch / "feed"
         feed.mkdir()

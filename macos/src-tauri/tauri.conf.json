@@ -4,7 +4,11 @@
   "version": "0.18.0",
   "identifier": "io.github.watcharagorn.agents-router.test",
   "build": {
-    "frontendDist": "../ui"
+    "beforeBuildCommand": {
+      "script": "python3 ../../scripts/build_app_ui.py",
+      "cwd": "."
+    },
+    "frontendDist": "../../build/ui-dist"
   },
   "app": {
     "withGlobalTauri": true,

@@ -1,9 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { controlFor, rowState, fileTarget, brokenFile, installState, matches, generalRows, fieldCommit, isTextField, dispatchEdit, errorMessage } from './settings.js';
+import { controlFor, rowState, fileTarget, brokenFile, installState, matches, paneRows, paneForKey, groupFor, fieldCommit, isTextField, dispatchEdit, errorMessage } from './settings.js';
 import { SettingsHistory } from './settings-history.js';
-import { makeControl } from '../settings-controls.js';
 const fixture = async name => JSON.parse(await readFile(new URL(`../../../tests/fixtures/app/${name}.json`, import.meta.url)));
 const config = await fixture('config-show-levels');
 const row = key => config.settings.find(row => row.key === key);
@@ -27,9 +26,15 @@ test('user-only row under Workspace shows the user value read-only and User only
   assert.equal(state.reset, false);
   assert.equal(rowState(row('claude.accounts'), 'user', config).chip, 'Workspace only');
 });
-test('General keeps four top-level keys then provider blocks; search matches label, key and description', () => {
-  assert.deepEqual(generalRows(config).slice(0, 4).map(row => row.key), ['max_jobs', 'max_depth', 'job_retention_days', 'subagents.prefer_roles']);
-  assert.equal(generalRows(config)[4].key, 'claude.primary');
+test('keys split into General, one pane per provider and Sharing; search matches label, key and description', async () => {
+  const base = await fixture('config-show');
+  assert.deepEqual(paneRows(base, 'general').map(row => row.key), ['max_jobs', 'max_depth', 'job_retention_days', 'subagents.prefer_roles']);
+  const counts = Object.fromEntries(['general', 'claude', 'codex', 'antigravity', 'kiro', 'sharing'].map(pane => [pane, paneRows(base, pane).length]));
+  assert.deepEqual(counts, { general: 4, claude: 27, codex: 30, antigravity: 30, kiro: 26, sharing: 14 });
+  assert.equal(paneForKey('claude.max_jobs'), 'claude'); assert.equal(paneForKey('roles.builder'), 'roles'); assert.equal(paneForKey('max_jobs'), 'general');
+  assert.equal(groupFor(row('claude.max_jobs')), 'Limits'); assert.equal(groupFor(row('codex.circuit_open_seconds')), 'Retries and health');
+  assert.equal(groupFor(row('kiro.max_jobs_by_room')), 'File only'); assert.equal(groupFor({ key: 'claude.new_thing', kind: 'int' }), 'Other');
+  assert.equal(groupFor(row('max_depth')), 'Jobs');
   for (const query of ['max depth', 'max_depth', 'How deep workers']) assert.ok(matches(row('max_depth'), query));
 });
 test('every File only row opens its own resolved file and line, read-only', () => {
@@ -47,13 +52,14 @@ test('broken settings file locks all rows and preserves agt message and line', a
 test('uninstall is hidden for external agt; app-owned uninstall disables for blockers and enables at zero', async () => {
   const busy = { usage: await fixture('usage') };
   assert.equal(installState(busy).owned, true);
-  assert.equal(installState(busy).uninstallDisabled, true); assert.equal(installState(busy).uninstallTooltip, '2 jobs running');
+  assert.equal(installState(busy).uninstallDisabled, true); assert.equal(installState(busy).uninstallReason, 'Wait for 2 running jobs to finish.');
+  assert.equal(installState({}).uninstallReason, 'Checking running jobs…');
   busy.usage = await fixture('usage-idle'); assert.equal(installState(busy).uninstallDisabled, false);
   const external = structuredClone(busy.usage); external.install.source = 'uv';
   assert.equal(installState({ usage: external }).owned, false);
   assert.equal(installState({ usage: { ...busy.usage, install: undefined } }).owned, false);
-  assert.deepEqual(installState({error:'agt not found'}).problem, {message:'agt not found',action:'Install'});
-  assert.deepEqual(installState({error:'agt 0.16 is too old'}).problem, {message:'agt 0.16 is too old',action:'Repair'});
+  assert.deepEqual(installState({error:'agt not found'}).problem, {message:"agt isn't installed.",action:'Install'});
+  assert.deepEqual(installState({error:'agt 0.16 is too old'}).problem, {message:'agt 0.16 is too old.',action:'Repair'});
 });
 test('field commits one step on Enter then blur; typing stays in the focused field', () => {
   const commits = [], commit = fieldCommit('2', value => commits.push(value));
@@ -94,7 +100,7 @@ test('undo switches pane and scope before mutation; changed revision refuses wit
   h.changeExternally(); const result = await h.history.undo();
   assert.equal(result.ok,false); assert.equal(h.calls.length,2); assert.equal(h.calls[1].revision,'r1');
   assert.deepEqual(h.navigation[0],{pane:'general',level:'local',workspace:'/project',key:'max_jobs'});
-  assert.equal(h.messages[0].message,'Changed elsewhere. Showing current value.'); assert.equal(h.history.undoSteps.length,1);
+  assert.equal(h.messages[0].message,'Changed elsewhere. Showing the current value.'); assert.equal(h.history.undoSteps.length,1);
 });
 test('undo restores an explicit empty names list and redo restores the edited names', async () => {
   const h = harness([]), target = {pane:'general',workspace:null,level:'user'};
@@ -116,7 +122,7 @@ test('a later deliberate edit cannot authorize undo across an outside revision c
   const result=await h.history.undo();
   assert.equal(result.ok,false);
   assert.equal(h.calls.at(-1).revision,'r1');
-  assert.equal(h.messages.at(-1).message,'Changed elsewhere. Showing current value.');
+  assert.equal(h.messages.at(-1).message,'Changed elsewhere. Showing the current value.');
 });
 test('exit-3 refusal displays agt own ask without retry or a history step', async () => {
   const refusal = await fixture('config-set-needs-user-words');
@@ -127,41 +133,6 @@ test('exit-3 refusal displays agt own ask without retry or a history step', asyn
   assert.equal(errorMessage({error:{message:'invalid value'}}),'invalid value');
 });
 
-// Small DOM double runs the actual control builder (not a duplicate renderer).
-class Node {
-  constructor(tag) { this.tagName=tag; this.children=[]; this.attributes={}; this.events={}; }
-  setAttribute(k,v) { this.attributes[k]=String(v); }
-  append(...nodes) { this.children.push(...nodes); }
-  addEventListener(k,v) { const existing=this.events[k]; this.events[k]=event=>{existing?.(event);v(event);}; }
-  blur() { this.events.blur?.(); }
-  dataset={};
-}
-test('control kinds render actual spinbutton, switch, choice, fields and file output', () => {
-  globalThis.document={createElement:tag=>new Node(tag)};
-  for (const kind of ['int','float','bool','choice','text','names','auto_copy','fixed']) {
-    const setting={...row('max_depth'),kind,choices:['one','two']};
-    const control=makeControl(setting,{value:kind==='bool'?true:2,label:'Max depth',editable:true},()=>{});
-    assert.ok(control);
-    if (kind==='int'||kind==='float') assert.equal(control.children[0].attributes.role,'spinbutton');
-    if (kind==='bool') assert.equal(control.attributes.role,'switch');
-    if (kind==='choice') assert.equal(control.attributes['aria-haspopup'],'menu');
-    if (kind==='fixed') assert.equal(control.tagName,'output');
-  }
-  delete globalThis.document;
-});
-test('actual stepper clamps arrows and commits one step on Enter plus blur', () => {
-  globalThis.document={createElement:tag=>new Node(tag)};
-  const saves = [];
-  const control=makeControl(row('max_jobs'),{value:1,label:'Max jobs',editable:true},value=>saves.push(value));
-  const input=control.children[0];
-  input.events.keydown({key:'ArrowDown',preventDefault(){}});
-  assert.equal(input.value,'1');
-  input.events.keydown({key:'ArrowUp',preventDefault(){}});
-  input.events.keydown({key:'ArrowUp',preventDefault(){}});
-  input.events.keydown({key:'Enter'});
-  assert.deepEqual(saves,['3']);
-  delete globalThis.document;
-});
 test('environment provenance has a named chip without a nonexistent scope target', () => {
   const state=rowState(row('codex.primary'),'user',config);
   assert.equal(state.chip,'Environment wins');assert.equal(state.chipLevel,null);assert.match(state.chipTooltip,/CODEX_HOME/);

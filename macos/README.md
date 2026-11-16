@@ -67,6 +67,76 @@ All Cargo invocations use `export CARGO_HOME=$PWD/build/cargo-home` from the
 repository root and `--locked`. Tools are checked by
 `scripts/check_app_tools.sh`; this task installs no tools.
 
+## Web UI build
+
+`macos/ui/` is the web UI's source: the pages `popover.html`, `settings.html`
+and `index.html`, their scripts and stylesheets, and `logic/` with its
+`node --test` suite. Both windows are React: the popover (`src/popover/`) and
+the Settings window (`src/settings/`), built from the shared components in
+`src/shared/`. Vite bundles the three pages into the ignored
+`build/ui-dist/`, and `tauri.conf.json` embeds that folder (`frontendDist`),
+never `macos/ui/` itself. New code is strict TypeScript under `macos/ui/src/`
+(`popover/`, `settings/`, `shared/`); `allowJs` lets it import `logic/*.js`
+unchanged.
+
+| What | Where |
+| --- | --- |
+| Node | `24.22.2`, pinned with its SHA256 in `scripts/node-runtime.lock`, unpacked in `build/node/` |
+| npm packages | Exact versions in `macos/ui/package.json`, integrity hashes in `macos/ui/package-lock.json` |
+| `node_modules` | `npm ci --ignore-scripts` runs in `build/ui-npm/`; `macos/ui/node_modules` is an ignored link to its `node_modules` |
+| npm cache and config | `build/npm-cache/`; empty `build/npmrc` files keep `~/.npmrc` out |
+| Output | `build/ui-dist/`: the three pages at its root, hashed files in `assets/` |
+| Component tests | Vitest, Testing Library and jsdom: `src/**/*.test.tsx`, configured in `vitest.config.ts` |
+
+Each page links one stylesheet, `src/<page>/index.css`, which imports
+`tokens.css`, `motion.css` and the page's own sheet in the order the page
+used. Vite inlines the imports, so each page keeps its cascade order. CSS is
+not minified: the pages read motion tokens such as `--tooltip-delay: 400ms`
+with `parseFloat` as milliseconds. The build targets Safari 17. It inlines no
+assets as `data:` URIs and uses no preload polyfill; the CSP allows only
+`'self'` and is unchanged. `settings-inventory.json` and
+`window-permissions.json` stay out of the build; only tests and guards read
+them.
+
+```bash
+scripts/prepare_app_tools.sh --yes        # once, with consent: Node, npm ci, tauri-cli
+python3 scripts/build_app_ui.py           # vite build into build/ui-dist, then check it
+python3 scripts/build_app_ui.py --typecheck   # tsc --noEmit
+python3 scripts/build_app_ui.py --test        # vitest run: React component tests in jsdom
+```
+
+The component tests use a fake popover adapter with the native event
+semantics, the committed fixtures, and the real `motion.css` token values;
+they never load `window.__TAURI__`.
+
+`build_app_ui.py` never installs. Without the pinned Node or the packages it
+stops and names `scripts/prepare_app_tools.sh --yes`. After every build it
+checks the output: the three pages exist, and the HTML has no inline
+`<script>`, `<style>`, `style=` or `on…=` attribute. Every `src`, `href` and
+CSS `url()` must name a file inside the build. `scripts/check_app_tools.sh`
+also requires the Node and the packages.
+
+`cargo tauri build` runs the UI build first as `beforeBuildCommand`, so
+`build_app.sh`, the self-test and a debug build need no extra step. Raw
+`cargo test` and `cargo run` don't run it, and the crate won't compile
+without `build/ui-dist`. Build the UI first:
+
+```bash
+python3 scripts/build_app_ui.py
+cd macos/src-tauri && CARGO_HOME="$PWD/../../build/cargo-home" cargo test --locked
+node --test macos/ui/logic                # from the repository root
+```
+
+Dev loop, in two terminals. The CSP is unchanged, so use no dev server:
+
+```bash
+python3 scripts/build_app_ui.py --watch   # rebuilds build/ui-dist on every change
+cd macos/src-tauri && CARGO_HOME="$PWD/../../build/cargo-home" ../../build/tools/bin/cargo-tauri dev \
+    --no-dev-server --additional-watch-folders ../../build/ui-dist
+```
+
+Tauri rebuilds and restarts the app when `build/ui-dist` changes.
+
 ## Test and release builds
 
 Only the released app is called `Agents Router.app`. Every other build is a
@@ -304,9 +374,25 @@ locally). The native deadline is 60 seconds; the external deadline is 90.
 Rust writes `report.json` once, alongside native logs and fake-agt call records.
 The runner requires both exit 0 and a complete passing report with the OS
 version/build, arm64 architecture, WebKit CFBundleVersion, single page loads,
-all pane layouts and all probes. It reports macOS 14.0 as unverified: a newer
-host proves only its own WebKit. Replay this script on a 14.0 machine when one
-is available. Failure diagnostics survive at the printed scratch path.
+all nine Settings pane layouts and all probes. It reports macOS 14.0 as
+unverified: a newer host proves only its own WebKit. Replay this script on a
+14.0 machine when one is available. Failure diagnostics survive at the printed
+scratch path.
+
+The Settings check clicks each `nav button[data-pane]` in turn. A pane counts
+once `body.dataset.pane` and the button's `aria-current="page"` match, and
+`#pane-content` holds exactly that pane's config keys and rows. It opens every
+`<details>` there before measuring, so file-only rows get a size. Rust splits the
+`config show` fixture's keys by their first part:
+
+| Key | Pane | Row selector in `#pane-content` |
+|---|---|---|
+| `claude.*`, `codex.*`, `antigravity.*`, `kiro.*` | That provider | `[data-setting-key]` |
+| `share.*` | Sharing | `.share-item` (and its `[data-setting-key]` rows) |
+| Any other | General | `[data-setting-key]` |
+| None | Roles, Accounts, Activity | `.role-row`, `.settings-account`, `.activity-row` |
+
+Every fixture key must show up exactly once across the nine panes.
 
 `.github/workflows/release.yml` runs `app-build` on macos-15 arm64 with CLT
 selected, Rust 1.95.0 and cached repo-local tools/Cargo. PR builds need no signing
@@ -345,7 +431,9 @@ panel, resigns its key status, reopens it and dispatches Escape through the
 loaded page. It removes the update footer while shown to check content resizing
 (animated unless Reduce Motion is on). It quits afterwards. Standard error includes the NSPanel class,
 one `usage read reason=debounced refresh=false`, and hide-not-close lines for
-`reason=blur` and `reason=Esc`. FSEvents and a native app run require access to
+`reason=blur` and `reason=Esc`. Settings opens at the `work` account and must
+show the Accounts pane with one `.settings-account` row per account in
+`accounts-list-locked.json`. FSEvents and a native app run require access to
 the macOS window server outside the command sandbox. No quota is used.
 
 ## Popover integration contract
@@ -370,12 +458,18 @@ sends a `settings-target` event to Settings with
 `{ pane, runtime, account }`; the page and account navigation are step 5/6.
 Settings activation is Regular while visible and Accessory after hiding.
 
-The popover uses the decided compact row anatomy. `logic/rows.js` owns pure
-row/VoiceOver text and footer priority; `row-view.js` retains DOM nodes so
-refreshes preserve keyboard focus. Each account has one sequential tab stop:
-the inline action when present, otherwise the Settings row button. All account
-strings enter the DOM through `textContent`. `motion.css` owns every motion
-duration, curve and visual delay; only `usage-updated` animates meter values.
+The popover groups accounts under provider headings. `logic/rows.js` owns
+the pure row/VoiceOver text and footer copy; React keys rows by
+`runtime:name`, so refreshes keep their DOM nodes and keyboard focus. The
+account list is one Tab stop: ↑/↓ and Home/End move between rows, ←/→ between
+a row's Settings target and its inline button (focused first). ⌘R refreshes,
+⌘, opens Settings, ⌘Q quits; Escape closes the More menu, otherwise hides the
+tooltip and the popover. These listen on `document`, because focus starts on
+body. Contracts the native checks read: `#accounts .account-row` (one per
+account; provider headings are not rows), `#accounts .row-link` labels,
+`#status` and `body[data-active]`. Account strings are React text, never
+markup. `motion.css` owns every duration, curve and visual delay; only
+`usage-updated` slides the gauge and rolls digits.
 
 The popover reports intrinsic content height through a `ResizeObserver`,
 coalesced in a microtask so reporting also works while the retained panel's
@@ -385,8 +479,9 @@ with motion values read from `motion.css`. Rust clamps to an 80 pt floor and
 the top edge anchored. Only the account list scrolls at the cap. First show,
 loading to first answer and Reduce Motion snap; Reduce Motion fades content.
 
-Run `node --test macos/ui/logic` for row, accessible-label and DOM presentation
-checks. Regenerate app/native-envelope inputs with
+Run `node --test macos/ui/logic` for row and accessible-label text, and
+`python3 scripts/build_app_ui.py --test` for the popover's states, keyboard,
+menu, tooltip, gauge, motion and listener cleanup. Regenerate app/native-envelope inputs with
 `PYTHONPATH=src:tests python3 tests/generate_usage_fixture.py`.
 `AGT_APP_TEST_USAGE_FIXTURE=usage-popover.json` (or `usage-nothing.json`) selects
 an additional golden input in the isolated debug launcher. Install/Repair and
@@ -524,9 +619,10 @@ job alone receives those secrets. The public key is the only key committed.
 Tauri's signing and static-feed format follow the
 [updater documentation](https://v2.tauri.app/plugin/updater/).
 
-Both windows use `tooltip.js`; timing lives only in `motion.css`. Run
-`node --test macos/ui/logic` for controls, scope, errors, field commits,
-serialized undo/redo, revision refusal and blocker/zero-job states. The
+Both windows use the shared `Tooltip`; timing lives only in `motion.css`. Run
+`node --test macos/ui/logic` for scope, errors, field commits, serialized
+undo/redo, revision refusal and blocker/zero-job states, and
+`python3 scripts/build_app_ui.py --test` for the controls, panes and sheets. The
 producer-generated `config-show-levels.json`, `config-show-broken.json` and
 `usage-idle.json` extend the golden inputs. Light/dark evidence is under
 `.mentor/plans/agt-macos-app/evidence/step5-general-*.png`.
@@ -556,7 +652,7 @@ operations; no new command is granted to the popover:
 `{kind:"model",entry:"claude:work",value:"opus"}`,
 `{kind:"effort",entry:"claude:work",value:"high"}`, or
 `{kind:"restore",undo_from,if_unchanged}`. A null model/effort clears the override.
-Model and effort apply to **All roles**, matching agt's entry-wide flags.
+Model and effort apply to every role ("Applies to every role"), matching agt's entry-wide flags.
 Restore uses only `undo_from`, `if_unchanged`, `level` and the original workspace
 from a successful report in this app session. Rust rejects invented undo paths
 or a different scope; agt refuses a changed file. The human `undo` string is
@@ -581,17 +677,31 @@ also reorders builder providers, reads them back and applies structured undo.
 
 ## Settings panes (step 6, PART B)
 
-`ui/panes.js` renders Roles, Accounts, Sharing and Activity inside the retained
-Settings window. Pure models and name-check sequencing live in
-`ui/logic/panes.js`; `SettingsHistory` serializes General, Sharing values and
-structured Roles restore operations on the same session undo stack. Picks and
-account switches stay reversible by toggling again. Activity Search searches
-only log events; setting-row Show history opens it at the key.
+The Settings window renders only the selected pane. The sidebar lists General,
+Roles, Accounts, Sharing and Activity, then one pane per provider (Claude, Codex,
+Antigravity, Kiro). A key's prefix picks its pane: `claude.*` goes to Claude,
+`share.*` to Sharing, `roles.*` to Roles, and every other key to General. Rust's
+`settings-target` still sends `general` or `accounts`; the frontend maps keys.
+Every settings-document row carries `data-setting-key`, file-only rows included.
+
+| Part | Source |
+|---|---|
+| Shell, scope, search, history, events | `ui/src/settings/SettingsApp.tsx` |
+| Panes | `ui/src/settings/panes/*.tsx` |
+| Installer, updater and Add account sheets | `ui/src/settings/sheets.tsx` (one `SheetHost`, priority installer, updater, Add account) |
+| Controls, rows, menus, sheets | `ui/src/shared/` |
+| Pure models | `ui/logic/settings.js`, `ui/logic/panes.js`, `ui/logic/install.js` |
+
+`SettingsHistory` serializes General, provider, Sharing values and structured
+Roles restore operations on the same session undo stack. Picks and account
+switches stay reversible by toggling again. Activity Search searches only log
+events; a row's Show history opens it at the key. New items (`share.auto_copy`)
+offers agents and skills: both write `on`, none `off`, one writes its name.
 
 Provider chips are ordered only for edit/full roles. Left/right arrows rove
 focus, Option-arrows move providers, and native context menus offer Move to
 front/up/down. Model and Effort sections show only agt's allowed choices and
-label their entry-wide scope All roles. The account sheet invalidates its
+label their entry-wide scope "Applies to every role". The account sheet invalidates its
 successful name check immediately on input and ignores superseded replies.
 
 Additional Settings-only operations complete pane actions:

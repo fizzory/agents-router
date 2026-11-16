@@ -1154,7 +1154,7 @@ fn debug_self_test(app: &tauri::AppHandle) {
         main_thread(&app, |app, _mtm| {
             if let Some(window) = app.get_webview_window("popover") {
                 let _ = window.eval_with_callback(
-                    "JSON.stringify({rows:document.querySelector('#accounts').children.length,status:document.querySelector('#status').textContent,height:innerHeight,active:document.body.dataset.active})",
+                    "JSON.stringify({rows:document.querySelectorAll('#accounts .account-row').length,status:document.querySelector('#status').textContent,height:innerHeight,active:document.body.dataset.active})",
                     |value| log(&format!("self-test popover-content={value}")),
                 );
             }
@@ -1200,7 +1200,7 @@ fn debug_self_test(app: &tauri::AppHandle) {
         main_thread(&app, |app, _mtm| {
             if let Some(window) = app.get_webview_window("settings") {
                 let _ = window.eval_with_callback(
-                    "document.body.dataset.retained='yes'; JSON.stringify({pane:document.body.dataset.pane,rows:document.querySelectorAll('.setting-row').length})",
+                    "document.body.dataset.retained='yes'; JSON.stringify({pane:document.body.dataset.pane,rows:document.querySelectorAll('.settings-account').length})",
                     |value| log(&format!("self-test settings-content={value}")),
                 );
                 let _ = window.close();

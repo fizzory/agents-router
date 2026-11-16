@@ -1,0 +1,9 @@
+# Node.js: official nodejs.org release, darwin-arm64 tarball; the digest is from
+# https://nodejs.org/dist/v24.22.2/SHASUMS256.txt. npm packages are pinned
+# exactly in macos/ui/package.json and by integrity in macos/ui/package-lock.json.
+# Node, npm's cache and the UI's node_modules all stay below build/.
+
+[node]
+version = "24.22.2"
+url = "https://nodejs.org/dist/v24.22.2/node-v24.22.2-darwin-arm64.tar.gz"
+sha256 = "aa9549349e47dffaa42dcf95d6e06ade8c4bdafc980979883b88767670df385a"

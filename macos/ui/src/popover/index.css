@@ -1,0 +1,5 @@
+/* The popover's stylesheets in cascade order; Vite inlines them into one file. */
+@import "../../tokens.css";
+@import "../shared/shared.css";
+@import "./popover.css";
+@import "../../motion.css";

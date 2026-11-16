@@ -1,0 +1,6 @@
+/* The Settings window's stylesheets in their cascade order; Vite inlines them into one file. */
+@import "../../tokens.css";
+@import "../shared/shared.css";
+@import "../shared/controls.css";
+@import "./settings.css";
+@import "../../motion.css";
