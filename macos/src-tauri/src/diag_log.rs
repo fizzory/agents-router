@@ -9,9 +9,16 @@
 //! app does: an I/O failure goes to stderr only.
 use crate::app_paths::{self, AppPaths};
 use std::{
+    ffi::{CStr, CString},
     fs::{self, File, OpenOptions},
     io::{self, Write},
-    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
+    os::{
+        fd::{AsRawFd, FromRawFd},
+        unix::{
+            ffi::OsStrExt,
+            fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
+        },
+    },
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock, TryLockError},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -19,6 +26,13 @@ use std::{
 
 pub const FILE_NAME: &str = "agents-router.log";
 pub const ROTATED_NAME: &str = "agents-router.log.1";
+/// Never rotated or removed: launches flock it around each record.
+pub const LOCK_NAME: &str = "agents-router.log.lock";
+/// How often a record tries the lock, 1 ms apart, before it is written
+/// without rotating.
+const LOCK_TRIES: u32 = 50;
+/// The log file's open flags, with open_at's own.
+const APPEND: libc::c_int = libc::O_WRONLY | libc::O_APPEND;
 /// Rotate before a write would take the file past this size: at most about
 /// twice this on disk, with the one `.1` file.
 pub const MAX_BYTES: u64 = 1024 * 1024;
@@ -45,6 +59,8 @@ pub const BRIDGED: [&str; 10] = [
     "failed to install the update",
     "failed to move the new app into place",
 ];
+/// Its serde_json text quotes the feed: only its position is kept.
+pub const DESERIALIZE_FAILED: &str = "failed to deserialize update response";
 /// Its AppleScript error is the privileged shell's stderr: only this is kept.
 pub const MOVE_FAILED: &str = "failed to move the new app into place";
 /// tauri::process, at Error: a failed relaunch (the spawn's io error).
@@ -106,11 +122,18 @@ pub fn sanitize(text: &str) -> String {
         out.push_str(&rest[..at]);
         out.push_str("://");
         let body = &rest[at + 3..];
-        // A URL runs to whitespace, a quote or a bracket that can't be in one.
-        // Cutting later is safe: the query and fragment go either way.
-        let end = body
+        // A URL runs to whitespace, a quote or a bracket that can't be in one,
+        // or, before its query, to the scheme of the next URL: two joined by
+        // a comma, or by nothing, are two URLs, each sanitized on its own.
+        // Commas and parentheses stay inside: they are legal in a path or
+        // query. A URL inside the query goes with it: cutting later is safe.
+        let mut end = body
             .find(|c: char| c.is_whitespace() || c.is_control() || "\"'<>`".contains(c))
             .unwrap_or(body.len());
+        let kept = body[..end].find(['?', '#']).unwrap_or(end);
+        if let Some(next) = body[..kept].find("://") {
+            end = scheme_start(&body[..next]);
+        }
         let (url, after) = body.split_at(end);
         let authority = url.find(['/', '?', '#']).unwrap_or(url.len());
         let (userinfo_host, tail) = url.split_at(authority);
@@ -138,24 +161,55 @@ pub fn sanitize(text: &str) -> String {
     out
 }
 
-/// Quoted text in a deserialize error can be a piece of the feed: drop it.
-pub fn without_quoted(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut quoted = false;
-    for c in text.chars() {
-        if c == '"' {
-            if !quoted {
-                out.push_str("\"…");
-            }
-            quoted = !quoted;
-            if !quoted {
-                out.push('"');
-            }
-        } else if !quoted {
-            out.push(c);
-        }
+/// Where the scheme that ends `text` (just before a "://") starts.
+fn scheme_start(text: &str) -> usize {
+    text.trim_end_matches(|c: char| c.is_ascii_alphanumeric() || "+-.".contains(c))
+        .len()
+}
+
+/// A list of URLs for one log line: each sanitized on its own, separated by a
+/// space, which no URL contains.
+pub fn url_list(urls: &[&str]) -> String {
+    if urls.is_empty() {
+        return "none".into();
     }
-    out
+    urls.iter()
+        .map(|url| sanitize(url))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A JSON error in the update feed: its category and position, never its
+/// message, which quotes the feed's own values ("…", `…`) in any form.
+pub fn json_error(error: &serde_json::Error) -> String {
+    use serde_json::error::Category;
+    let category = match error.classify() {
+        Category::Io => "io",
+        Category::Syntax => "syntax",
+        Category::Data => "data",
+        Category::Eof => "eof",
+    };
+    match error.line() {
+        // serde_json::from_value, as the updater uses it, has no position.
+        0 => format!("JSON {category} error; detail not kept"),
+        line => format!(
+            "JSON {category} error at line {line} column {}; detail not kept",
+            error.column()
+        ),
+    }
+}
+
+/// The updater's own deserialize record has only serde_json's text: keep its
+/// trailing " at line N column M" when it has one, nothing else of it.
+fn deserialize_failed(message: &str) -> String {
+    let digits = |n: &str| !n.is_empty() && n.len() <= 20 && n.bytes().all(|b| b.is_ascii_digit());
+    let position = message
+        .rsplit_once(" at line ")
+        .and_then(|(_, tail)| tail.split_once(" column "))
+        .filter(|(line, column)| digits(line) && digits(column))
+        .map(|(line, column)| format!(" at line {line} column {column}"))
+        .unwrap_or_default();
+    format!("{DESERIALIZE_FAILED}; detail not kept{position}")
 }
 
 fn cut(text: &str, max: usize) -> &str {
@@ -193,12 +247,80 @@ pub fn record(stamp: &str, pid: u32, message: &str) -> String {
     line
 }
 
-/// The open log file and its rotation.
+/// The open log file and its rotation. The folder is opened once, after the
+/// checks: every later open, stat and rename is relative to that descriptor,
+/// so a folder swapped for a link afterwards (into the release's log folder,
+/// say) can't redirect a write.
 pub struct Sink {
     path: PathBuf,
+    name: CString,
+    dir: File,
     file: Option<File>,
+    /// LOCK_NAME, held around each size check, rotation and append: two
+    /// launches (logging starts before single-instance) rotate one at a time.
+    lock: Option<File>,
     max: u64,
     failed: bool,
+}
+
+/// The cross-launch lock, released when dropped, an early `?` included.
+struct Held(libc::c_int);
+impl Drop for Held {
+    fn drop(&mut self) {
+        // SAFETY: the Sink keeps this lock file open for the guard's whole life.
+        unsafe { libc::flock(self.0, libc::LOCK_UN) };
+    }
+}
+
+fn c_name(name: &str) -> io::Result<CString> {
+    Ok(CString::new(name)?)
+}
+
+/// Opens or creates `name` in the folder: never through a link, never
+/// waiting, a regular file only, 0600. Without O_NONBLOCK, a FIFO at the name
+/// would hold an open for writing until a reader came.
+fn open_at(dir: &File, name: &CStr, flags: libc::c_int) -> io::Result<File> {
+    let flags = flags | libc::O_CREAT | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
+    // SAFETY: a valid folder descriptor and a NUL-terminated name; the mode is
+    // passed as c_uint, as the variadic call promotes it.
+    let fd = unsafe { libc::openat(dir.as_raw_fd(), name.as_ptr(), flags, 0o600 as libc::c_uint) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: openat just returned this descriptor; nothing else owns it.
+    let file = unsafe { File::from_raw_fd(fd) };
+    // A FIFO, socket or device at the name: closed unwritten, its mode kept.
+    if !file.metadata()?.file_type().is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a regular file",
+        ));
+    }
+    // The mode applies only when the file is created.
+    file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    Ok(file)
+}
+
+/// Whether `name` in the folder (not followed) is the file open as `file`.
+fn names(dir: &File, name: &CStr, file: &File) -> io::Result<bool> {
+    // SAFETY: an all-zero stat is valid; fstatat only writes it.
+    let mut disk: libc::stat = unsafe { std::mem::zeroed() };
+    let fd = dir.as_raw_fd();
+    let found = unsafe { libc::fstatat(fd, name.as_ptr(), &mut disk, libc::AT_SYMLINK_NOFOLLOW) };
+    if found < 0 {
+        return Ok(false);
+    }
+    let open = file.metadata()?;
+    Ok(open.dev() == disk.st_dev as u64 && open.ino() == disk.st_ino as u64)
+}
+
+fn rename_at(dir: &File, from: &CStr, to: &CStr) -> io::Result<()> {
+    let fd = dir.as_raw_fd();
+    // SAFETY: a valid folder descriptor and NUL-terminated names.
+    if unsafe { libc::renameat(fd, from.as_ptr(), fd, to.as_ptr()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 impl Sink {
@@ -208,7 +330,11 @@ impl Sink {
         Self::with_limit(path, within, MAX_BYTES)
     }
     pub fn with_limit(path: PathBuf, within: Option<&Path>, max: u64) -> Result<Self, String> {
-        let dir = path.parent().ok_or("log path has no folder")?.to_path_buf();
+        let folder = path.parent().ok_or("log path has no folder")?.to_path_buf();
+        let name = path
+            .file_name()
+            .ok_or("log path has no file name")
+            .and_then(|n| CString::new(n.as_bytes()).map_err(|_| "log file name has a NUL"))?;
         let check = |when: &str| -> Result<(), String> {
             if let Some(root) = within {
                 let relative = path
@@ -222,19 +348,38 @@ impl Sink {
         fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
-            .create(&dir)
-            .map_err(|e| format!("{}: {e}", dir.display()))?;
+            .create(&folder)
+            .map_err(|e| format!("{}: {e}", folder.display()))?;
         check("after creating the log folder")?;
-        match fs::symlink_metadata(&dir) {
-            Ok(meta) if meta.is_dir() => {}
-            _ => return Err(format!("{} must be a folder, not a link", dir.display())),
+        let not_a_folder = || format!("{} must be a folder, not a link", folder.display());
+        let dir = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&folder)
+            .map_err(|e| format!("{}: {e}", not_a_folder()))?;
+        // The folder held is the one checked: still no link below the root,
+        // and the path still names this folder.
+        check("after opening the log folder")?;
+        let opened = dir
+            .metadata()
+            .map_err(|e| format!("{}: {e}", folder.display()))?;
+        match fs::symlink_metadata(&folder) {
+            Ok(meta)
+                if meta.is_dir() && meta.dev() == opened.dev() && meta.ino() == opened.ino() => {}
+            _ => return Err(not_a_folder()),
         }
-        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
-            .map_err(|e| format!("{}: {e}", dir.display()))?;
-        let file = Self::open_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        dir.set_permissions(fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("{}: {e}", folder.display()))?;
+        let file = open_at(&dir, &name, APPEND).map_err(|e| format!("{}: {e}", path.display()))?;
+        let lock = c_name(LOCK_NAME)
+            .and_then(|lock| open_at(&dir, &lock, libc::O_RDWR))
+            .map_err(|e| format!("{}: {e}", folder.join(LOCK_NAME).display()))?;
         Ok(Self {
             path,
+            name,
+            dir,
             file: Some(file),
+            lock: Some(lock),
             max,
             failed: false,
         })
@@ -242,32 +387,47 @@ impl Sink {
     pub fn path(&self) -> &Path {
         &self.path
     }
-    fn open_file(path: &Path) -> io::Result<File> {
-        let file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(path)?;
-        // mode() applies only when the file is created.
-        file.set_permissions(fs::Permissions::from_mode(0o600))?;
-        Ok(file)
-    }
-    /// The open file, reopened when the path no longer names it: another
-    /// instance rotated it, or someone removed it.
+    /// The open file, reopened when its name in the folder no longer names
+    /// it: another instance rotated it, or someone removed it.
     fn current(&mut self) -> io::Result<&mut File> {
-        let same = match (&self.file, fs::symlink_metadata(&self.path)) {
-            (Some(file), Ok(disk)) => {
-                let open = file.metadata()?;
-                open.dev() == disk.dev() && open.ino() == disk.ino()
-            }
-            _ => false,
+        let same = match &self.file {
+            Some(file) => names(&self.dir, &self.name, file)?,
+            None => false,
         };
         if !same {
             self.file = None;
-            self.file = Some(Self::open_file(&self.path)?);
+            self.file = Some(open_at(&self.dir, &self.name, APPEND)?);
         }
         Ok(self.file.as_mut().expect("log file open"))
+    }
+    /// LOCK_EX on the lock file, tried LOCK_TRIES times 1 ms apart: None when
+    /// another launch keeps it longer, or the lock file can't be opened.
+    fn lock(&mut self) -> Option<Held> {
+        let lock_name = c_name(LOCK_NAME).ok()?;
+        for _ in 0..LOCK_TRIES {
+            if self.lock.is_none() {
+                self.lock = Some(open_at(&self.dir, &lock_name, libc::O_RDWR).ok()?);
+            }
+            let lock = self.lock.as_ref()?;
+            // SAFETY: a descriptor the Sink owns and keeps open.
+            if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+                let held = Held(lock.as_raw_fd());
+                // Removed or replaced while open: another launch would lock the
+                // file now at that name, so lock that one.
+                if names(&self.dir, &lock_name, lock).unwrap_or(false) {
+                    return Some(held);
+                }
+                drop(held);
+                self.lock = None;
+                continue;
+            }
+            match io::Error::last_os_error().kind() {
+                io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(1)),
+                io::ErrorKind::Interrupted => {}
+                _ => return None,
+            }
+        }
+        None
     }
     /// One whole record: a single write on an O_APPEND file, then flush.
     pub fn append(&mut self, record: &str) -> io::Result<()> {
@@ -278,10 +438,20 @@ impl Sink {
         result
     }
     fn append_inner(&mut self, record: &[u8]) -> io::Result<()> {
+        // Without the lock: never wait longer, never rotate a file another
+        // launch may be rotating, and write only while the record fits.
+        let held = self.lock();
+        // Under the lock: another launch may have rotated since our last write.
         let size = self.current()?.metadata()?.len();
         if size > 0 && size + record.len() as u64 > self.max {
+            if held.is_none() {
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "full while another launch holds the rotation lock; record dropped",
+                ));
+            }
             self.file = None;
-            fs::rename(&self.path, self.path.with_file_name(ROTATED_NAME))?;
+            rename_at(&self.dir, &self.name, &c_name(ROTATED_NAME)?)?;
         }
         let file = self.current()?;
         file.write_all(record)?;
@@ -396,15 +566,13 @@ fn updater(message: &str) -> Option<String> {
     if !BRIDGED.iter().any(|p| message.starts_with(p)) {
         return None;
     }
-    Some(
-        if message.starts_with("failed to deserialize update response") {
-            without_quoted(message)
-        } else if message.starts_with(MOVE_FAILED) {
-            format!("{MOVE_FAILED} (AppleScript error not kept)")
-        } else {
-            message.to_string()
-        },
-    )
+    Some(if message.starts_with(DESERIALIZE_FAILED) {
+        deserialize_failed(message)
+    } else if message.starts_with(MOVE_FAILED) {
+        format!("{MOVE_FAILED} (AppleScript error not kept)")
+    } else {
+        message.to_string()
+    })
 }
 
 /// Tauri's restart records: these targets, levels and messages only.
@@ -538,6 +706,27 @@ mod tests {
             ("p@ss in path https://h/p@x stays", "p@ss in path https://h/p@x stays"),
             ("no url here?a=b", "no url here?a=b"),
             ("https://example.com", "https://example.com"),
+            // Two URLs joined by a comma, or by nothing: each sanitized alone.
+            (
+                "https://a/feed,https://user:secret@b/feed",
+                "https://a/feed,https://b/feed",
+            ),
+            ("https://a,https://user:secret@b/f", "https://a,https://b/f"),
+            (
+                "https://a/feedhttps://user:secret@b/feed",
+                "https://a/feedhttps://b/feed",
+            ),
+            ("https://ahttps://user:secret@b", "https://ahttps://b"),
+            (
+                "https://a/x?q=1,https://user:secret@b/y#frag",
+                "https://a/x",
+            ),
+            // A URL inside a query or fragment goes with it.
+            ("https://h/cb?next=https://x/secret", "https://h/cb"),
+            ("https://h/p#https://u:secret@x/k=v", "https://h/p"),
+            // A comma inside one URL keeps its query out all the same.
+            ("https://h/a,b?token=S#frag", "https://h/a,b"),
+            ("https://h/p?list=a,b&token=S", "https://h/p"),
         ] {
             assert_eq!(sanitize(input), expected, "{input}");
             let line = record("T", 1, input);
@@ -545,6 +734,23 @@ mod tests {
                 assert!(!line.contains(secret), "{line}");
             }
         }
+    }
+
+    #[test]
+    fn an_endpoint_list_sanitizes_each_url_and_separates_them_with_spaces() {
+        assert_eq!(url_list(&[]), "none");
+        let list = url_list(&[
+            "https://a/feed?k=v",
+            "https://user:secret@b/feed",
+            "https://c/x,https://user:secret@d/y",
+        ]);
+        assert_eq!(
+            list,
+            "https://a/feed https://b/feed https://c/x,https://d/y"
+        );
+        // The line it goes into is sanitized again: nothing changes.
+        assert_eq!(sanitize(&list), list);
+        assert!(!record("T", 1, &format!("endpoints={list}")).contains("secret"));
     }
 
     #[test]
@@ -574,11 +780,13 @@ mod tests {
             sink.append(&record("T", 1, &format!("line {i:04} {}", "x".repeat(40))))
                 .unwrap();
         }
-        let names: Vec<_> = fs::read_dir(path.parent().unwrap())
+        let mut names: Vec<_> = fs::read_dir(path.parent().unwrap())
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
-        assert_eq!(names.len(), 2, "{names:?}");
+        names.sort();
+        assert_eq!(names, [FILE_NAME, ROTATED_NAME, LOCK_NAME]);
+        assert_eq!(mode(&path.with_file_name(LOCK_NAME)), 0o600);
         let rotated = path.with_file_name(ROTATED_NAME);
         assert!(fs::metadata(&path).unwrap().len() <= 1000);
         assert!(fs::metadata(&rotated).unwrap().len() <= 1000);
@@ -617,10 +825,254 @@ mod tests {
     }
 
     #[test]
+    fn a_log_folder_swapped_for_a_link_never_redirects_writes() {
+        let scratch = Scratch::new("swap");
+        let support = scratch.0.join("support");
+        let elsewhere = scratch.0.join("release-logs");
+        fs::create_dir_all(&support).unwrap();
+        fs::create_dir_all(&elsewhere).unwrap();
+        let path = log_path(crate::app_paths::TEST_IDENTIFIER, &scratch.0, &support);
+        let mut sink = Sink::with_limit(path.clone(), Some(&support), 200).unwrap();
+        sink.append("first\n").unwrap();
+        // After init, the checked folder is moved away and a link to another
+        // log folder (the release's, say) takes its name.
+        let folder = path.parent().unwrap();
+        let moved = folder.with_file_name("moved");
+        fs::rename(folder, &moved).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, folder).unwrap();
+        // Appends, a rotation and a removed file: all stay in the folder opened.
+        for i in 0..10 {
+            sink.append(&format!("record {i} {}\n", "x".repeat(40)))
+                .unwrap();
+        }
+        assert!(moved.join(ROTATED_NAME).is_file());
+        fs::remove_file(moved.join(FILE_NAME)).unwrap();
+        sink.append("after removal\n").unwrap();
+        assert_eq!(fs::read_dir(&elsewhere).unwrap().count(), 0);
+        assert_eq!(
+            fs::read_to_string(moved.join(FILE_NAME)).unwrap(),
+            "after removal\n"
+        );
+    }
+
+    #[test]
+    fn another_launchs_lock_defers_rotation_and_never_blocks() {
+        use std::os::fd::AsRawFd;
+        let scratch = Scratch::new("lock");
+        let path = scratch.0.join("logs").join(FILE_NAME);
+        let rotated = path.with_file_name(ROTATED_NAME);
+        let mut sink = Sink::with_limit(path.clone(), None, 100).unwrap();
+        let full = format!("{}\n", "a".repeat(89));
+        sink.append(&full).unwrap();
+        // Another launch's lock: flock locks belong to the open file, so this
+        // one conflicts with the sink's in the same process too. Taking it at
+        // once also shows the sink let go of its own after the append.
+        let other = File::open(path.with_file_name(LOCK_NAME)).unwrap();
+        let flock = |op| unsafe { libc::flock(other.as_raw_fd(), op) };
+        assert_eq!(flock(libc::LOCK_EX | libc::LOCK_NB), 0);
+        // While locked: a record that fits is written; one past the limit is
+        // dropped with an error, neither written nor rotated.
+        sink.append("fits\n").unwrap();
+        assert!(sink.append("while locked\n").is_err());
+        assert!(!rotated.exists());
+        assert_eq!(fs::read_to_string(&path).unwrap(), format!("{full}fits\n"));
+        // Released: the next record past the limit rotates.
+        assert_eq!(flock(libc::LOCK_UN), 0);
+        sink.append("after release\n").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "after release\n");
+        assert_eq!(
+            fs::read_to_string(&rotated).unwrap(),
+            format!("{full}fits\n")
+        );
+    }
+
+    #[test]
+    fn a_busy_lock_never_takes_the_file_past_the_cap() {
+        use std::os::fd::AsRawFd;
+        let scratch = Scratch::new("cap");
+        let path = scratch.0.join("logs").join(FILE_NAME);
+        let rotated = path.with_file_name(ROTATED_NAME);
+        let mut sink = Sink::open(path.clone(), None).unwrap();
+        let line = format!("{}\n", "r".repeat(99));
+        let size = || fs::metadata(&path).unwrap().len();
+        // Near the cap: room for exactly two more records.
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(MAX_BYTES - 2 * line.len() as u64)
+            .unwrap();
+        // Another launch keeps the lock for every record below.
+        let other = File::open(path.with_file_name(LOCK_NAME)).unwrap();
+        let flock = |op| unsafe { libc::flock(other.as_raw_fd(), op) };
+        assert_eq!(flock(libc::LOCK_EX | libc::LOCK_NB), 0);
+        for i in 0..6 {
+            assert_eq!(sink.append(&line).is_ok(), i < 2, "record {i}");
+            assert!(size() <= MAX_BYTES, "record {i}: {} bytes", size());
+        }
+        assert_eq!(size(), MAX_BYTES);
+        assert!(!rotated.exists());
+        // Released: the full file is rotated, at the cap, not past it.
+        assert_eq!(flock(libc::LOCK_UN), 0);
+        sink.append(&line).unwrap();
+        assert_eq!(size(), line.len() as u64);
+        assert_eq!(fs::metadata(&rotated).unwrap().len(), MAX_BYTES);
+    }
+
+    /// A FIFO at `path`, mode 0644 whatever the umask.
+    fn fifo(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let name = CString::new(path.as_os_str().as_bytes()).unwrap();
+        // SAFETY: a NUL-terminated path.
+        let made = unsafe { libc::mkfifo(name.as_ptr(), 0o644) };
+        assert_eq!(made, 0, "{}", io::Error::last_os_error());
+        fs::set_permissions(path, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+
+    /// The FIFO's read end, opened without waiting for a writer.
+    fn reader(path: &Path) -> File {
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)
+            .unwrap()
+    }
+
+    /// Runs `work` on its own thread, so an open stalled on a FIFO fails the
+    /// test instead of hanging it. On a stall, a reader lets the open go on.
+    fn promptly<T: Send + 'static>(fifo: &Path, work: impl FnOnce() -> T + Send + 'static) -> T {
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = send.send(work());
+        });
+        match receive.recv_timeout(Duration::from_secs(30)) {
+            Ok(result) => result,
+            Err(_) => {
+                let _reader = reader(fifo);
+                let _ = receive.recv_timeout(Duration::from_secs(30));
+                panic!("stalled on the FIFO at {}", fifo.display());
+            }
+        }
+    }
+
+    fn mode(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    /// Asserts nothing was written into the FIFO this read end belongs to.
+    fn unread(mut reader: File) {
+        use std::io::Read;
+        let mut got = Vec::new();
+        match reader.read_to_end(&mut got) {
+            Ok(_) => assert!(got.is_empty(), "{got:?}"),
+            Err(e) => assert_eq!(e.kind(), io::ErrorKind::WouldBlock, "{e}"),
+        }
+    }
+
+    /// A log path in its own new folder of the scratch.
+    fn log_in(scratch: &Scratch, folder: &str) -> PathBuf {
+        let path = scratch.0.join(folder).join(FILE_NAME);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        path
+    }
+
+    #[test]
+    fn a_fifo_at_the_log_name_never_stalls_the_start() {
+        // No reader: an open for writing would wait for one.
+        let scratch = Scratch::new("fifo-alone");
+        let path = log_in(&scratch, "logs");
+        fifo(&path);
+        let opening = path.clone();
+        assert!(promptly(&path, move || Sink::open(opening, None).is_err()));
+        assert_eq!(mode(&path), 0o644);
+    }
+
+    #[test]
+    fn a_fifo_at_the_log_name_with_a_reader_is_refused_unchanged() {
+        // The open succeeds, so only the file type stops it, before its mode
+        // changes or anything is written.
+        let scratch = Scratch::new("fifo-read");
+        let path = log_in(&scratch, "logs");
+        fifo(&path);
+        let read_end = reader(&path);
+        let error = Sink::open(path.clone(), None).err().unwrap();
+        assert!(error.contains("not a regular file"), "{error}");
+        assert_eq!(mode(&path), 0o644);
+        unread(read_end);
+    }
+
+    #[test]
+    fn a_fifo_at_the_lock_name_is_refused_unchanged() {
+        // O_RDWR opens a FIFO at once: only its type stops it, before its
+        // mode changes.
+        let scratch = Scratch::new("fifo-lock");
+        let path = log_in(&scratch, "logs");
+        let lock = path.with_file_name(LOCK_NAME);
+        fifo(&lock);
+        let error = Sink::open(path, None).err().unwrap();
+        assert!(error.contains("not a regular file"), "{error}");
+        assert_eq!(mode(&lock), 0o644);
+    }
+
+    #[test]
+    fn a_fifo_met_on_reopen_under_the_lock_never_stalls_or_is_written() {
+        use std::os::fd::AsRawFd;
+        let scratch = Scratch::new("fifo-reopen");
+        let path = log_in(&scratch, "logs");
+        let mut sink = Sink::open(path.clone(), None).unwrap();
+        sink.append("first\n").unwrap();
+        fs::remove_file(&path).unwrap();
+        fifo(&path);
+        // No reader: refused at once, under the rotation lock.
+        let (mut sink, appended) = promptly(&path, move || {
+            let appended = sink.append("second\n");
+            (sink, appended)
+        });
+        assert!(appended.is_err());
+        // A reader: refused all the same, nothing written, mode kept.
+        let read_end = reader(&path);
+        assert!(sink.append("third\n").is_err());
+        assert_eq!(mode(&path), 0o644);
+        unread(read_end);
+        // The lock was let go.
+        let other = File::open(path.with_file_name(LOCK_NAME)).unwrap();
+        // SAFETY: a descriptor this test owns.
+        let locked = unsafe { libc::flock(other.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        assert_eq!(locked, 0);
+    }
+
+    #[test]
+    fn a_launch_writes_into_the_file_another_launch_rotated_in() {
+        let scratch = Scratch::new("two");
+        let path = scratch.0.join("logs").join(FILE_NAME);
+        let mut first = Sink::with_limit(path.clone(), None, 100).unwrap();
+        let mut second = Sink::with_limit(path.clone(), None, 100).unwrap();
+        let one = format!("{}\n", "1".repeat(80));
+        let two = format!("{}\n", "2".repeat(80));
+        first.append(&one).unwrap();
+        second.append(&two).unwrap();
+        // The first still holds the rotated file open: it reopens the new one
+        // and doesn't rotate again over the kept `.1`.
+        first.append("first again\n").unwrap();
+        assert_eq!(
+            fs::read_to_string(path.with_file_name(ROTATED_NAME)).unwrap(),
+            one
+        );
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            format!("{two}first again\n")
+        );
+    }
+
+    #[test]
     fn the_bridge_keeps_only_allowed_updater_records() {
         use log::Level::{Debug, Error};
         const UPDATER: &str = "tauri_plugin_updater::updater";
-        for message in BRIDGED.iter().filter(|m| **m != MOVE_FAILED) {
+        for message in BRIDGED
+            .iter()
+            .filter(|m| ![MOVE_FAILED, DESERIALIZE_FAILED].contains(*m))
+        {
             let line = format!("{message}: detail");
             assert_eq!(
                 bridged(UPDATER, Debug, &line),
@@ -650,8 +1102,30 @@ mod tests {
                 Error,
                 "failed to deserialize update response: invalid type: string \"dW50cnVzdGVk\", expected a map"
             ),
-            Some("updater ERROR: failed to deserialize update response: invalid type: string \"…\", expected a map".into())
+            Some("updater ERROR: failed to deserialize update response; detail not kept".into())
         );
+        // serde_json quotes feed values with escaped quotes and backticks too.
+        for (message, expected) in [
+            (
+                r#"failed to deserialize update response: invalid value: string "before \"TOKEN=SECRET\" after", expected a version"#,
+                "updater ERROR: failed to deserialize update response; detail not kept",
+            ),
+            (
+                "failed to deserialize update response: unknown variant `SECRET`, expected one of `a`, `b`",
+                "updater ERROR: failed to deserialize update response; detail not kept",
+            ),
+            (
+                r#"failed to deserialize update response: invalid type: string "SECRET", expected a map at line 3 column 14"#,
+                "updater ERROR: failed to deserialize update response; detail not kept at line 3 column 14",
+            ),
+            (
+                r#"failed to deserialize update response: invalid type: string "SECRET at line 1 column 2x", expected a map"#,
+                "updater ERROR: failed to deserialize update response; detail not kept",
+            ),
+        ] {
+            let line = bridged(UPDATER, Error, message);
+            assert_eq!(line.as_deref(), Some(expected), "{message}");
+        }
         // The AppleScript error is the privileged shell's stderr.
         assert_eq!(
             bridged(
@@ -660,6 +1134,46 @@ mod tests {
                 "failed to move the new app into place: mv: /Applications/secret-name.app: Permission denied (1)"
             ),
             Some("updater ERROR: failed to move the new app into place (AppleScript error not kept)".into())
+        );
+    }
+
+    #[test]
+    fn a_feed_json_error_keeps_its_category_and_position_only() {
+        #[derive(serde::Deserialize, Debug)]
+        #[allow(dead_code)]
+        struct Release {
+            version: u32,
+        }
+        // serde_json::from_value, as the updater calls it: no position.
+        let value = serde_json::json!({"version": "before \"TOKEN=SECRET\" after"});
+        let error = serde_json::from_value::<Release>(value).unwrap_err();
+        assert!(error.to_string().contains("SECRET"), "{error}");
+        assert_eq!(json_error(&error), "JSON data error; detail not kept");
+        let value = serde_json::json!({"version": 1, "SECRET": true});
+        #[derive(serde::Deserialize, Debug)]
+        #[serde(deny_unknown_fields)]
+        #[allow(dead_code)]
+        struct Strict {
+            version: u32,
+        }
+        let error = serde_json::from_value::<Strict>(value).unwrap_err();
+        assert!(error.to_string().contains("`SECRET`"), "{error}");
+        assert_eq!(json_error(&error), "JSON data error; detail not kept");
+        // Parsed from text: the position stays.
+        let error = serde_json::from_str::<Release>("{\n  \"version\": \"SECRET\"}").unwrap_err();
+        assert_eq!(
+            json_error(&error),
+            "JSON data error at line 2 column 21; detail not kept"
+        );
+        let error = serde_json::from_str::<Release>("{\"version\": SECRET").unwrap_err();
+        assert_eq!(
+            json_error(&error),
+            "JSON syntax error at line 1 column 13; detail not kept"
+        );
+        let error = serde_json::from_str::<Release>("{\"version\": 1").unwrap_err();
+        assert_eq!(
+            json_error(&error),
+            "JSON eof error at line 1 column 13; detail not kept"
         );
     }
 

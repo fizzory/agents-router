@@ -652,6 +652,20 @@ updates.
 - Rotation: before a write would take the file past 1 MiB, it becomes
   `agents-router.log.1`, replacing the previous `.1`. At most about 2 MiB on
   disk. A record is at most 4 KiB; a longer one ends in `…[truncated]`.
+- Logging starts before the single-instance check, so two launches can write
+  at once. Each record takes an `flock` on `agents-router.log.lock` (`0600`,
+  never rotated) for its size check, rotation and write, and reopens the file
+  when another launch rotated it. A launch that can't take the lock within
+  about 50 ms never waits longer and never rotates: it writes its record only
+  when the file stays within 1 MiB, and otherwise drops it and says so on
+  stderr.
+- The folder is opened once, after the checks above, and every later open,
+  check and rename goes through that open folder, never the path. A folder
+  replaced by a link later, into the release's log folder say, can't redirect
+  a write.
+- Every file there is opened without waiting and must be a regular file. A
+  FIFO, socket or device at the log or lock name is refused before its mode
+  changes or anything is written.
 - Logging never changes what the app does. When the folder or file can't be
   opened or written, the app carries on and says so once on stderr.
 
@@ -676,7 +690,7 @@ What it records:
 | Line | When |
 | --- | --- |
 | `start version=… identifier=… build=release\|test pid=… exe=…` | Each launch, once the folders are resolved. `std_exe=` follows when the OS reports another executable path |
-| `update check start manual=… current=… endpoints=…` | A check starts: at launch, 24 hours after the last one, or on `Check for Updates…`. The 60-second timer's other ticks log nothing |
+| `update check start manual=… current=… endpoints=…` | A check starts: at launch, 24 hours after the last one, or on `Check for Updates…`. The 60-second timer's other ticks log nothing. `endpoints` lists the feed URLs, each sanitized on its own, separated by spaces |
 | `update check skipped: test build` | A manual check in a test build |
 | `update check result available version=… current=… date=… target=… url=…` | The feed offers a newer version |
 | `update check result current version=…` | Up to date |
@@ -698,8 +712,8 @@ The updater plugin logs through the `log` crate. The app keeps only records
 whose target starts with `tauri_plugin_updater` and whose message starts with
 one of: `checking for updates`, `update endpoint returned 204`,
 `update endpoint did not respond with a successful status code`,
-`failed to check for updates`, `failed to deserialize update response` (quoted
-text removed), `Searching for updater target`, `cannot swap the app bundles`,
+`failed to check for updates`, `failed to deserialize update response` (as
+`…; detail not kept`, with only a trailing `at line N column M`), `Searching for updater target`, `cannot swap the app bundles`,
 `app installation needs admin privileges`, `failed to install the update`,
 `failed to move the new app into place` (its AppleScript error, the privileged
 shell's stderr, removed).
@@ -712,7 +726,12 @@ thread` and `restart triggered from a separate thread`; at Error, `failed to
 request exit: …`. Nothing else from Tauri.
 
 Never recorded:
-- the user info, query and fragment of any URL, also inside error messages;
+- the user info, query and fragment of any URL, also inside error messages.
+  Two URLs joined by a comma, or by nothing, are sanitized each on its own;
+- the feed's content in a JSON error: `update check result failed` keeps its
+  category and position only, as `error=JSON data error; detail not kept`
+  (`syntax`, `eof` or `io` in place of `data`; `at line N column M` when
+  serde_json reports one);
 - request headers and proxy settings;
 - the updater public key and update signatures;
 - the raw feed JSON: `update response:` and `parsed release response` are dropped.

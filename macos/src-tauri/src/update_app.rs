@@ -85,7 +85,7 @@ fn publish(app: &tauri::AppHandle, dialog: Option<Dialog>, foreground: bool) {
     }
 }
 /// The configured feed URLs, read from the app config: never the updater's key,
-/// headers or proxy. The log sanitizes them like every other line.
+/// headers or proxy. Each is sanitized on its own, separated by spaces.
 fn endpoints(app: &tauri::AppHandle) -> String {
     let config = app.config();
     let list: Vec<&str> = config
@@ -96,18 +96,14 @@ fn endpoints(app: &tauri::AppHandle) -> String {
         .and_then(|e| e.as_array())
         .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
         .unwrap_or_default();
-    if list.is_empty() {
-        "none".into()
-    } else {
-        list.join(",")
-    }
+    diag_log::url_list(&list)
 }
-/// An updater error for the log: never the signature, nor quoted feed content.
+/// An updater error for the log: never the signature, nor any feed content.
 fn describe(error: &tauri_plugin_updater::Error) -> String {
     use tauri_plugin_updater::Error as E;
     match error {
         E::SignatureUtf8(_) => "the update signature could not be decoded".into(),
-        E::Serialization(_) => diag_log::without_quoted(&error.to_string()),
+        E::Serialization(e) => diag_log::json_error(e),
         _ => error.to_string(),
     }
 }

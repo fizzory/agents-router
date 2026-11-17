@@ -386,6 +386,51 @@ def check_sources(root, *, release=False):
             or not re.search(r'split_once\("\): "\)\)\s*\{\s*Some\(\(status, _\)\) =>', diag_code)):
         fail("diag-log", "the log bridge must also take Tauri's restart records (tauri::process, tauri::app: exact "
                          "targets, levels and messages), without the stderr open wrote")
+    # The log folder is opened once, after the checks; every later open, stat
+    # and rename is relative to it, so a folder swapped for a link can't
+    # redirect a write. A bounded flock serializes check, rotate and append.
+    def method(text, head):
+        return text.split(head, 1)[1].split("\n    }\n", 1)[0] if head in text else ""
+    current, append = method(diag_code, "fn current(&mut self)"), method(diag_code, "fn append_inner(")
+    lock = method(diag_code, "fn lock(&mut self)")
+    if (".custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)" not in diag_code
+            or not re.search(r"libc::openat\(dir\.as_raw_fd\(\)", diag_code)
+            or not re.search(r"flags \| libc::O_CREAT \| libc::O_NOFOLLOW \| libc::O_CLOEXEC", diag_code)
+            or not re.search(r"libc::fstatat\([^;]*libc::AT_SYMLINK_NOFOLLOW\)", diag_code)
+            or not re.search(r"libc::renameat\(fd, from\.as_ptr\(\), fd, to\.as_ptr\(\)\)", diag_code)
+            or re.findall(r"\.open\(([^)]*)\)", diag_code) != ["&folder"]
+            or re.search(r"\bfs::(?:rename|symlink_metadata|metadata|remove_file)\(&?self\.", diag_code)
+            or "names(&self.dir, &self.name, file)" not in current
+            or "open_at(&self.dir, &self.name," not in current
+            or "rename_at(&self.dir, &self.name," not in append):
+        fail("diag-log", "the log folder must be opened once (O_DIRECTORY | O_NOFOLLOW) and every later open, "
+                         "stat and rename made relative to it (openat, fstatat, renameat), never by path")
+    if (not re.search(r"for _ in 0\.\.LOCK_TRIES \{", lock)
+            or "libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB)" not in lock
+            or not re.search(r"impl Drop for Held \{[^}]*libc::flock\(self\.0, libc::LOCK_UN\)", diag_code)
+            or not 0 <= append.find("let held = self.lock();") < append.find("self.current()")
+            or not re.search(r"if size > 0 && size \+ record\.len\(\) as u64 > self\.max \{\s*"
+                             r"if held\.is_none\(\) \{\s*return Err\(", append)):
+        fail("diag-log", "rotation must hold the cross-launch flock (LOCK_EX | LOCK_NB, bounded retries), re-check the "
+                         "file after taking it, and without it neither rotate nor write past the size cap")
+    # A FIFO at a log name would hold an open for writing until a reader came;
+    # anything but a regular file is refused before its mode or contents change.
+    open_at = body(diag_code, "fn open_at(")
+    regular = open_at.find("if !file.metadata()?.file_type().is_file() {\n        return Err(")
+    if ("libc::O_CLOEXEC | libc::O_NONBLOCK;" not in open_at
+            or not 0 <= regular < open_at.find("file.set_permissions(")):
+        fail("diag-log", "every file in the log folder must be opened O_NONBLOCK and refused, before its mode changes "
+                         "or anything is written, unless it is a regular file")
+    # Feed URLs each sanitized on their own; no serde_json text from the feed.
+    if ("diag_log::url_list(&list)" not in body(rust, "fn endpoints(")
+            or "E::Serialization(e) => diag_log::json_error(e)," not in rust
+            or not re.search(r"if message\.starts_with\(DESERIALIZE_FAILED\) \{\s*deserialize_failed\(message\)", diag_code)
+            or 'format!("{DESERIALIZE_FAILED}; detail not kept{position}")' not in diag_code
+            or "let kept = body[..end].find(['?', '#']).unwrap_or(end);" not in diag_code
+            or not re.search(r"if let Some\(next\) = body\[\.\.kept\]\.find\(\"://\"\) \{\s*"
+                             r"end = scheme_start\(&body\[\.\.next\]\);", diag_code)):
+        fail("diag-log", "each feed URL must be sanitized on its own (space-separated, split at the next scheme), and a "
+                         "feed JSON error logged as its category and position only")
     readme = root / "macos/README.md"
     readme = readme.read_text(encoding="utf-8") if readme.is_file() else ""
     if "## Diagnostic log" not in readme or RELEASE_LOG not in readme or TEST_LOG not in readme:
@@ -902,7 +947,7 @@ class AppSourceTests(unittest.TestCase):
         cases = [
             # An unbuffered file: restart and exit run no destructors.
             edit(diag, "use std::{", "use std::io::BufWriter;\nuse std::{"),
-            edit(diag, "let file = OpenOptions::new()", "let file = io::LineWriter::new(OpenOptions::new()"),
+            edit(diag, "let file = unsafe { File::from_raw_fd(fd) };", "let file = io::LineWriter::new(unsafe { File::from_raw_fd(fd) });"),
             # A test build keeps its log in its own app support folder.
             edit(diag, 'support.join("logs").join(identifier)', 'support.join("logs").join(RELEASE_IDENTIFIER)'),
             edit(diag, 'support.join("logs").join(identifier).join(FILE_NAME)',
@@ -967,6 +1012,45 @@ class AppSourceTests(unittest.TestCase):
                  '"usage result failed generation={generation} error={shown}"'),
             edit(update, 'Ok(Ok(out)) => format!("unknown (plutil {})", out.status),',
                  'Ok(Ok(out)) => format!("unknown (plutil {}: {})", out.status, String::from_utf8_lossy(&out.stderr)),'),
+            # The folder held open: no path-based open, stat or rename after init.
+            edit(diag, ".custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)",
+                 ".custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC)"),
+            edit(diag, "flags | libc::O_CREAT | libc::O_NOFOLLOW | libc::O_CLOEXEC", "flags | libc::O_CREAT | libc::O_CLOEXEC"),
+            edit(diag, "Some(file) => names(&self.dir, &self.name, file)?,",
+                 "Some(file) => fs::symlink_metadata(&self.path)?.ino() == file.metadata()?.ino(),"),
+            edit(diag, "self.file = Some(open_at(&self.dir, &self.name, APPEND)?);",
+                 "self.file = Some(OpenOptions::new().append(true).create(true).open(&self.path)?);"),
+            edit(diag, "rename_at(&self.dir, &self.name, &c_name(ROTATED_NAME)?)?;",
+                 "fs::rename(&self.path, self.path.with_file_name(ROTATED_NAME))?;"),
+            edit(diag, "libc::fstatat(fd, name.as_ptr(), &mut disk, libc::AT_SYMLINK_NOFOLLOW)",
+                 "libc::fstatat(fd, name.as_ptr(), &mut disk, 0)"),
+            # The cross-launch lock: taken first, bounded, released, and no rotation without it.
+            edit(diag, "        let held = self.lock();\n", "        let held = Some(());\n"),
+            edit(diag, "            if held.is_none() {\n                return Err(", "            if false {\n                return Err("),
+            # Without the lock, no write past the size cap either.
+            edit(diag, "        if size > 0 && size + record.len() as u64 > self.max {\n"
+                       "            if held.is_none() {\n"
+                       "                return Err(io::Error::new(\n"
+                       "                    io::ErrorKind::WouldBlock,\n"
+                       "                    \"full while another launch holds the rotation lock; record dropped\",\n"
+                       "                ));\n"
+                       "            }\n",
+                 "        if held.is_some() && size > 0 && size + record.len() as u64 > self.max {\n"),
+            # Never waiting on a FIFO; a regular file only, checked before its mode changes.
+            edit(diag, "libc::O_CLOEXEC | libc::O_NONBLOCK;", "libc::O_CLOEXEC;"),
+            edit(diag, "if !file.metadata()?.file_type().is_file() {", "if file.metadata()?.file_type().is_dir() {"),
+            edit(diag, "    // A FIFO, socket or device at the name: closed unwritten, its mode kept.\n",
+                 "    file.set_permissions(fs::Permissions::from_mode(0o600))?;\n"),
+            edit(diag, "libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB)", "libc::flock(lock.as_raw_fd(), libc::LOCK_EX)"),
+            edit(diag, "for _ in 0..LOCK_TRIES {", "loop {"),
+            edit(diag, "unsafe { libc::flock(self.0, libc::LOCK_UN) };", "let _ = self.0;"),
+            # Feed URLs one by one; a feed JSON error's category and position only.
+            edit(update, "diag_log::url_list(&list)", 'list.join(",")'),
+            edit(update, "E::Serialization(e) => diag_log::json_error(e),", "E::Serialization(_) => error.to_string(),"),
+            edit(diag, "        deserialize_failed(message)\n", "        message.to_string()\n"),
+            edit(diag, 'format!("{DESERIALIZE_FAILED}; detail not kept{position}")', 'format!("{message}{position}")'),
+            edit(diag, "            end = scheme_start(&body[..next]);\n", ""),
+            edit(diag, 'body[..kept].find("://")', 'body[..end].find("://")'),
             # The README names both paths.
             edit(Path("macos/README.md"), RELEASE_LOG, "the log", -1),
             edit(Path("macos/README.md"), TEST_LOG, "the test log", -1),
