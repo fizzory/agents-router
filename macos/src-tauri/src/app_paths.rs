@@ -111,13 +111,20 @@ pub struct AppPaths {
 }
 
 /// The folders a test build must never reach, under the person's own HOME.
-pub fn production(home: &Path) -> [PathBuf; 4] {
+pub fn production(home: &Path) -> [PathBuf; 5] {
     [
         home.join(".local/bin"),
         home.join("Library/Application Support/Agents Router"),
         home.join(".agents-router"),
         home.join(".agt"),
+        release_log_dir(home),
     ]
+}
+
+/// The release's diagnostic log folder (diag_log.rs). Test builds log inside
+/// their app support folder instead.
+pub fn release_log_dir(home: &Path) -> PathBuf {
+    home.join("Library/Logs").join(RELEASE_IDENTIFIER)
 }
 
 /// The account's home folder from the user database (getpwuid_r). Unlike
@@ -1133,6 +1140,41 @@ mod tests {
             p.exclude_homes,
             Some(std::env::join_paths([p.child_home(), w.home.clone()]).unwrap())
         );
+    }
+
+    #[test]
+    fn the_release_log_folder_is_a_production_folder() {
+        let mut w = World::new("paths-logs");
+        let (home, account) = (w.home.clone(), w.account.clone());
+        let logs = home.join("Library/Logs/io.github.watcharagorn.agents-router");
+        assert_eq!(release_log_dir(&home), logs);
+        assert!(production(&home).contains(&logs));
+        for root in [&home, &account] {
+            let logs = release_log_dir(root);
+            fs::create_dir_all(&logs).unwrap();
+            for path in [
+                logs.clone(),
+                logs.join("support"),
+                root.join("Library/Logs"),
+            ] {
+                let error = w.test(&["--test-app-support", &s(&path)]).unwrap_err();
+                assert!(
+                    error.contains("overlaps the release's") && error.contains("Library/Logs"),
+                    "{}: {error}",
+                    path.display()
+                );
+            }
+        }
+        w.set("AGT_APP_SUPPORT", release_log_dir(&account).join("support"));
+        assert!(w.test(&[]).unwrap_err().contains("AGT_APP_SUPPORT"));
+        w.vars.remove("AGT_APP_SUPPORT");
+        // The test build's own logs folder is a sibling, under its app support folder.
+        assert!(w
+            .test(&[
+                "--test-app-support",
+                &s(&home.join("Library/Logs/Agents Router Test"))
+            ])
+            .is_ok());
     }
 
     #[test]

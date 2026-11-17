@@ -98,6 +98,41 @@ WHOLE_ENVIRON = re.compile(r"\*\*os\.environ\b|dict\(\s*os\.environ\b|os\.enviro
                            r"\benv\s*=\s*os\.environ\b|\(\s*os\.environ\s*\)")
 
 
+# One literal per update step in update_app.rs's diagnostic log lines; the
+# restart's is in app.rs. Removing one hides a step of a failed update.
+UPDATE_STEPS = (
+    "update check skipped: test build",
+    "update check start manual=",
+    "update check result available ",
+    "update check result current ",
+    "update check result failed ",
+    "update install start ",
+    "update download start url=",
+    "update download finished bytes=",
+    "update signature verified ",
+    "update install replacing ",
+    "update install ok ",
+    "update failed stage=",
+)
+# Updater records the log bridge must drop: they carry the raw feed, proxy
+# settings or the installer's arguments.
+UPDATER_DROPPED = ("update response: ", "parsed release response ", "using proxy ", "disabling proxy",
+                   "Executing updater ", "running on_before_exit hook")
+# Routine activity reaches stderr only, through app::trace; app::log also
+# writes the file. Each prefix is one call site's literal.
+TRACED = ("usage read ", "usage result generation=", "wake received", "single-instance callback",
+          "prevent_exit applied", "self-test ", "popover ", "tray template=", "Settings shown",
+          "settings hidden", "debug fixture launcher")
+# Failures whose detail can be a child's stderr: the file gets a fixed summary
+# (log) and the full text goes to stderr only (trace).
+SUMMARISED = ("runtime cleanup deferred", "plugin refresh deferred", "update self-test failed",
+              "usage request rejected", "usage result failed")
+# The files whose app::log / app::trace calls the diag-log rule reads.
+LOGGING_SOURCES = ("app.rs", "native.rs", "install.rs", "install_app.rs", "update_app.rs")
+RELEASE_LOG = "~/Library/Logs/io.github.watcharagorn.agents-router/agents-router.log"
+TEST_LOG = "<app support>/logs/<identifier>/agents-router.log"
+
+
 def uncomment_python(text):
     return "\n".join(line.split("#", 1)[0] if line.lstrip().startswith("#") else line for line in text.splitlines())
 
@@ -254,6 +289,107 @@ def check_sources(root, *, release=False):
                                            '"versions.json"', '{"from": current, "to": following}')):
         fail("update-versions", "scripts/check_app_update.py must write this checkout's version and the next "
                                 "patch's test version to versions.json")
+
+    # The diagnostic log (diag_log.rs): each build its own file, every record
+    # unbuffered (restart and exit run no destructors), every update step on
+    # record, and only the updater plugin's safe records bridged in.
+    diag = cargo / "src/diag_log.rs"
+    diag_code = uncomment(diag.read_text(encoding="utf-8")).split("#[cfg(test)]", 1)[0] if diag.is_file() else ""
+    if not diag_code:
+        fail("diag-log", "macos/src-tauri/src/diag_log.rs is missing")
+    if re.search(r"\b(?:BufWriter|LineWriter)\b", diag_code):
+        fail("diag-log", "diag_log.rs must write and flush each record itself, with no buffered writer")
+    if (not re.search(r'pub fn log_path\(identifier: &str, home: &Path, support: &Path\) -> PathBuf \{\s*'
+                      r'if app_paths::is_test_build\(identifier\) \{\s*'
+                      r'support\.join\("logs"\)\.join\(identifier\)\.join\(FILE_NAME\)\s*'
+                      r'\} else \{\s*app_paths::release_log_dir\(home\)\.join\(FILE_NAME\)\s*\}\s*\}', diag_code)
+            or "log_path(identifier, &paths.home, &paths.support.path)" not in diag_code
+            or re.search(r"RELEASE_IDENTIFIER|io\.github\.watcharagorn", diag_code)):
+        fail("diag-log", "a test build must log in <app support>/logs/<identifier>; only the release in "
+                         "app_paths::release_log_dir")
+    if (not re.search(r'pub fn release_log_dir\(home: &Path\) -> PathBuf \{\s*'
+                      r'home\.join\("Library/Logs"\)\.join\(RELEASE_IDENTIFIER\)\s*\}', app_paths)
+            or not re.search(r"pub fn production\(home: &Path\)[^{]*\{[^}]*\brelease_log_dir\(home\)", app_paths)):
+        fail("diag-log", "app_paths::production must include the release log folder")
+    def body(text, head):
+        # A top-level fn's body: from its head to the first closing brace in column 0.
+        return text.split(head, 1)[1].split("\n}\n", 1)[0] if head in text else ""
+
+    if "= sanitize(" not in body(diag_code, "pub fn record("):
+        fail("diag-log", "diag_log::record must sanitize every message")
+    app_rs = uncomment((cargo / "src/app.rs").read_text(encoding="utf-8"))
+    if "diag_log::write(message);" not in body(app_rs, "pub fn log(message: &str) {"):
+        fail("diag-log", "app::log must write the diagnostic log as well as stderr")
+    trace = body(app_rs, "pub fn trace(message: &str) {")
+    if not trace or re.search(r"\bdiag_log::|\blog\(|\bwrite\(", trace) or "eprintln!" not in trace:
+        fail("diag-log", "app::trace must write stderr only, never the diagnostic log")
+    # Routine lines on stderr only; failures with a child's text summarised in the file.
+    sources = {name: uncomment((cargo / "src" / name).read_text(encoding="utf-8"))
+               for name in LOGGING_SOURCES if (cargo / "src" / name).is_file()}
+    logged = "\n".join(sources.values())
+    def call(sink, prefix):
+        return re.search(r"\b" + sink + r'\((?:&format!\()?\s*"' + re.escape(prefix), logged)
+    for prefix in TRACED:
+        if call("log", prefix) or not call("trace", prefix):
+            fail("diag-log", f"the routine line {prefix.strip()!r} must use app::trace, not app::log")
+    for prefix in SUMMARISED:
+        raw = re.search(r'\blog\(&format!\(\s*"' + re.escape(prefix) + r'[^"]*\{(?:e|error|shown)\b', logged)
+        if raw or not call("log", prefix) or not call("trace", prefix):
+            fail("diag-log", f"{prefix!r} must log a fixed summary and send its error text to app::trace only")
+    if 'log(&format!("usage request rejected: {}", error.kind()));' not in sources.get("app.rs", ""):
+        fail("diag-log", "a rejected usage request must log ClientError::kind(), not the error's Debug text")
+    if re.search(r"\blog\(&format!\([^;]*\b(?:e|error)\b\s*\)\)", sources.get("install_app.rs", "")):
+        fail("diag-log", "install_app.rs must not log install errors: they can be agt's stderr")
+    if re.search(r"from_utf8_lossy\(&out\.stderr\)", sources.get("update_app.rs", "")):
+        fail("diag-log", "update_app.rs must not put plutil's stderr in a log line")
+    init = app_run.find("diag_log::init(&paths, &identifier)")
+    if not 0 <= app_run.find("paths.prepare()") < init < app_run.find("tauri::Builder::default()"):
+        fail("diag-log", "app::run must open the diagnostic log after AppPaths and prepare(), before the builder")
+    for step in UPDATE_STEPS:
+        if not re.search(r'\blog\((?:&format!\()?\s*"' + re.escape(step), rust):
+            fail("diag-log", f"update_app.rs must log the update step {step.strip()!r}")
+    restart = body(app_rs, "pub fn restart(")
+    relaunch = re.search(r'\blog\(&format!\(\s*"update restart relaunch=', restart)
+    if not relaunch or not 0 <= relaunch.start() < restart.find("app.restart()"):
+        fail("diag-log", "app::restart must log its relaunch target before either restart path")
+    allowed = re.search(r"pub const BRIDGED: \[&str; \d+\] = \[(.*?)\];", diag_code, re.S)
+    allowed = re.findall(r'"((?:\\.|[^"\\])*)"', allowed[1]) if allowed else []
+    if (not allowed or any(record.startswith(prefix) for record in UPDATER_DROPPED for prefix in allowed)
+            or 'pub const UPDATER_TARGET: &str = "tauri_plugin_updater";' not in diag_code
+            or not re.search(r"if target\.starts_with\(UPDATER_TARGET\) \{\s*return updater\(message\)", diag_code)
+            or not re.search(r"fn updater\(message: &str\) -> Option<String> \{\s*"
+                             r"if !BRIDGED\.iter\(\)\.any\(\|p\| message\.starts_with\(p\)\) \{\s*return None;", diag_code)
+            or not re.search(r"fn log\(&self, record: &log::Record\) \{\s*if !self\.enabled\(record\.metadata\(\)\) \{", diag_code)
+            or not re.search(r"fn enabled\([^)]*\) -> bool \{\s*let target = metadata\.target\(\);\s*"
+                             r"target\.starts_with\(UPDATER_TARGET\) \|\| target == PROCESS_TARGET \|\| target == APP_TARGET\s*\}",
+                             diag_code)):
+        fail("diag-log", "the log bridge must take only tauri_plugin_updater records that start with an allowed "
+                         "prefix, never the raw feed or proxy settings")
+    # Tauri's restart records: exact targets, levels and messages; open's stderr dropped.
+    if (not all(const in diag_code for const in (
+                'pub const PROCESS_TARGET: &str = "tauri::process";',
+                'pub const APP_TARGET: &str = "tauri::app";',
+                'pub const RESTART_FAILED: &str = "failed to restart app: ";',
+                'pub const LAUNCH_SERVICES_FAILED: &str = "failed to restart app with LaunchServices";',
+                'pub const REQUEST_EXIT_FAILED: &str = "failed to request exit: ";'))
+            or not re.search(r'pub const RESTART_PATHS: \[&str; 2\] = \[\s*"restart triggered on the main thread",\s*'
+                             r'"restart triggered from a separate thread",?\s*\];', diag_code)
+            or not re.search(r'let label = match target \{\s*PROCESS_TARGET => "tauri\.process",\s*'
+                             r'APP_TARGET => "tauri\.app",\s*_ => return None,\s*\};', diag_code)
+            or not re.search(r"match \(target, level\) \{\s*"
+                             r"\(PROCESS_TARGET, Error\) if message\.starts_with\(RESTART_FAILED\) => Some\(message\.into\(\)\),\s*"
+                             r"\(PROCESS_TARGET, Error\) if message\.starts_with\(LAUNCH_SERVICES_FAILED\) => \{\s*"
+                             r"Some\(launch_services\(&message\[LAUNCH_SERVICES_FAILED\.len\(\)\.\.\]\)\)\s*\}\s*"
+                             r"\(APP_TARGET, Debug\) if RESTART_PATHS\.contains\(&message\) => Some\(message\.into\(\)\),\s*"
+                             r"\(APP_TARGET, Error\) if message\.starts_with\(REQUEST_EXIT_FAILED\) => Some\(message\.into\(\)\),\s*"
+                             r"_ => None,\s*\}", diag_code)
+            or not re.search(r'split_once\("\): "\)\)\s*\{\s*Some\(\(status, _\)\) =>', diag_code)):
+        fail("diag-log", "the log bridge must also take Tauri's restart records (tauri::process, tauri::app: exact "
+                         "targets, levels and messages), without the stderr open wrote")
+    readme = root / "macos/README.md"
+    readme = readme.read_text(encoding="utf-8") if readme.is_file() else ""
+    if "## Diagnostic log" not in readme or RELEASE_LOG not in readme or TEST_LOG not in readme:
+        fail("diag-log", f"macos/README.md must document the diagnostic log: {RELEASE_LOG} and {TEST_LOG}")
 
     # Include checked-in platform/release overlays and the generated release
     # overlay when present, but never traverse build/tools or Cargo caches.
@@ -746,6 +882,99 @@ class AppSourceTests(unittest.TestCase):
         for index, mutate in enumerate(cases):
             with self.subTest(case=index):
                 self.reject("update-versions", mutate)
+
+    def test_rejects_a_diagnostic_log_that_buffers_mixes_builds_or_hides_steps(self):
+        diag, app, update = TAURI / "src/diag_log.rs", TAURI / "src/app.rs", TAURI / "src/update_app.rs"
+        native, install_app = TAURI / "src/native.rs", TAURI / "src/install_app.rs"
+        def edit(path, old, new, count=1):
+            def mutate(root):
+                text = (root / path).read_text()
+                self.assertIn(old, text)
+                self.write(root, path, text.replace(old, new, count))
+            return mutate
+        def move_init_before_prepare(root):
+            text = (root / app).read_text()
+            init = "    diag_log::init(&paths, &identifier);\n"
+            prepare = "    if paths.test {\n        paths.prepare()"
+            self.assertIn(init, text)
+            self.assertIn(prepare, text)
+            self.write(root, app, text.replace(init, "", 1).replace(prepare, init + prepare, 1))
+        cases = [
+            # An unbuffered file: restart and exit run no destructors.
+            edit(diag, "use std::{", "use std::io::BufWriter;\nuse std::{"),
+            edit(diag, "let file = OpenOptions::new()", "let file = io::LineWriter::new(OpenOptions::new()"),
+            # A test build keeps its log in its own app support folder.
+            edit(diag, 'support.join("logs").join(identifier)', 'support.join("logs").join(RELEASE_IDENTIFIER)'),
+            edit(diag, 'support.join("logs").join(identifier).join(FILE_NAME)',
+                 'home.join("Library/Logs").join(identifier).join(FILE_NAME)'),
+            edit(diag, "if app_paths::is_test_build(identifier) {", "if identifier.ends_with(\".test\") {"),
+            edit(diag, "log_path(identifier, &paths.home, &paths.support.path)", "log_path(identifier, &paths.home, &paths.home)"),
+            edit(TAURI / "src/app_paths.rs", "        release_log_dir(home),\n", ""),
+            edit(diag, "let message = sanitize(cut(message, MAX_RECORD * 4));", "let message = cut(message, MAX_RECORD * 4);"),
+            # app::log reaches the file, opened once the folders are known.
+            edit(app, "    diag_log::write(message);\n}", "}"),
+            edit(app, "    diag_log::init(&paths, &identifier);\n", ""),
+            move_init_before_prepare,
+            # Every update step, and the restart before it happens.
+            edit(app, '"update restart relaunch=', '"relaunch='),
+            edit(app, 'log(&format!(\n        "update restart relaunch=',
+                 'app.restart();\n    log(&format!(\n        "update restart relaunch='),
+            edit(update, '            app::log("update check skipped: test build");\n', ""),
+            # The bridge: updater targets only, allowed prefixes only.
+            edit(diag, "    if !BRIDGED.iter().any(|p| message.starts_with(p)) {\n        return None;\n    }\n", ""),
+            edit(diag, "if target.starts_with(UPDATER_TARGET) {", "if target.contains(\"updater\") {"),
+            edit(diag, "        if !self.enabled(record.metadata()) {\n            return;\n        }\n", ""),
+            edit(diag, '    "checking for updates",\n', '    "checking for updates",\n    "update response",\n'),
+            edit(diag, '    "checking for updates",\n', '    "",\n'),
+            edit(diag, "message.starts_with(p)", "message.contains(p)"),
+            # Tauri's restart records: these exact targets, levels and messages.
+            edit(diag, " || target == PROCESS_TARGET || target == APP_TARGET", ""),
+            edit(diag, "target == APP_TARGET", "target.starts_with(APP_TARGET)"),
+            edit(diag, 'pub const PROCESS_TARGET: &str = "tauri::process";', 'pub const PROCESS_TARGET: &str = "tauri";'),
+            edit(diag, '        PROCESS_TARGET => "tauri.process",\n', ""),
+            edit(diag, '        _ => return None,\n    };', '        _ => "tauri",\n    };'),
+            edit(diag, "(APP_TARGET, Debug) if", "(APP_TARGET, _) if"),
+            edit(diag, "RESTART_PATHS.contains(&message)", "message.starts_with(\"restart\")"),
+            edit(diag, '        (APP_TARGET, Error) if message.starts_with(REQUEST_EXIT_FAILED) => Some(message.into()),\n', ""),
+            edit(diag, "        _ => None,\n    }\n}", "        _ => Some(message.into()),\n    }\n}"),
+            # open's stderr after "): " never reaches the file.
+            edit(diag, "Some(launch_services(&message[LAUNCH_SERVICES_FAILED.len()..]))", "Some(message.into())"),
+            edit(diag, 'Some((status, _)) => format!("{LAUNCH_SERVICES_FAILED} ({status}); stderr not kept")',
+                 'Some((status, stderr)) => format!("{LAUNCH_SERVICES_FAILED} ({status}): {stderr}")'),
+            # Routine activity on stderr only: app::trace, which never writes the file.
+            edit(app, 'trace(&format!("usage read reason=', 'log(&format!("usage read reason='),
+            edit(app, 'None => trace(&format!("usage result generation=', 'None => log(&format!("usage result generation='),
+            edit(app, 'trace("self-test complete; quitting")', 'log("self-test complete; quitting")'),
+            edit(app, 'trace("prevent_exit applied', 'log("prevent_exit applied'),
+            edit(native, 'app::trace("wake received', 'app::log("wake received'),
+            edit(native, 'app::trace(&format!(\n        "popover resized-to-content', 'app::log(&format!(\n        "popover resized-to-content'),
+            edit(app, 'pub fn trace(message: &str) {\n    eprintln!', 'pub fn trace(message: &str) {\n    diag_log::write(message);\n    eprintln!'),
+            edit(app, 'pub fn trace(message: &str) {\n    eprintln!("agt-app {:.3} {message}", now());', 'pub fn trace(message: &str) {\n    log(message);'),
+            # A child's stderr never reaches the file: a fixed summary there, the text via trace.
+            edit(install_app, 'app::log("plugin refresh deferred; its error is on stderr only");',
+                 'app::log(&format!("plugin refresh deferred: {e}"));'),
+            edit(install_app, 'app::log("runtime cleanup deferred; its error is on stderr only");',
+                 'app::log(&format!("runtime cleanup deferred: {e}"));'),
+            edit(install_app, '            app::log("plugin refresh deferred; its error is on stderr only");\n', ""),
+            edit(install_app, '            app::trace(&format!("plugin refresh deferred: {e}"));\n', ""),
+            edit(update, 'app::log("update self-test failed; its error is on stderr and in failure.txt");',
+                 'app::log(&format!("update self-test failed: {error}"));'),
+            edit(app, 'log(&format!("usage request rejected: {}", error.kind()));',
+                 'log(&format!("usage request rejected: {error:?}"));'),
+            edit(app, 'log(&format!("usage request rejected: {}", error.kind()));',
+                 'log(&format!("usage request rejected: {}", error));'),
+            edit(app, '"usage result failed generation={generation} error={kind}"',
+                 '"usage result failed generation={generation} error={shown}"'),
+            edit(update, 'Ok(Ok(out)) => format!("unknown (plutil {})", out.status),',
+                 'Ok(Ok(out)) => format!("unknown (plutil {}: {})", out.status, String::from_utf8_lossy(&out.stderr)),'),
+            # The README names both paths.
+            edit(Path("macos/README.md"), RELEASE_LOG, "the log", -1),
+            edit(Path("macos/README.md"), TEST_LOG, "the test log", -1),
+        ]
+        cases += [edit(update, f'"{step}', '"step ') for step in UPDATE_STEPS]
+        for index, mutate in enumerate(cases):
+            with self.subTest(case=index):
+                self.reject("diag-log", mutate)
 
     def test_update_rehearsal_installs_the_next_patch_of_this_checkout(self):
         sys.path.insert(0, str(ROOT / "scripts"))

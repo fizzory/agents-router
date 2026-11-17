@@ -559,7 +559,7 @@ open -n --env AGT_APP_SUPPORT=/tmp/agt-test "/path/to/Agents Router Test.app"
 "/path/to/Agents Router Test.app/Contents/MacOS/agents-router" --test-agt-home /tmp/agt-home
 ```
 
-- Folders must be absolute, without `.` or `..`. A folder that is, contains or sits inside `~/.local/bin`, `~/Library/Application Support/Agents Router`, `~/.agents-router` or `~/.agt`, also through a symlink, stops the launch with a message. `~` is checked twice: as the HOME the app was launched with and as your account's home folder from the user database, so a changed `HOME` can't move the check.
+- Folders must be absolute, without `.` or `..`. A folder that is, contains or sits inside `~/.local/bin`, `~/Library/Application Support/Agents Router`, `~/.agents-router`, `~/.agt` or `~/Library/Logs/io.github.watcharagorn.agents-router`, also through a symlink, stops the launch with a message. `~` is checked twice: as the HOME the app was launched with and as your account's home folder from the user database, so a changed `HOME` can't move the check.
 - agt run by the test build, its Terminal handoffs, hooks and MCP servers get all four folders and a private HOME, `<app support>/home`, so they never see your real Claude, Codex or Gemini setup.
 - They also get `AGT_EXCLUDE_HOMES` with the private HOME and your own, so agt never reads your `~/.agt/settings.toml` as a workspace's settings, also when `~/.git` exists. A folder you pick as a Settings workspace keeps working as one.
 - Move to Applications, a restart and **Open at login** reopen the app with the chosen folders as flags, also those that came from variables.

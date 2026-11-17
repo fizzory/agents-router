@@ -29,6 +29,22 @@ impl std::fmt::Display for ClientError {
     }
 }
 impl std::error::Error for ClientError {}
+impl ClientError {
+    /// For the diagnostic log: the variant and exit code, never the text it
+    /// carries (agt's stderr or output can be in it).
+    pub fn kind(&self) -> String {
+        match self {
+            Self::InvalidRequest(_) => "InvalidRequest".into(),
+            Self::Execution(_) => "Execution".into(),
+            Self::TimedOut => "TimedOut".into(),
+            Self::InvalidResponse(_) => "InvalidResponse".into(),
+            Self::Exit {
+                code: Some(code), ..
+            } => format!("Exit code={code}"),
+            Self::Exit { code: None, .. } => "Exit signal".into(),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Request {
@@ -399,6 +415,36 @@ mod tests {
     use super::*;
     use crate::terminal::tests::Scratch;
     use std::{fs, os::unix::fs::PermissionsExt};
+
+    #[test]
+    fn error_kinds_never_carry_the_child_output() {
+        let secret = "token=s3cr3t /Users/someone/private";
+        for (error, kind) in [
+            (ClientError::InvalidRequest(secret.into()), "InvalidRequest"),
+            (ClientError::Execution(secret.into()), "Execution"),
+            (ClientError::TimedOut, "TimedOut"),
+            (
+                ClientError::InvalidResponse(secret.into()),
+                "InvalidResponse",
+            ),
+            (
+                ClientError::Exit {
+                    code: Some(1),
+                    stderr: secret.into(),
+                },
+                "Exit code=1",
+            ),
+            (
+                ClientError::Exit {
+                    code: None,
+                    stderr: secret.into(),
+                },
+                "Exit signal",
+            ),
+        ] {
+            assert_eq!(error.kind(), kind);
+        }
+    }
 
     #[test]
     fn exits_are_command_specific() {

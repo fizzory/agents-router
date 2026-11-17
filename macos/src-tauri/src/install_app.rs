@@ -138,7 +138,9 @@ impl InstallController {
                 }
                 // Cleanup is conservative on an unidentified job or an unreadable usage report.
                 if let Err(e) = install::cleanup(&self.paths).await {
-                    app::log(&format!("runtime cleanup deferred: {e}"));
+                    // The error can be agt's stderr: the file gets the marker only.
+                    app::log("runtime cleanup deferred; its error is on stderr only");
+                    app::trace(&format!("runtime cleanup deferred: {e}"));
                 }
                 app::request_usage(app, false, "installed");
                 if let Some(f) = result.foreign {
@@ -197,7 +199,9 @@ pub fn start(app: &tauri::AppHandle) {
         } else if *c.first.lock().unwrap() {
             c.after_install(&app).await;
         } else if let Err(e) = install::refresh_plugins(&c.paths).await {
-            app::log(&format!("plugin refresh deferred: {e}"));
+            // The error can be `agt update`'s stderr: the file gets the marker only.
+            app::log("plugin refresh deferred; its error is on stderr only");
+            app::trace(&format!("plugin refresh deferred: {e}"));
         }
     });
 }
