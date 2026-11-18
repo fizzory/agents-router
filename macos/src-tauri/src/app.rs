@@ -969,7 +969,6 @@ pub fn run() {
             });
         }))
         .plugin(tauri_nspanel::init())
-        .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -1114,17 +1113,21 @@ pub fn run() {
                     _ => (),
                 })
                 .on_tray_icon_event(|tray, event| {
-                    let app = tray.app_handle();
-                    tauri_plugin_positioner::on_tray_event(app, &event);
-                    if matches!(
-                        event,
-                        TrayIconEvent::Click {
-                            button: MouseButton::Left,
-                            button_state: MouseButtonState::Up,
-                            ..
-                        }
-                    ) {
-                        main_thread(app, |app, mtm| native::toggle(&app, mtm));
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        position,
+                        rect,
+                        ..
+                    } = event
+                    {
+                        // Tauri queues tray events, so the pointer read here may
+                        // already be on another display. tray-icon read it in its
+                        // own mouseUp handler, before the queue: use that reading.
+                        let click = native::tray_event(position, rect);
+                        main_thread(tray.app_handle(), move |app, mtm| {
+                            native::toggle(&app, mtm, click)
+                        });
                     }
                 })
                 .build(app)?;

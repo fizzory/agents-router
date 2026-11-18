@@ -438,6 +438,67 @@ show the Accounts pane with one `.settings-account` row per account in
 `accounts-list-locked.json`. FSEvents and a native app run require access to
 the macOS window server outside the command sandbox. No quota is used.
 
+## Tray and usage reads
+
+`native::apply_glyph` sets the tray image and the monospaced-digit title on the
+status button itself. tray-icon takes clicks only through its own subview of
+that button, `TaoTrayTarget`, sized when the tray was built empty (16×22), and
+resizes it only in its own setters. So `apply_glyph` then calls tray-icon's
+`set_tooltip`, the one setter that changes nothing else on screen, to fit the
+subview to the button. Without it, clicks outside the first 16 points reach the
+bare button and do nothing. The stderr line `tray … click-target-fits=true`
+(`app::trace`, not the diagnostic log file) confirms the fit.
+`tests/test_app_sources.py` checks the order, and checks the
+locked tray-icon's `set_tooltip` still resizes. That check reads tray-icon's
+source in Cargo's `registry/src`. Locally it skips while the source isn't there.
+The macOS app workflow runs `cargo fetch --locked` first and sets
+`REQUIRE_CRATE_SOURCES=1`, so there it fails instead. The tray redraws only when
+its mark, title or label changes.
+
+`watcher.rs` reads usage again, after the debounce, when settings or `state/`
+change, or when something `agt usage` reads in a job folder changes:
+
+| Counts | Doesn't count |
+| --- | --- |
+| A job folder coming or going; `spec.json`, `runner.pid`, `inbox-closed.json` | `events.jsonl`, `stderr-*.log`, `runner.log`, `result.md`, temp files |
+| `status.json` fields `state`, `runtime`, `account`, `assigned_account`, `runner_pid`, `child_pid`, `child_started`; an unreadable or new `status.json` | The runner's 2 s heartbeat (`updated_at`, `progress`) and other fields usage doesn't read, such as `message` and `init` |
+
+The watcher remembers those `status.json` fields as it saw them while handling
+an event, and the job folder they came from, for each job it has seen that is
+still on disk. They aren't always what the screen shows; see below.
+
+| Event | Cache |
+| --- | --- |
+| An event on a job folder: one coming, going or replaced, or FSEvents folding its files' events into one | Drops every job whose folder is gone or is another folder now. Stores that job's fields as the watcher reads them while handling the event; drops it when its `status.json` is gone or unreadable |
+| A `status.json` that is gone or unreadable | Drops that job |
+| The jobs folder or a folder above it; a watched folder replaced; lost events | Cleared |
+
+A job back under an old name, or in a jobs folder moved in, counts as new.
+An empty cache holds no event back, so a clear costs at most one more read, at
+the next heartbeats.
+
+The scheduled refresh, about every 60 s, still runs, and catches a runner that
+died mid-job.
+
+The usage read runs on its own, after the watcher has handled the events that
+started it (`request_usage` → `AgtClient::execute` → Python's
+`usage_snapshot`). So the cache can hold back a read the screen needs:
+
+1. The cache holds a job's fields as Y.
+2. Its `status.json` changes to X for a moment. A usage read running then
+   samples X, and the app shows X.
+3. The file is back to Y before the watcher handles the delayed FSEvents. It
+   compares Y with the cached Y and starts no read.
+4. The app shows X until the next successful read.
+
+With nothing else changing, that is the next successful scheduled refresh,
+opening the popover, or the app becoming active again. The scheduled refresh
+isn't exactly every 60 s: the `agt usage` subprocess's time, failed reads and
+sleep stretch it. Uninstall and cleanup aren't affected: they read usage again
+themselves, under `admission.lock` (`install.rs`). The app accepts this bounded
+staleness. If it ever matters, reconcile the cache with the per-job fields
+Python's read actually saw, and read again on a mismatch.
+
 ## Popover integration contract
 
 `ui/tauri.js` is the only frontend Tauri adapter. The popover alone may invoke:
@@ -460,6 +521,23 @@ sends a `settings-target` event to Settings with
 `{ pane, runtime, account }`; the page and account navigation are step 5/6.
 Settings activation is Regular while visible and Accessory after hiding.
 
+The popover window is an `NSPanel` (`AgtPopoverPanel`, made from the tao
+window by tauri-nspanel): borderless, transparent and nonactivating. The app
+runs as an Accessory and is never active while the popover is open, so the
+panel's settings follow from that:
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| `hidesOnDeactivate` | `false` | A panel that hides on deactivate stays off screen while its app is inactive. On macOS 26 the popover was ordered in, animated and key, yet `kCGWindowIsOnscreen` stayed false and nothing showed. Confirmed on macOS 26.6 with several displays: after a click on the fixed build, the `+100ms` `popover visibility` line below showed `window-server-onscreen=true`. |
+| Ordering in | `show_and_make_key`: `orderFrontRegardless`, then `makeKeyWindow` | `orderFrontRegardless` brings the window to the front of its level even though the app isn't active; `orderFront:` and `makeKeyAndOrderFront:` don't. Key without activation gives the popover its keyboard; losing key hides it (`reason=blur`). |
+| Collection behaviour | `CanJoinAllSpaces \| FullScreenAuxiliary` | On every Space of every display, also with "Displays have separate Spaces" and beside a full-screen app. Never `MoveToActiveSpace`: AppKit throws when both are set. |
+| Level | `NSFloatingWindowLevel` (3) | Above normal windows. The level decides stacking, not whether WindowServer puts the window on screen. |
+
+`tests/test_app_sources.py` (`[panel]`) rejects hiding on deactivate,
+`orderFront:` and `makeKeyAndOrderFront:`, and `MoveToActiveSpace`. It also
+checks that the locked tauri-nspanel's `show_and_make_key` still calls
+`orderFrontRegardless`.
+
 The popover groups accounts under provider headings. `logic/rows.js` owns
 the pure row/VoiceOver text and footer copy; React keys rows by
 `runtime:name`, so refreshes keep their DOM nodes and keyboard focus. The
@@ -478,8 +556,104 @@ coalesced in a microtask so reporting also works while the retained panel's
 animation frames are suspended. `set_popover_height` takes `{ height, durationMs, curve }`,
 with motion values read from `motion.css`. Rust clamps to an 80 pt floor and
 `min(work-area height - 24 pt, 560 pt)`, then resizes on the main thread with
-the top edge anchored. Only the account list scrolls at the cap. First show,
+the top edge anchored. The work area is the display's visible frame below its
+menu bar. Only the account list scrolls at the cap. First show,
 loading to first answer and Reduce Motion snap; Reduce Motion fades content.
+
+### Popover placement
+
+`placement.rs` decides where the popover goes; `native.rs` reads AppKit and
+sets the frame. Everything is in AppKit points with a bottom-left origin:
+`NSScreen` frames, `NSEvent::mouseLocation` and the status item window's
+frame. The one exception is tray-icon's click event, which `tray_click` turns
+back into points first. The app doesn't use the positioner plugin or Tauri's
+physical, top-left positions. Nothing moves the panel after `show` and
+`resize` set its frame: tao runs `set_position` later on the main queue,
+converted with the scale of the display the window was last on.
+`tests/test_app_sources.py` rejects both.
+
+| Open | Display | Horizontal centre | Log `reason=` |
+| --- | --- | --- | --- |
+| Left click on the status item | The one whose menu bar holds the click | The status item, when its window is that icon on that display; else the click | `click-on-status-item`, `click-pointer` |
+| Anything else: first launch, self-test; or a click outside every menu bar | The one holding the status item, when its window is an icon-sized rect on a screen | The status item | `status-item` |
+| The same, without such a status item | The pointer's | The display's right edge | `pointer-display-top-right` |
+
+- The click is the one tray-icon read in its own `mouseUp:` handler, before
+  Tauri queued the event; `mouseLocation` read in the callback can already be
+  on another display. The event's `position` and `rect` are flipped against
+  `CGDisplayPixelsHigh(CGMainDisplayID())` (tray-icon 0.25.1's
+  `flip_window_screen_coordinates`) and multiplied by the backing scale of the
+  window that got the click, which macOS 26 can make the item's window on the
+  other display. `tray_click` undoes the flip against the same call, whatever
+  its unit, and divides by that window's own `backingScaleFactor`, after
+  checking that its frame still gives the event's `rect` to a pixel. If it
+  doesn't (the window moved or changed scale in between), the click is
+  `mouseLocation` now; the log's `click-source=` says which. A click outside
+  every menu bar (pressed on the icon, released elsewhere) opens from the
+  status item instead. `placement.rs`'s tests take the flip height as a
+  parameter, so `tests/test_app_sources.py` (`[tray-flip]`) checks `native.rs`:
+  `tray_flip` must return that call, read no screen frame, and be what it
+  passes to `placement::click`. It also checks that the locked tray-icon's
+  `flip_window_screen_coordinates` still subtracts from that call and that
+  both the click position and the icon rect go through it. Like the
+  `set_tooltip` check, it reads tray-icon's source in Cargo's `registry/src`
+  and skips locally while that source isn't there; with
+  `REQUIRE_CRATE_SOURCES=1` it fails instead. If a new tray-icon fails it,
+  re-check `[tray-flip]` and `tray_flip` against the new flip.
+- A point on a display's top edge belongs to that display's menu bar.
+  `mouseLocation` reports the built-in display's top row as y = 982, which is
+  also the bottom edge of a display placed above it.
+- The popover never overlaps the menu bar; a gap of up to 8 points below it is
+  acceptable.
+- The popover's top edge is the bottom of that display's menu bar:
+  `visibleFrame`'s top when it is below the frame's. Otherwise it is the status
+  item window's height, when that window sits in this menu bar. Failing that,
+  it is the tallest of `NSStatusBar`'s thickness, the item window's height on
+  another display and 30 points, or 30 when that tallest is over 38. On macOS
+  26 an external display can report a `visibleFrame` equal to its frame, with a
+  30-point bar and a thickness of 24.
+- The popover is centred on the icon when its frame on the clicked display is
+  known, otherwise on the click, then clamped into the display's visible frame.
+  Its width always covers the clicked icon: where a Dock at the side narrows
+  the visible frame past the icon, the popover reaches over the Dock's column,
+  never off the display.
+- `resize` finds the display `show` chose by its display id and reads its
+  menu bar, Dock and frame again, keeping the centre (moved with the display if
+  it moved). A height read off that display is kept over the fallback, since
+  the item's window can move to the other display's copy in between. If the
+  display is gone, the popover is placed as a non-click open would, and that
+  replacement is kept, so reconnecting the display moves nothing. A fresh
+  click or open always places it anew.
+- Frames are set through the animator, with a zero duration when not
+  animating, meant to replace a resize animation still running after a quick
+  hide and reopen (a plain `setFrame` may let it finish at its old target).
+  Not yet confirmed on a real display.
+- After placing, `native.rs` writes `popover placed reason=… click-source=…
+  screen=… anchor=(x,y) top=… menu-bar=… thickness=… status-item=… frame=…`
+  to stderr (`app::trace`, not the diagnostic log file). The frame is read
+  back from the panel, so one real click confirms placement.
+- After every show it writes `popover visibility stage=shown …` to stderr,
+  and again with `stage=+100ms` from the main thread about 100 ms later.
+  Occlusion and the window list settle asynchronously, so the `+100ms` line
+  is the verdict. One real click confirms the popover is on screen:
+
+  | Field | Source | On screen |
+  | --- | --- | --- |
+  | `visible` | `isVisible`: AppKit ordered it in | `true` |
+  | `key` | `isKeyWindow` | `true` |
+  | `on-active-space` | `isOnActiveSpace` | `true` |
+  | `occlusion-visible` | `occlusionState` has `Visible` | `true` |
+  | `alpha` | `alphaValue` | `1.00` |
+  | `window` | `windowNumber` | — |
+  | `window-server-onscreen` | `CGWindowListCopyWindowInfo` for that window: `kCGWindowIsOnscreen` (`unlisted` when absent) | `true` |
+  | `in-window-list` | `NSWindow.windowNumbers` (all Spaces) holds it | `true` |
+  | `screen`, `frame` | The panel's `screen` and frame | The clicked display |
+  | `hides-on-deactivate`, `level`, `collection` | The panel's settings | `false`, `3`, `CanJoinAllSpaces \| FullScreenAuxiliary` |
+  | `app-active` | `NSApp.isActive` | Usually `false` |
+  | `app-hidden` | `NSApp.isHidden`: a hidden app's windows stay off screen too | `false` |
+
+  `visible=true` with `window-server-onscreen=false` means AppKit placed it
+  and WindowServer kept it off screen.
 
 Run `node --test macos/ui/logic` for row and accessible-label text, and
 `python3 scripts/build_app_ui.py --test` for the popover's states, keyboard,

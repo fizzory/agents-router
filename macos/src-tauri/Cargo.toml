@@ -1,6 +1,6 @@
 [package]
 name = "agents-router-app"
-version = "0.18.2"
+version = "0.18.4"
 edition = "2021"
 rust-version = "1.90"
 default-run = "agents-router"
@@ -28,7 +28,6 @@ tauri-build = { version = "=2.7.4", features = [] }
 [dependencies]
 tauri = { version = "=2.12.5", features = ["tray-icon", "macos-private-api"] }
 tauri-nspanel = "=2.1.1"
-tauri-plugin-positioner = { version = "=2.4.0", features = ["tray-icon"] }
 tauri-plugin-single-instance = "=2.5.5"
 tauri-plugin-updater = "=2.14.1"
 tauri-plugin-process = "=2.4.0"
