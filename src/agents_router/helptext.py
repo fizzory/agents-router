@@ -194,10 +194,13 @@ class Parser(argparse.ArgumentParser):
         self._drawing = False
         super().__init__(*args, **kwargs)
 
-    def _get_formatter(self) -> argparse.HelpFormatter:
+    def _get_formatter(self, *args: Any, **kwargs: Any) -> argparse.HelpFormatter:
         # argparse also makes a formatter for every add_argument; only drawn help may load rich.
-        return (ui.help_formatter(self.prog) if self._drawing else None) or super()._get_formatter()
+        # Python 3.15 passes file= from print_help and print_usage; older ones pass nothing.
+        return (ui.help_formatter(self.prog) if self._drawing else None) or super()._get_formatter(*args, **kwargs)
 
+    # No formatter= here: 3.15's print_help makes its formatter before _drawing is set, so it is
+    # always the plain one. Its TypeError fallback calls format_help(), which draws as before.
     def format_help(self) -> str:
         if self.page is not None:
             return "\n".join(ui.plain(line) for line in page_lines(self.page)) + "\n"

@@ -42,7 +42,7 @@ python3 -m unittest test_setup test_guide             # one or a few modules
 ```
 
 - **The full run.** Start it in the background with its output in a log (`python3 -m unittest discover -s tests -t tests > "$TMPDIR/agt-suite.log" 2>&1`), then read only `grep -E '^(ERROR|FAIL):|^Ran |^OK|^FAILED' "$TMPDIR/agt-suite.log"`. Never pipe it through `tail -N`: that cuts the `ERROR:` header and the test's name. Any tester brief says the same.
-- **Known failure:** `test_help.test_other_commands_keep_argparse_help` fails on Python 3.15, whose argparse changed. Any other failure blocks.
+- **Every failure blocks**, on every Python from 3.11 up, 3.15 included.
 - **Unsure a failure is yours?** Run the same module on a clean tree with `git stash`, the test, then `git stash pop`.
 - **A failure a rerun clears** is unexplained, not green. Before calling it flaky, rerunning or merging past it, answer: can the product hit this timing window? Presume a failure in code the change added is a product race until shown otherwise. Fix the product, then the test.
 - **macOS app build names:** every build you make is `Agents Router Test.app`; only `scripts/build_app.sh` makes `Agents Router.app`. Locations and cleanup, data folders and login item included: `macos/README.md`, "Test and release builds".
