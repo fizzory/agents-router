@@ -45,8 +45,9 @@ python3 -m unittest test_setup test_guide             # one or a few modules
 - **Every failure blocks**, on every Python from 3.11 up, 3.15 included.
 - **Unsure a failure is yours?** Run the same module on a clean tree with `git stash`, the test, then `git stash pop`.
 - **A failure a rerun clears** is unexplained, not green. Before calling it flaky, rerunning or merging past it, answer: can the product hit this timing window? Presume a failure in code the change added is a product race until shown otherwise. Fix the product, then the test.
-- **macOS app build names:** every build you make is `Agents Router Test.app`; only `scripts/build_app.sh` makes `Agents Router.app`. Locations and cleanup, data folders and login item included: `macos/README.md`, "Test and release builds".
-- **macOS app:** the commands in `macos/README.md`. Every cargo call uses `CARGO_HOME=$PWD/build/cargo-home` (set from the repository root) and `--locked`. Build the UI first (`python3 scripts/build_app_ui.py`; the crate embeds `build/ui-dist`), then run `cargo test --locked` in `macos/src-tauri`, `node --test macos/ui/logic` and `python3 scripts/build_app_ui.py --test`. Installing a toolchain (Rust, or tauri-cli, Node and the UI's npm packages through `scripts/prepare_app_tools.sh`) needs the person's yes.
+- **No test verdict while a release build runs.** Unchanged `client.rs` tests have failed and timed out during `build_app.sh`. Start the macOS tester after `build_app.sh` finishes. A red seen during a build is inconclusive: rerun it idle, and on `main`, before calling it flaky or blocking.
+- **macOS app build names:** every build you make is `Agents Router Test.app`; only `scripts/build_app.sh` makes `Agents Router.app`. Locations and cleanup, data folders and login item included: `macos/README.md`, "Test and release builds". The exception: a hands-on check on the person's Mac uses the release build, installed over their copy with their OK, per [references/hands-on-check.md](references/hands-on-check.md).
+- **macOS app:** the commands in `macos/README.md`. Every cargo call uses `CARGO_HOME=$PWD/build/cargo-home` (set from the repository root) and `--locked`. Build the UI first (`python3 scripts/build_app_ui.py`; the crate embeds `build/ui-dist`), then run `cargo test --locked` in `macos/src-tauri`, `node --test macos/ui/logic` and `python3 scripts/build_app_ui.py --test`. Installing a toolchain (Rust, or tauri-cli, Node and the UI's npm packages through `scripts/prepare_app_tools.sh`) needs the person's yes. To check a GUI fix by the person's click: [references/hands-on-check.md](references/hands-on-check.md).
 
 ## 4. A change the plugin ships
 
@@ -57,9 +58,15 @@ Raise `version` in these three files together:
 - `pyproject.toml`
 - `src/agents_router/__init__.py`
 
+These three are only part of the version set. Every bump moves everything `scripts/build_app.py` `versions()` checks, the app's files included; take the list from that function, not from a past release's diff. `tests/test_app_sources.py` runs it, and release.yml's step "Require exact release tag and matching package versions" asserts it against the tag. Check it from the repository root with `python3 -c 'import sys; sys.path.insert(0, "scripts"); from build_app import versions; versions()'`: it prints `Release version: X.Y.Z` or names the files that disagree. Then run `PYTHONPATH=src:tests python3 tests/generate_usage_fixture.py`: the app fixtures embed the version.
+
+Release notes go in the PR body. There is no changelog file, and the GitHub release uses generated notes.
+
 A **minor** bump also changes the setup guide's sentence "This guide is for agt X.Y.Z or newer" in `src/agents_router/guides/setup.md` (`tests/test_guide.py` checks it names the major.minor). Then run `python3 scripts/sync_guide.py`. That guide change selects the `agents-router-setup` eval test ([release.md](references/release.md) step 3), so plan for that test on every minor release.
 
-When `main` changed the version under a branch that also bumps it, five files conflict: the three above, `src/agents_router/guides/setup.md` and `skills/agents-router-setup/SKILL.md`. Take `main`'s text, re-apply the branch's version, run `python3 scripts/sync_guide.py`, then `python3 -m unittest test_guide`.
+Before bumping, check the version lines of the open PRs: `gh pr list --json number,title,headRefName`, then `gh pr diff <n> --exclude '*.lock' | grep -E '^\+(version|__version__) = '` for each (no output: that PR bumps nothing). Never take a version an open PR already owns. A side-task brief from a session that holds a release PR says so: "don't bump; PR #N owns X.Y.Z", or it names the next version.
+
+When `main` changed the version under a branch that also bumps it, the version files conflict, and so do `src/agents_router/guides/setup.md` and `skills/agents-router-setup/SKILL.md`. Take `main`'s text, re-apply the branch's version to the whole `versions()` set, regenerate the fixtures and run `python3 scripts/sync_guide.py`, then the `versions()` check and `python3 -m unittest test_guide`.
 
 Claude Code updates an installed plugin only when that version changes. `tests/test_guide.py` checks that the three match.
 
@@ -93,7 +100,7 @@ In short:
 1. Run the full suite. When the change touches a skill with cases in `tests/skill-evals/`, that skill's graded cases must pass too, and only those (`--tag <skill>`, `-j 4`): the eval test, on the person's subscription quota: ask once, and never shape the work to avoid it. The benchmark and trigger tuning only advise.
 2. Raise the version.
 3. Commit with the subject `Agents Router X.Y.Z: <what changed for the person>`.
-4. Push the branch and open a pull request.
+4. Push the branch and open a pull request. Then watch its CI: start `/mentor:merge`, or `gh pr checks <n> --watch` in the background. Triage a red job before the person has to report it.
 5. After any merge, whoever merged (you, `/mentor:merge`, or the person), run `agt update --dry-run`, then `agt update`, and tell the person to `/reload-plugins`.
 6. When the app changed: tag, check the draft, publish on the person's word ([release.md](references/release.md) step 8). A merge alone ships no installer.
 

@@ -67,19 +67,37 @@
    - a minor version for new behavior.
 
    For a minor version, also update the guide's "This guide is for agt X.Y.Z or newer" sentence. Then run `python3 scripts/sync_guide.py` whenever the guide changed.
+
+   Before picking the number, check the open PRs' version lines (SKILL.md §4). The three files are only part of the set: every bump moves everything `scripts/build_app.py` `versions()` checks, the app's files included. `tests/test_app_sources.py` runs that check, and release.yml's step "Require exact release tag and matching package versions" asserts it against the tag. Run it from the repository root, then regenerate the app fixtures, which embed the version:
+
+   ```bash
+   python3 -c 'import sys; sys.path.insert(0, "scripts"); from build_app import versions; versions()'   # prints "Release version: X.Y.Z" or names the files that disagree
+   PYTHONPATH=src:tests python3 tests/generate_usage_fixture.py
+   ```
+
+   Release notes go in the PR body (step 6). There is no changelog file, and the GitHub release uses generated notes (`--generate-notes` in release.yml).
 5. **Commit**, only when the person asks. The subject is `Agents Router X.Y.Z: <what changed, for the person>`, like the history (`git log --format=%s -10`). End the message with the attribution lines the session gives you.
 6. **Push and open the pull request**, only when the person asks:
 
    ```bash
    git push -u origin HEAD
-   gh pr create --title "Agents Router X.Y.Z: ..." --body "<summary, test results, live check>"
+   gh pr create --title "Agents Router X.Y.Z: ..." --body "<release notes, test results, live check>"
    ```
 
-   End the body with the attribution footer the session gives you.
+   End the body with the attribution footer the session gives you. Then watch CI: start `/mentor:merge`, or run `gh pr checks <n> --watch` in the background. When a job goes red, read it (`gh run view <run-id> --log-failed`) and triage it before the person has to report it.
 7. **After any merge, whoever merged** (you, `/mentor:merge`, or the person), first run `agt update --dry-run`, which prints where agt reinstalls from. It should name the remote (`git+https://…`). If it names a local checkout that holds uncommitted work, stop and ask the person. Then run `agt update` (it reinstalls from the recorded source and updates the plugin in every profile). Then tell the person to type `/reload-plugins`, or start new sessions, in each profile.
 8. **macOS app release**, when the merged change ships the app:
    - **Merge vs. release.** A merge to `main` only uploads a workflow-run artifact. A GitHub release needs a strict `vX.Y.Z` tag on `main` after the three version files in step 4 agree and the app versions match. Tagging and publishing happen only when the person asks (`macos/README.md`, "Release build").
    - **Precondition.** The `release` environment exists and holds `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Check at that scope with `gh api repos/<owner>/<repo>/environments/release/secrets --jq '.secrets[].name'`; `gh secret list` without `--env release` shows none of those environment secrets. Creating them is the person's step. Re-run the check after they say it's done, and again if a later change moves the scope.
-   - **Check the draft.** After `draft-release`, the draft has four assets (`.dmg`, `.app.tar.gz`, `.sig`, `latest.json`), and `latest.json` names the version and the matching tag URL.
-   - **Publish.** `gh release edit vX.Y.Z --draft=false --latest` runs only on the person's explicit word: every installed app follows `latest.json`. Then confirm that `https://github.com/fizzory/agents-router/releases/latest/download/latest.json` redirects (302).
-   - **Close-out.** Until publication, the message after a merge names tag, secrets and publish as the remaining work.
+   - **Watch the run.** The tag starts `release.yml`, which also runs on every push to `main` and every PR. Find the tag's run with `gh run list --workflow release.yml --branch vX.Y.Z`, then run `gh run watch <id> --exit-status` in the background; it exits non-zero when the run fails.
+   - **Check the draft.** After `draft-release`, the draft has four assets (`.dmg`, `.app.tar.gz`, `.sig`, `latest.json`), and `latest.json` names the version and the matching tag URL:
+
+     ```bash
+     gh release view vX.Y.Z --json isDraft,assets --jq '{isDraft, assets: [.assets[].name]}'
+     gh release download vX.Y.Z --pattern latest.json --output - | jq '{version, urls: [.platforms[].url]}'
+     ```
+
+     `--output -` prints the file instead of leaving a `latest.json` in the checkout.
+   - **Publish.** `gh release edit vX.Y.Z --draft=false --latest` runs only on the person's explicit word: every installed app follows `latest.json`. Then verify that `gh api repos/<owner>/<repo>/releases/latest -q .tag_name` prints `vX.Y.Z`, and that `https://github.com/fizzory/agents-router/releases/latest/download/latest.json` redirects (302). `gh release view` has no `isLatest` field: asking for it exits 1, even after a good publish.
+   - **Click the updated app.** For a GUI fix, once the person has updated through Check for Updates…, ask for one hands-on click on the app the updater installed, launched normally (not from a shell), and name the expected result ([hands-on-check.md](hands-on-check.md)). The CI build is not the binary you checked locally.
+   - **Close-out.** Until publication, the message after a merge names tag, secrets and publish as the remaining work. Once a published release carries the diagnostic log (PR #31; `macos/README.md`, "Diagnostic log"), read that file for the updater-installed app instead of launching it from a shell. The popover's on-screen lines still go to stderr only, so the click's result is the person's answer.
