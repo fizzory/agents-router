@@ -54,7 +54,7 @@ pub fn observe_wake(_mtm: MainThreadMarker, wake: WakeTrigger) {
     unsafe {
         let center = NSWorkspace::sharedWorkspace().notificationCenter();
         let block = block2::RcBlock::new(move |_note: NonNull<NSNotification>| {
-            app::log("wake received: queued on shared debounce");
+            app::trace("wake received: queued on shared debounce");
             wake.notify();
         });
         let token = center.addObserverForName_object_queue_usingBlock(
@@ -78,7 +78,7 @@ pub fn post_wake(_mtm: MainThreadMarker) {
             .notificationCenter()
             .postNotificationName_object(NSWorkspaceDidWakeNotification, Some(&workspace));
     }
-    app::log("self-test posted NSWorkspaceDidWakeNotification");
+    app::trace("self-test posted NSWorkspaceDidWakeNotification");
 }
 
 pub fn create_panel(
@@ -107,7 +107,7 @@ pub fn create_panel(
     );
     panel.hide();
     let ns_panel = panel.as_panel();
-    app::log(&format!(
+    app::trace(&format!(
         "popover class={} NSPanel borderless=true transparent=true nonactivating=true hidden=true hides-on-deactivate={} level={} collection={:?}",
         ns_panel.class(),
         ns_panel.hidesOnDeactivate(),
@@ -115,7 +115,7 @@ pub fn create_panel(
         ns_panel.collectionBehavior(),
     ));
     #[cfg(debug_assertions)]
-    app::log(&format!(
+    app::trace(&format!(
         "popover reduce-motion={}",
         NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
     ));
@@ -318,7 +318,7 @@ fn log_visibility(app: &tauri::AppHandle, mtm: MainThreadMarker, stage: &str) {
     let number = window.windowNumber();
     let listed = NSWindow::windowNumbersWithOptions(NSWindowNumberListOptions::AllSpaces, mtm)
         .is_some_and(|numbers| numbers.iter().any(|n| n.integerValue() == number));
-    app::log(&format!(
+    app::trace(&format!(
         "popover visibility stage={stage} visible={} key={} on-active-space={} occlusion-visible={} alpha={:.2} window={number} window-server-onscreen={} in-window-list={listed} screen={:?} frame={} hides-on-deactivate={} level={} collection={:?} app-active={} app-hidden={}",
         window.isVisible(),
         window.isKeyWindow(),
@@ -377,7 +377,7 @@ fn show_from(app: &tauri::AppHandle, mtm: MainThreadMarker, now: Now, open: Open
         // NonactivatingPanel can become key for keyboard navigation without activating the app.
         // tauri-nspanel's show_and_make_key: orderFrontRegardless, then makeKeyWindow.
         panel.show_and_make_key();
-        app::log(&format!(
+        app::trace(&format!(
             "popover placed reason={} click-source={source} screen={:?} anchor=({:.1},{:.1}) top={:.1} menu-bar={:.1} thickness={:.1} status-item={} frame={}",
             anchor.reason.as_str(),
             now.name(anchor.screen),
@@ -391,9 +391,9 @@ fn show_from(app: &tauri::AppHandle, mtm: MainThreadMarker, now: Now, open: Open
         ));
     } else {
         panel.show_and_make_key();
-        app::log("popover placed reason=no-screen; frame unchanged");
+        app::trace("popover placed reason=no-screen; frame unchanged");
     }
-    app::log("popover NSPanel shown; webview retained; application not activated");
+    app::trace("popover NSPanel shown; webview retained; application not activated");
     log_visibility_now_and_later(app, mtm);
     app::request_usage(app, true, "open");
 }
@@ -433,7 +433,7 @@ pub fn resize(
         ns_rect(placed),
         animate.then_some((duration_ms / 1000.0, curve)),
     );
-    app::log(&format!(
+    app::trace(&format!(
         "popover resized-to-content requested={height:.0} height={:.0} cap={:.0} top={:.0} mode={} reason={} screen={:?}",
         placed.height,
         placement::popover_cap(anchor.work),
@@ -462,7 +462,7 @@ pub fn toggle(app: &tauri::AppHandle, mtm: MainThreadMarker, event: Option<place
 pub fn hide(app: &tauri::AppHandle, _mtm: MainThreadMarker, reason: &str) {
     if let Ok(panel) = app.get_webview_panel("popover") {
         panel.hide();
-        app::log(&format!(
+        app::trace(&format!(
             "popover NSPanel hidden reason={reason}; never closed; webview retained"
         ));
     }
@@ -564,7 +564,7 @@ fn apply_glyph(app: &tauri::AppHandle, glyph: Glyph) -> tauri::Result<bool> {
             .iter()
             .find(|view| view.class().name().to_bytes() == b"TaoTrayTarget")
             .map(|view| view.frame());
-        app::log(&format!(
+        app::trace(&format!(
             "tray template={} variant={:?} attributed-title={:?} accessibility-label={:?} button={} click-target={} click-target-fits={}",
             image.isTemplate(),
             glyph.variant,
@@ -598,7 +598,7 @@ pub fn open_settings(app: &tauri::AppHandle, mtm: MainThreadMarker, target: serd
         let _ = app.show();
         let _ = app.emit_to("settings", "settings-target", target);
     }
-    app::log("Settings shown activation=Regular; webview retained; target delivered");
+    app::trace("Settings shown activation=Regular; webview retained; target delivered");
 }
 
 /// Launch Services resolves the default editor. Send a line position without

@@ -165,7 +165,9 @@ LaunchServices tell them apart.
 - The login item's LaunchAgent label is `<identifier>.app`. The release keeps
   `io.github.watcharagorn.agents-router.app`.
 - The builds share no folders. The release keeps `~/Library/Application Support/Agents Router`,
-  `~/.local/bin/agt`, `~/.agents-router` and `~/.agt`; a test build gets its own, below.
+  `~/.local/bin/agt`, `~/.agents-router`, `~/.agt` and its log folder
+  `~/Library/Logs/io.github.watcharagorn.agents-router`; a test build gets its own, below,
+  and logs to `<app support>/logs/<identifier>` ([Diagnostic log](#diagnostic-log)).
 
 ### Test build folders
 
@@ -190,7 +192,7 @@ build. Nothing depends on `debug_assertions`.
 - Validation: absolute, non-empty, no `.`/`..`, no control characters. Each
   folder's physical path (symlinks resolved, case-insensitive) must not be,
   contain or sit inside `~/.local/bin`, `~/Library/Application Support/Agents Router`,
-  `~/.agents-router` or `~/.agt`, where `~` is both the launch HOME and the
+  `~/.agents-router`, `~/.agt` or `~/Library/Logs/io.github.watcharagorn.agents-router`, where `~` is both the launch HOME and the
   account's home from the user database (`getpwuid_r`), which no `HOME` or
   `CFFIXED_USER_HOME` changes. A failed lookup stops the launch. A dangling
   symlink is refused, and so is a bin folder equal to `<app support>/bin`, where
@@ -269,7 +271,7 @@ identifier: `io.github.watcharagorn.agents-router.test`, or
 | What | Where |
 | --- | --- |
 | Login item | `~/Library/LaunchAgents/<id>.app.plist`, launchd label `<id>.app`. `Open at login` writes it. Keep the release's `io.github.watcharagorn.agents-router.app.plist` and agt share's `io.github.watcharagorn.agents-router.share.plist` |
-| Data folder | `~/Library/Application Support/Agents Router Test`. By default it also holds the bin folder (`cli-bin`), the agt home and settings (`agt-home`) and the private HOME (`home`) |
+| Data folder | `~/Library/Application Support/Agents Router Test`. By default it also holds the bin folder (`cli-bin`), the agt home and settings (`agt-home`), the private HOME (`home`) and the diagnostic log (`logs/<id>/agents-router.log`) |
 | Overridden folders | Each folder given with a `--test-*` flag or `AGT_*` variable ([Test build folders](#test-build-folders)). Settings → General → `Test build` lists all four |
 | WebKit, caches, preferences | `~/Library/WebKit/<id>`, `~/Library/Caches/<id>`, `~/Library/Preferences/<id>.plist` |
 
@@ -444,8 +446,9 @@ that button, `TaoTrayTarget`, sized when the tray was built empty (16×22), and
 resizes it only in its own setters. So `apply_glyph` then calls tray-icon's
 `set_tooltip`, the one setter that changes nothing else on screen, to fit the
 subview to the button. Without it, clicks outside the first 16 points reach the
-bare button and do nothing. The log line `tray … click-target-fits=true`
-confirms the fit. `tests/test_app_sources.py` checks the order, and checks the
+bare button and do nothing. The stderr line `tray … click-target-fits=true`
+(`app::trace`, not the diagnostic log file) confirms the fit.
+`tests/test_app_sources.py` checks the order, and checks the
 locked tray-icon's `set_tooltip` still resizes. That check reads tray-icon's
 source in Cargo's `registry/src`. Locally it skips while the source isn't there.
 The macOS app workflow runs `cargo fetch --locked` first and sets
@@ -625,13 +628,14 @@ converted with the scale of the display the window was last on.
   animating, meant to replace a resize animation still running after a quick
   hide and reopen (a plain `setFrame` may let it finish at its old target).
   Not yet confirmed on a real display.
-- After placing, `native.rs` logs `popover placed reason=… click-source=…
-  screen=… anchor=(x,y) top=… menu-bar=… thickness=… status-item=… frame=…`.
-  The frame is read back from the panel, so one real click confirms placement.
-- After every show it logs `popover visibility stage=shown …`, and again with
-  `stage=+100ms` from the main thread about 100 ms later. Occlusion and the
-  window list settle asynchronously, so the `+100ms` line is the verdict. One
-  real click confirms the popover is on screen:
+- After placing, `native.rs` writes `popover placed reason=… click-source=…
+  screen=… anchor=(x,y) top=… menu-bar=… thickness=… status-item=… frame=…`
+  to stderr (`app::trace`, not the diagnostic log file). The frame is read
+  back from the panel, so one real click confirms placement.
+- After every show it writes `popover visibility stage=shown …` to stderr,
+  and again with `stage=+100ms` from the main thread about 100 ms later.
+  Occlusion and the window list settle asynchronously, so the `+100ms` line
+  is the verdict. One real click confirms the popover is on screen:
 
   | Field | Source | On screen |
   | --- | --- | --- |
@@ -736,7 +740,8 @@ in the popover. `Check for Updates…` is in the popover's ⋯ menu, the native 
 menu and General. A manual check opens a sheet; only choosing the update starts
 the download. Download/install failures offer Retry. Key/signature failures
 default to `Open Releases Page`. The download has a progress sheet, and the app
-restarts after installation. Test builds (the `.test` identifier) check no
+restarts after installation. Every step is in the
+[diagnostic log](#diagnostic-log). Test builds (the `.test` identifier) check no
 feed; a manual check says so and offers the Releases page. The new runtime is installed on first launch and
 the bundled `agt update --no-package` succeeds once per version, recorded under
 `$AGT_APP_SUPPORT/updated/<version>` under the install lock. Failed refreshes
@@ -798,6 +803,131 @@ undo/redo, revision refusal and blocker/zero-job states, and
 producer-generated `config-show-levels.json`, `config-show-broken.json` and
 `usage-idle.json` extend the golden inputs. Light/dark evidence is under
 `.mentor/plans/agt-macos-app/evidence/step5-general-*.png`.
+
+## Diagnostic log
+
+The app keeps a file of its update steps, start and exit, and errors. Launched
+from Finder, its stderr goes nowhere; this file stays across launches and
+updates.
+
+| Build | File |
+| --- | --- |
+| Release | `~/Library/Logs/io.github.watcharagorn.agents-router/agents-router.log` |
+| Test | `<app support>/logs/<identifier>/agents-router.log`, by default `~/Library/Application Support/Agents Router Test/logs/io.github.watcharagorn.agents-router.test/agents-router.log` |
+
+- `~` is the launch HOME. A test build follows `--test-app-support` and
+  `AGT_APP_SUPPORT`, so the check scripts' logs stay in their scratch folders.
+  `~/Library/Logs/io.github.watcharagorn.agents-router` is a production folder:
+  a test build refuses any folder that is, contains or sits inside it.
+- The folder is `0700`, the file `0600`. One line per record:
+  `2026-11-17T08:15:30.123Z [4242] update check start …`, the UTC time with
+  milliseconds, the process id, the message. Control characters are escaped.
+  Each line is written and flushed at once, so a restart or exit loses none.
+- Rotation: before a write would take the file past 1 MiB, it becomes
+  `agents-router.log.1`, replacing the previous `.1`. At most about 2 MiB on
+  disk. A record is at most 4 KiB; a longer one ends in `…[truncated]`.
+- Logging starts before the single-instance check, so two launches can write
+  at once. Each record takes an `flock` on `agents-router.log.lock` (`0600`,
+  never rotated) for its size check, rotation and write, and reopens the file
+  when another launch rotated it. A launch that can't take the lock within
+  about 50 ms never waits longer and never rotates: it writes its record only
+  when the file stays within 1 MiB, and otherwise drops it and says so on
+  stderr.
+- The folder is opened once, after the checks above, and every later open,
+  check and rename goes through that open folder, never the path. A folder
+  replaced by a link later, into the release's log folder say, can't redirect
+  a write.
+- Every file there is opened without waiting and must be a regular file. A
+  FIFO, socket or device at the log or lock name is refused before its mode
+  changes or anything is written.
+- Logging never changes what the app does. When the folder or file can't be
+  opened or written, the app carries on and says so once on stderr.
+
+Two sinks in `app.rs`: `log` writes stderr and the file, `trace` stderr only.
+Each call site picks one; the logger never filters by message text.
+
+| Reaches | Lines |
+| --- | --- |
+| The file and stderr (`log`) | The update flow, plugin refresh done, start, ready, the test build's folders, exit, restart, refusals, panics, and every error, rejection or deferred operation a failure caused |
+| stderr only (`trace`) | Usage reads and successful results, popover, Settings, tray and geometry activity, wake notifications, the single-instance callback, prevented exits, the debug fixture launcher, self-test content and success |
+
+Child-process output (agt's or `open`'s stderr, an AppleScript error) is
+summarised, never copied: the file gets the operation, the error kind and the
+exit status where there is one, and the full text goes to stderr only. A usage
+read that fails logs `usage result failed generation=… error=Exit code=1` (or
+`TimedOut`, `Execution`, `InvalidResponse`, `UnexpectedResponse`, `Refused`); a
+failed plugin refresh or runtime cleanup logs `… deferred; its error is on
+stderr only`.
+
+What it records:
+
+| Line | When |
+| --- | --- |
+| `start version=… identifier=… build=release\|test pid=… exe=…` | Each launch, once the folders are resolved. `std_exe=` follows when the OS reports another executable path |
+| `update check start manual=… current=… endpoints=…` | A check starts: at launch, 24 hours after the last one, or on `Check for Updates…`. The 60-second timer's other ticks log nothing. `endpoints` lists the feed URLs, each sanitized on its own, separated by spaces |
+| `update check skipped: test build` | A manual check in a test build |
+| `update check result available version=… current=… date=… target=… url=…` | The feed offers a newer version |
+| `update check result current version=…` | Up to date |
+| `update check result failed permanent=… error=…` | The check failed |
+| `updater DEBUG: …`, `updater ERROR: …` | The updater plugin's own records, filtered as below |
+| `update install start version=… current=… exe=… bundle=… bundle_version=…` | `Update to …` chosen: the bundle the install replaces and the version on disk there |
+| `update download start url=…`, `update download progress 25%` (50, 75) | The download |
+| `update download finished bytes=…; verifying signature` | Download done; the signature check runs next |
+| `update signature verified bytes=…` | The signature matched |
+| `update install replacing bundle=…` | The install starts |
+| `update install ok bundle=… bundle_version=… expected=…` | The install returned. `bundle_version` is read from the bundle's `Contents/Info.plist` afterwards: the old version there means the install missed the bundle that relaunches |
+| `update failed stage=check\|download\|install permanent=… error=…` | A failed download or install. A failure between `download finished` and `signature verified` is the signature |
+| `update restart relaunch=open -n <bundle> exe=… test_args=…` | The relaunch target, logged before the relaunch |
+| `tauri.process ERROR: failed to restart app…`, `tauri.app DEBUG: restart triggered on the main thread` (or `from a separate thread`), `tauri.app ERROR: failed to request exit: …` | Tauri's own restart records, filtered as below |
+| `exit code=…`, `refused: …`, `panic thread=… at <file>:<line>: …` | Quit, a launch refusal after the folders resolve, a panic |
+| `ready …`, `plugins refreshed version=…`, `usage result failed …`, `usage request rejected: <kind>`, `plugin refresh deferred; …`, `runtime cleanup deferred; …`, `… failed: …` | Setup finished, the plugin refresh after an update, and the failures above |
+
+The updater plugin logs through the `log` crate. The app keeps only records
+whose target starts with `tauri_plugin_updater` and whose message starts with
+one of: `checking for updates`, `update endpoint returned 204`,
+`update endpoint did not respond with a successful status code`,
+`failed to check for updates`, `failed to deserialize update response` (as
+`…; detail not kept`, with only a trailing `at line N column M`), `Searching for updater target`, `cannot swap the app bundles`,
+`app installation needs admin privileges`, `failed to install the update`,
+`failed to move the new app into place` (its AppleScript error, the privileged
+shell's stderr, removed).
+
+Tauri's restart logs through the same crate. From exactly `tauri::process`, at
+Error: `failed to restart app: <io error>` and `failed to restart app with
+LaunchServices`, which keeps `open`'s exit status and drops the stderr `open`
+wrote. From exactly `tauri::app`: at Debug, `restart triggered on the main
+thread` and `restart triggered from a separate thread`; at Error, `failed to
+request exit: …`. Nothing else from Tauri.
+
+Never recorded:
+- the user info, query and fragment of any URL, also inside error messages.
+  Two URLs joined by a comma, or by nothing, are sanitized each on its own;
+- the feed's content in a JSON error: `update check result failed` keeps its
+  category and position only, as `error=JSON data error; detail not kept`
+  (`syntax`, `eof` or `io` in place of `data`; `at line N column M` when
+  serde_json reports one);
+- request headers and proxy settings;
+- the updater public key and update signatures;
+- the raw feed JSON: `update response:` and `parsed release response` are dropped.
+
+The plugin exposes no HTTP status code, so the log has none. It shows what the
+plugin reports:
+
+| Response | Log |
+| --- | --- |
+| 2xx with a body | `update check result available …` with the offered version, or `current` |
+| 204 | `update endpoint returned 204 No Content`, then `update check result current` |
+| Any other status | `update endpoint did not respond with a successful status code`, then `update check result failed`; the code is unknown |
+| No response | `failed to check for updates: <transport error>`, then `update check result failed` |
+
+Read it:
+
+```sh
+tail -F ~/Library/Logs/io.github.watcharagorn.agents-router/agents-router.log
+open -a Console ~/Library/Logs/io.github.watcharagorn.agents-router/agents-router.log
+```
+
+It's a file, not the unified log: `log show` doesn't read it.
 
 ## Settings pane IPC (step 6, PART A)
 

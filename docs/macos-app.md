@@ -97,6 +97,7 @@ After quitting the app, these files can remain:
 | `~/Library/Application Support/Agents Router/` | Install lock, update completion records, Terminal handoffs and any saved previous CLI. Keep a needed backup; otherwise remove this folder after uninstalling the CLI |
 | `~/.agents-router/` | Jobs, state, backups and agt-created account folders. Remove only if you no longer use agt; deleting it also removes those accounts' local logins and session history |
 | `~/.agt/` | User settings. Remove if you no longer want them |
+| `~/Library/Logs/io.github.watcharagorn.agents-router/` | The app's diagnostic log (`agents-router.log`, `agents-router.log.1` and the empty `agents-router.log.lock`): update steps and errors. Remove it when you no longer need it |
 | `<workspace>/.agt/settings.toml` and `settings.local.toml` | Workspace and local settings. Remove from each workspace if no longer needed |
 
 To remove a remaining folder, use Finder → **Go** → **Go to Folder…**, enter the path and move the folder to the Trash. Use your override paths if you set them. Keep your own provider folders (`~/.claude*`, `~/.codex`, `~/.gemini` and `~/.kiro`).

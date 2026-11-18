@@ -2,6 +2,7 @@
 use crate::{
     app_paths::{self, AppPaths},
     client::{AgtClient, ClientError, CommandOutcome, ReadReply, Request},
+    diag_log,
     install_app::{self, InstallController},
     models::{CommandKind, ConfigShow, Level, Snapshot, Usage},
     native,
@@ -34,7 +35,15 @@ pub fn now() -> f64 {
         .unwrap_or_default()
         .as_secs_f64()
 }
+/// stderr (a terminal launch) and the diagnostic log file (diag_log.rs): the
+/// update flow, lifecycle, and every failure. Never a child's output.
 pub fn log(message: &str) {
+    trace(message);
+    diag_log::write(message);
+}
+/// stderr only: routine activity (usage reads, windows, tray, wake, self-test)
+/// and the full text of a failure whose file line is a summary.
+pub fn trace(message: &str) {
     eprintln!("agt-app {:.3} {message}", now());
 }
 
@@ -63,7 +72,7 @@ fn launcher(paths: &AppPaths) -> Result<PathBuf, String> {
                 "debug launcher requires an absolute path and explicit isolated AGT_HOME".into(),
             );
         }
-        log("debug fixture launcher override active");
+        trace("debug fixture launcher override active");
         return Ok(fake);
     }
     Ok(paths.launcher())
@@ -147,7 +156,7 @@ pub fn request_usage(app: &tauri::AppHandle, refresh: bool, reason: &'static str
     let client = state.client.clone();
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        log(&format!("usage read reason={reason} refresh={refresh}"));
+        trace(&format!("usage read reason={reason} refresh={refresh}"));
         let mut request = Request::new(CommandKind::Usage, None);
         request.refresh = refresh;
         let reply = match client.read(request).await {
@@ -159,13 +168,14 @@ pub fn request_usage(app: &tauri::AppHandle, refresh: bool, reason: &'static str
                 }
             },
             Err(error) => {
-                log(&format!("usage request rejected: {error}"));
+                log(&format!("usage request rejected: {}", error.kind()));
+                trace(&format!("usage request rejected: {error}"));
                 return;
             }
         };
         if let ReadReply::Fresh { generation, result } = reply {
             let state = app.state::<AppState>();
-            let (snapshot, fresh) = {
+            let (snapshot, failure) = {
                 let mut s = state.snapshot.lock().expect("snapshot");
                 // A coalesced batch has several waiters but is published only once.
                 if generation <= s.generation {
@@ -173,33 +183,43 @@ pub fn request_usage(app: &tauri::AppHandle, refresh: bool, reason: &'static str
                 }
                 s.generation = generation;
                 s.reading = false;
-                let fresh = match result {
+                // The failure's kind for the file: snapshot.error can be agt's stderr.
+                let failure = match result {
                     Ok(CommandOutcome::Data(data)) => {
                         if let Snapshot::Usage(usage) = *data {
                             s.usage = Some(usage);
                             s.error = None;
                             s.fetched_at = Some(now());
-                            true
+                            None
                         } else {
                             s.error = Some("Can't read agt: unexpected response".into());
-                            false
+                            Some("UnexpectedResponse".to_string())
                         }
                     }
                     Err(error) => {
+                        let kind = error.kind();
                         s.error = Some(usage_error(error));
-                        false
+                        Some(kind)
                     }
                     _ => {
                         s.error = Some("Can't read agt: request refused".into());
-                        false
+                        Some("Refused".to_string())
                     }
                 };
-                (s.clone(), fresh)
+                (s.clone(), failure)
             };
+            let fresh = failure.is_none();
+            let shown = snapshot.error.clone().unwrap_or_default();
             publish_status(&app, snapshot, fresh);
-            log(&format!(
-                "usage result generation={generation} fresh={fresh}"
-            ));
+            match failure {
+                None => trace(&format!("usage result generation={generation} fresh=true")),
+                Some(kind) => {
+                    log(&format!(
+                        "usage result failed generation={generation} error={kind}"
+                    ));
+                    trace(&format!("usage result failed shown={shown:?}"));
+                }
+            }
         }
     });
 }
@@ -699,6 +719,7 @@ pub(crate) fn quit(app: &tauri::AppHandle) {
     exit(app, 0);
 }
 pub(crate) fn exit(app: &tauri::AppHandle, code: i32) {
+    log(&format!("exit code={code}"));
     app.state::<AppState>()
         .quitting
         .store(true, Ordering::Relaxed);
@@ -811,15 +832,34 @@ pub fn set_pending_update(app: &tauri::AppHandle, version: Option<String>) {
 }
 
 /// Startup refusals (a release given --test-* flags, an unsafe test folder) end
-/// the launch with a message instead of a crash report.
+/// the launch with a message instead of a crash report. Those before the
+/// folders are resolved reach stderr only; later ones reach the log too.
 fn refuse(message: String) -> ! {
     eprintln!("agt-app {:.3} refused: {message}", now());
+    diag_log::write(&format!("refused: {message}"));
     std::process::exit(2);
 }
 /// Restart after an update. A test build carries its chosen folders as flags,
 /// including ones that came from environment variables LaunchServices drops.
 pub fn restart(app: &tauri::AppHandle) -> ! {
     let relaunch = app.state::<AppPaths>().relaunch_args();
+    // Tauri relaunches a bundle through LaunchServices (`open -n <bundle>`),
+    // anything else by running the executable.
+    let target = match tauri::process::current_binary(&app.env()) {
+        Ok(exe) => match exe
+            .parent()
+            .filter(|d| d.ends_with("Contents/MacOS"))
+            .and_then(|d| d.parent()?.parent())
+        {
+            Some(bundle) => format!("open -n {} exe={}", bundle.display(), exe.display()),
+            None => format!("exe={}", exe.display()),
+        },
+        Err(error) => format!("unknown ({error})"),
+    };
+    log(&format!(
+        "update restart relaunch={target} test_args={}",
+        relaunch.len()
+    ));
     if relaunch.is_empty() {
         app.restart();
     }
@@ -827,10 +867,6 @@ pub fn restart(app: &tauri::AppHandle) -> ! {
     let args = env.args_os.split_off(env.args_os.len().min(1));
     env.args_os
         .extend(app_paths::relaunch_argv(&args, &relaunch));
-    log(&format!(
-        "restarting with {} test-build arguments",
-        relaunch.len()
-    ));
     // Like Tauri's own restart: clean up and relaunch on the main thread only.
     if MainThreadMarker::new().is_some() {
         app.cleanup_before_exit();
@@ -849,6 +885,29 @@ pub fn restart(app: &tauri::AppHandle) -> ! {
     }
 }
 
+fn start_line<R: tauri::Runtime>(
+    context: &tauri::Context<R>,
+    identifier: &str,
+    test: bool,
+) -> String {
+    let exe = tauri::utils::platform::current_exe();
+    let mut line = format!(
+        "start version={} identifier={identifier} build={} pid={} exe={}",
+        context.package_info().version,
+        if test { "test" } else { "release" },
+        std::process::id(),
+        exe.as_ref()
+            .map_or_else(|e| format!("unknown ({e})"), |p| p.display().to_string())
+    );
+    // The updater and restart use the first; a difference explains a wrong bundle.
+    if let Ok(std_exe) = std::env::current_exe() {
+        if exe.as_ref().ok() != Some(&std_exe) {
+            line.push_str(&format!(" std_exe={}", std_exe.display()));
+        }
+    }
+    line
+}
+
 pub fn run() {
     // The identifier embedded in the bundle decides release or test build;
     // resolve every folder from it before any filesystem activity.
@@ -858,6 +917,10 @@ pub fn run() {
     if paths.test {
         paths.prepare().unwrap_or_else(|e| refuse(e));
     }
+    // After AppPaths: the self-test's HOME is in place, and a test build's
+    // support folder is checked and made.
+    diag_log::init(&paths, &identifier);
+    log(&start_line(&context, &identifier, paths.test));
     let launcher = launcher(&paths).unwrap_or_else(|e| refuse(e));
     let client = AgtClient::with_env(
         launcher.clone(),
@@ -901,7 +964,7 @@ pub fn run() {
     let app = builder
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             main_thread(app, |app, mtm| {
-                log("single-instance callback on main thread");
+                trace("single-instance callback on main thread");
                 native::open_settings(&app, mtm, serde_json::json!({"pane":"general"}));
             });
         }))
@@ -1022,7 +1085,7 @@ pub fn run() {
                         main_thread(app, |app, _mtm| {
                             let _ = app.remove_menu();
                             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-                            log("settings hidden activation=Accessory; webview retained");
+                            trace("settings hidden activation=Accessory; webview retained");
                         });
                     }
                 }
@@ -1122,7 +1185,7 @@ pub fn run() {
                 && code != Some(tauri::RESTART_EXIT_CODE) =>
         {
             api.prevent_exit();
-            log("prevent_exit applied: tray app remains running");
+            trace("prevent_exit applied: tray app remains running");
         }
         tauri::RunEvent::Resumed => {
             request_usage(app, true, "reactivation");
@@ -1158,7 +1221,7 @@ fn debug_self_test(app: &tauri::AppHandle) {
             if let Some(window) = app.get_webview_window("popover") {
                 let _ = window.eval_with_callback(
                     "JSON.stringify({rows:document.querySelectorAll('#accounts .account-row').length,status:document.querySelector('#status').textContent,height:innerHeight,active:document.body.dataset.active})",
-                    |value| log(&format!("self-test popover-content={value}")),
+                    |value| trace(&format!("self-test popover-content={value}")),
                 );
             }
             set_pending_update(&app, None);
@@ -1204,7 +1267,7 @@ fn debug_self_test(app: &tauri::AppHandle) {
             if let Some(window) = app.get_webview_window("settings") {
                 let _ = window.eval_with_callback(
                     "document.body.dataset.retained='yes'; JSON.stringify({pane:document.body.dataset.pane,rows:document.querySelectorAll('.settings-account').length})",
-                    |value| log(&format!("self-test settings-content={value}")),
+                    |value| trace(&format!("self-test settings-content={value}")),
                 );
                 let _ = window.close();
             }
@@ -1218,25 +1281,25 @@ fn debug_self_test(app: &tauri::AppHandle) {
                 .kill_on_drop(true)
                 .status()
                 .await;
-        log(&format!(
+        trace(&format!(
             "self-test second-launch-success={}",
             secondary.is_ok_and(|s| s.success())
         ));
         tokio::time::sleep(Duration::from_secs(1)).await;
         main_thread(&app, |app, _mtm| {
             if let Some(window) = app.get_webview_window("settings") {
-                log(&format!(
+                trace(&format!(
                     "self-test settings-reopened-visible={}",
                     window.is_visible().unwrap_or(false)
                 ));
                 let _ = window.eval_with_callback(
                     "JSON.stringify({pane:document.body.dataset.pane,retained:document.body.dataset.retained})",
-                    |value| log(&format!("self-test settings-retained={value}")),
+                    |value| trace(&format!("self-test settings-retained={value}")),
                 );
             }
         });
         tokio::time::sleep(Duration::from_secs(1)).await;
-        log("self-test complete; quitting");
+        trace("self-test complete; quitting");
         quit(&app);
     });
 }

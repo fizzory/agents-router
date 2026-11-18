@@ -1,6 +1,7 @@
 pub mod app;
 pub mod app_paths;
 pub mod client;
+pub mod diag_log;
 pub mod glyph;
 pub mod install;
 mod install_app;
