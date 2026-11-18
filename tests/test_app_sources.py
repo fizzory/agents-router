@@ -20,6 +20,7 @@ Rust's cargo tests do the actual serde decoding; this guard needs no Rust on PAT
 
 import json
 import importlib.util
+import os
 import sys
 from pathlib import Path
 import re
@@ -148,11 +149,17 @@ def check_sources(root, *, release=False):
             fail("pins", f"{name} needs an exact = version")
         if name == "tauri-plugin-shell" or (isinstance(value, dict) and value.get("package") == "tauri-plugin-shell"):
             fail("shell", "tauri-plugin-shell is forbidden")
+        if name == "tauri-plugin-positioner" or (isinstance(value, dict) and value.get("package") == "tauri-plugin-positioner"):
+            fail("placement", "tauri-plugin-positioner is forbidden: native.rs places the popover in AppKit points")
     lock = cargo / "Cargo.lock"
     if not lock.is_file():
         fail("lock", "Cargo.lock is missing")
-    elif any(item.get("name") == "tauri-plugin-shell" for item in tomllib.loads(lock.read_text()).get("package", [])):
-        fail("shell", "tauri-plugin-shell in Cargo.lock")
+    else:
+        locked = {item.get("name") for item in tomllib.loads(lock.read_text()).get("package", [])}
+        if "tauri-plugin-shell" in locked:
+            fail("shell", "tauri-plugin-shell in Cargo.lock")
+        if "tauri-plugin-positioner" in locked:
+            fail("placement", "tauri-plugin-positioner in Cargo.lock")
 
     package = load_json(root / UI / "package.json")
     for group in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
@@ -374,9 +381,75 @@ def check_sources(root, *, release=False):
             fail("title", f"{path.relative_to(root)} calls set_title")
         if re.search(r"tauri[_-]plugin[_-]shell", text):
             fail("shell", f"{path.relative_to(root)} references plugin-shell")
+        # The popover's frame is set in AppKit points, synchronously, in native.rs.
+        # The positioner works in physical pixels, and Tauri/tao's position setters
+        # land later on the main queue, converted with the scale of whichever
+        # display the window was on: on mixed-scale displays that moved the popover
+        # to the middle of another display after native.rs had placed it.
+        if re.search(r"(?:tauri[_-]plugin|plugin)[_-]positioner", text):
+            fail("placement", f"{path.relative_to(root)} references the positioner plugin")
+        if path.suffix == ".rs" and re.search(r"\b(?:move_window(?:_constrained)?|set_position|set_outer_position|setFrameTopLeftPoint|setFrameOrigin)\s*\(", text):
+            fail("placement", f"{path.relative_to(root)} moves a window outside native.rs's synchronous AppKit placement")
         if (re.search(r"SF[ -]Symbols|com\.apple\.SF|(?:imageWith|system)SymbolName", text, re.I)
                 or path.suffix == ".svg" and re.search(r'''<g\b[^>]*\bid=["'](?:Symbols|Guides|Notes)["']''', text)):
             fail("symbols", f"{path.relative_to(root)} references SF Symbols")
+
+    # tray-icon delivers clicks through its own subview of the status button, sized
+    # only by its setters. A native image or title change grows the button past it;
+    # clicks outside then hit the bare button and do nothing. set_tooltip resizes it.
+    native_setters = r"\.\s*set(?:Image|AttributedTitle|Title)\s*\("
+    apply = re.search(r"\bfn apply_glyph\b.*?\n}\n", uncomment((cargo / "src/native.rs").read_text(encoding="utf-8")), re.S)
+    body = apply[0] if apply else ""
+    last_change = max((m.end() for m in re.finditer(native_setters, body)), default=-1)
+    resizes = [m.end() for m in re.finditer(r"\btray\s*\.\s*set_tooltip\s*\(", body)]
+    if not apply or last_change < 0 or not any(end > last_change for end in resizes):
+        fail("tray-target", "native.rs apply_glyph must call tray.set_tooltip after its last setImage/setAttributedTitle")
+    for path in sorted((cargo / "src").rglob("*.rs")):
+        text = uncomment(path.read_text(encoding="utf-8"))
+        outside = text.replace(body, "") if apply and path == cargo / "src/native.rs" else text
+        if re.search(native_setters, outside):
+            fail("tray-target", f"{path.relative_to(root)} changes the status button outside apply_glyph")
+        if re.search(r"\bsetToolTip\s*\(", text):
+            fail("tray-target", f"{path.relative_to(root)} sets the tooltip natively; tray.set_tooltip also resizes the click target")
+
+    # The popover is a nonactivating panel of an accessory app that is never
+    # active. A panel that hides on deactivate stays off screen the whole time it
+    # is open: on macOS 26 WindowServer listed it, animated and made it key, but
+    # never put it on screen. It is ordered in with orderFrontRegardless
+    # (tauri-nspanel's show_and_make_key), on every Space of every display.
+    native = uncomment((cargo / "src/native.rs").read_text(encoding="utf-8"))
+    create = re.search(r"\bfn create_panel\b.*?\n}\n", native, re.S)
+    create = create[0] if create else ""
+    if not re.search(r"\bpanel\s*\.\s*set_hides_on_deactivate\s*\(\s*false\s*\)", create):
+        fail("panel", "native.rs create_panel must call panel.set_hides_on_deactivate(false)")
+    behaviour = re.search(r"\bset_collection_behavior\s*\((.*?)\)\s*;", create, re.S)
+    behaviour = behaviour[1] if behaviour else ""
+    if not all(re.search(rf"\b{flag}\b", behaviour) for flag in ("CanJoinAllSpaces", "FullScreenAuxiliary")):
+        fail("panel", "native.rs create_panel must give the popover CanJoinAllSpaces | FullScreenAuxiliary")
+    for path in sorted((cargo / "src").rglob("*.rs")):
+        text = uncomment(path.read_text(encoding="utf-8"))
+        if re.search(r"\b(?:set_hides_on_deactivate|setHidesOnDeactivate|hides_on_deactivate)\s*(?:\(|:)\s*true\b", text):
+            fail("panel", f"{path.relative_to(root)} makes a window hide on deactivate; the app is never active")
+        if re.search(r"\b(?:make_key_and_order_front|makeKeyAndOrderFront)\b|\borderFront\s*(?:\(|:)", text):
+            fail("panel", f"{path.relative_to(root)} orders a window front without orderFrontRegardless; the app is never active, use show_and_make_key")
+        if re.search(r"\bMoveToActiveSpace\b", text):
+            fail("panel", f"{path.relative_to(root)} uses MoveToActiveSpace; AppKit throws when it meets CanJoinAllSpaces")
+
+    # tray-icon 0.25.1 flips its click event against CGDisplayPixelsHigh(CGMainDisplayID())
+    # (flip_window_screen_coordinates); placement::tray_click undoes it with the
+    # height tray_flip reads, so it must be that call. Any other height, such as an
+    # NSScreen frame's, need not be the number tray-icon subtracted from.
+    # placement.rs's tests inject the height, so only this rule sees native.rs drift.
+    flip = re.search(r"\bfn tray_flip\b.*?\n}\n", native, re.S)
+    # uncomment keeps '...' spans, which a lifetime can stretch over a comment.
+    flip = re.sub(r"//[^\n]*", "", flip[0]) if flip else ""
+    if not re.search(r"\bCGDisplayPixelsHigh\s*\(\s*CGMainDisplayID\s*\(\s*\)\s*\)", flip):
+        fail("tray-flip", "native.rs tray_flip must return CGDisplayPixelsHigh(CGMainDisplayID()), tray-icon's flip height")
+    if re.search(r"\b(?:NSScreen|mainScreen|firstObject|visibleFrame|backingScaleFactor|CGDisplayBounds)\b"
+                 r"|\bscreens\s*\(|\.\s*frame\s*\(", flip):
+        fail("tray-flip", "native.rs tray_flip must not read a screen's frame; tray-icon flips against CGDisplayPixelsHigh(CGMainDisplayID())")
+    if not re.search(r"\bplacement\s*::\s*click\s*\([^;]*\btray_flip\s*\(\s*\)", native):
+        fail("tray-flip", "native.rs must pass tray_flip() to placement::click")
 
     models = uncomment((cargo / "src/models.rs").read_text(encoding="utf-8"))
     inventory = models.split("pub const FIXTURES:", 1)[-1].split("];", 1)[0]
@@ -491,6 +564,40 @@ class AppSourceTests(unittest.TestCase):
         self.assertIn("scripts/build_app.sh\n", draft)
         self.assertIn('"dist/Agents-Router-$version-arm64.app.tar.gz"', draft)
 
+    def test_app_workflow_requires_crate_sources_for_the_source_guards(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        app = workflow.split("\n  app-build:\n", 1)[1].split("\n  draft-release:\n", 1)[0]
+        steps = re.split(r"(?m)^      - ", app.split("\n    steps:\n", 1)[1])[1:]
+        guards = [i for i, step in enumerate(steps) if re.search(r"(?m)^        run: .*\btest_app_sources\b", step)]
+        fetches = [i for i, step in enumerate(steps) if re.search(r"(?m)^        run: cargo fetch --locked\b", step)]
+        self.assertEqual(len(guards), 1)
+        self.assertEqual(len(fetches), 1)
+        self.assertLess(fetches[0], guards[0])
+        self.assertIn("working-directory: macos/src-tauri\n", steps[fetches[0]])
+        self.assertRegex(steps[guards[0]], r"(?m)^          REQUIRE_CRATE_SOURCES: '1'$")
+        self.assertNotRegex(steps[fetches[0]] + steps[guards[0]], r"(?m)^        (?:if|continue-on-error):")
+        # Every other workflow runs the guards without Cargo, so they may skip there.
+        for other in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            if other.name != "release.yml":
+                self.assertNotIn("REQUIRE_CRATE_SOURCES", other.read_text(), other.name)
+
+    def test_tray_icon_check_skips_locally_and_fails_when_sources_are_required(self):
+        for name in ("test_locked_tray_icon_resizes_its_click_target_in_set_tooltip",
+                     "test_locked_tray_icon_flips_against_cg_main_display"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as empty:
+                test = AppSourceTests(name)
+                with unittest.mock.patch.dict("os.environ", {"CARGO_HOME": empty}):
+                    os.environ.pop("REQUIRE_CRATE_SOURCES", None)
+                    result = unittest.TestResult()
+                    test.run(result)
+                    self.assertEqual(len(result.skipped), 1)
+                    self.assertIn("cargo fetch --locked", result.skipped[0][1])
+                with unittest.mock.patch.dict("os.environ", {"CARGO_HOME": empty, "REQUIRE_CRATE_SOURCES": "1"}):
+                    result = unittest.TestResult()
+                    test.run(result)
+                    self.assertEqual((len(result.failures), result.skipped), (1, []))
+                    self.assertIn("is not in", result.failures[0][1])
+
     def test_core_workflow_keeps_both_python_versions_on_ubuntu_and_intel_macos(self):
         workflow = (ROOT / ".github/workflows/tests.yml").read_text()
         self.assertIn("os: [ubuntu-latest, macos-15-intel]", workflow)
@@ -551,6 +658,23 @@ class AppSourceTests(unittest.TestCase):
         for name, text in (("build_app.sh", 'cargo tauri build --features ci-selftest\n'),
                            ("build_app.py", 'run("cargo", "tauri", "build", "--features", "ci-selftest")\n')):
             self.reject("selftest", lambda root: self.write(root, Path("scripts") / name, text))
+
+    def test_rejects_the_positioner_and_deferred_window_moves(self):
+        cargo = TAURI / "Cargo.toml"
+        self.reject("placement", lambda root: self.write(root, cargo,
+            (root / cargo).read_text() + '\n[dependencies.place]\npackage = "tauri-plugin-positioner"\nversion = "=2.4.0"\n'))
+        self.reject("placement", lambda root: self.write(root, TAURI / "Cargo.lock",
+            (root / TAURI / "Cargo.lock").read_text() + '\n[[package]]\nname = "tauri-plugin-positioner"\nversion = "2.4.0"\n'))
+        for name, text in (("src/bad.rs", "fn bad() { let _ = tauri_plugin_positioner::init(); }"),
+                           ("src/move.rs", "fn bad(w: &tauri::WebviewWindow) { let _ = w.set_position(p); }"),
+                           ("src/top.rs", "fn bad(w: &NSWindow) { w.setFrameTopLeftPoint(point); }")):
+            with self.subTest(name=name):
+                self.reject("placement", lambda root: self.write(root, TAURI / name, text))
+        self.reject("placement", lambda root: self.write(root, UI / "bad.js",
+            "import { moveWindow } from '@tauri-apps/plugin-positioner';"))
+        root = self.temp_tree()
+        self.write(root, TAURI / "src/ok.rs", "// set_position( in a comment is fine\nfn ok() { panel.setFrame_display(next, false); }")
+        self.assertEqual([e for e in check_sources(root) if e.startswith("[placement]")], [])
 
     def test_rejects_plugin_shell_even_renamed(self):
         self.reject("shell", lambda root: self.write(root, TAURI / "Cargo.toml",
@@ -673,6 +797,151 @@ class AppSourceTests(unittest.TestCase):
 
     def test_rejects_set_title(self):
         self.reject("title", lambda root: self.write(root, TAURI / "src/bad.rs", 'fn bad() { tray.set_title(Some("86%")); }'))
+
+    def test_rejects_tray_changes_that_leave_the_click_target_behind(self):
+        native = TAURI / "src/native.rs"
+        resize = "if let Err(error) = tray.set_tooltip(Some(&glyph.tooltip)) {"
+        title = "button.setAttributedTitle(&title);"
+
+        def edit(root, old, new):
+            text = (root / native).read_text()
+            self.assertIn(old, text)
+            self.write(root, native, text.replace(old, new, 1))
+
+        self.reject("tray-target", lambda root: edit(root, resize, "if let Err(error) = Ok::<(), String>(()) {"))
+
+        def moved(root):
+            edit(root, resize, "if let Err(error) = Ok::<(), String>(()) {")
+            edit(root, title, "let _ = tray.set_tooltip(Some(\"x\"));\n                " + title)
+        self.reject("tray-target", moved)
+        self.reject("tray-target", lambda root: edit(root, "button.setAccessibilityLabel(", "button.setToolTip(Some(&label));\n        button.setAccessibilityLabel("))
+        self.reject("tray-target", lambda root: self.write(root, TAURI / "src/bad.rs",
+            "fn bad(button: &NSStatusBarButton) { button.setTitle(&title); }"))
+
+    def test_rejects_a_popover_panel_kept_off_screen(self):
+        native = TAURI / "src/native.rs"
+        hides = "panel.set_hides_on_deactivate(false);"
+        behaviour = "NSWindowCollectionBehavior::CanJoinAllSpaces\n            | "
+
+        def edit(root, old, new):
+            text = (root / native).read_text()
+            self.assertIn(old, text)
+            self.write(root, native, text.replace(old, new, 1))
+
+        self.reject("panel", lambda root: edit(root, hides, "panel.set_hides_on_deactivate(true);"))
+        self.reject("panel", lambda root: edit(root, hides, ""))
+        self.reject("panel", lambda root: edit(root, behaviour, ""))
+        self.reject("panel", lambda root: edit(root, behaviour, behaviour + "NSWindowCollectionBehavior::MoveToActiveSpace | "))
+        for text in (
+            "fn bad(window: &NSWindow) { window.setHidesOnDeactivate(true); }",
+            "fn bad() { let _: () = unsafe { msg_send![panel, setHidesOnDeactivate: true] }; }",
+            "fn bad() { PanelBuilder::new(app, \"x\").hides_on_deactivate(true); }",
+            "fn bad(panel: &Panel) { panel.make_key_and_order_front(); }",
+            "fn bad(window: &NSWindow) { window.makeKeyAndOrderFront(None); }",
+            "fn bad(window: &NSWindow) { window.orderFront(None); }",
+            "fn bad() { let _: () = unsafe { msg_send![panel, orderFront: nil] }; }",
+        ):
+            with self.subTest(text=text):
+                self.reject("panel", lambda root: self.write(root, TAURI / "src/bad.rs", text))
+        root = self.temp_tree()
+        self.write(root, TAURI / "src/fine.rs", "fn fine(window: &NSWindow) { window.orderFrontRegardless(); }")
+        self.assertEqual([e for e in check_sources(root) if e.startswith("[panel]")], [])
+
+    def test_rejects_a_tray_flip_off_tray_icons_baseline(self):
+        native = TAURI / "src/native.rs"
+        height = "CGDisplayPixelsHigh(CGMainDisplayID()) as f64"
+        call = "placement::click(event, now.item, tray_flip(), pointer(mtm))"
+
+        def edit(root, old, new):
+            text = (root / native).read_text()
+            self.assertIn(old, text)
+            self.write(root, native, text.replace(old, new, 1))
+
+        for reverted in (
+            "NSScreen::mainScreen(MainThreadMarker::new().unwrap()).map_or(0.0, |s| s.frame().size.height)",
+            "NSScreen::screens(mtm).firstObject().map_or(0.0, |s| s.frame().size.height)",
+            "screens.iter().next().map_or(0.0, |s| rect(s.frame()).height)",
+            f"({height}).max(NSScreen::mainScreen(mtm).map_or(0.0, |s| s.frame().size.height))",
+            "0.0",
+        ):
+            with self.subTest(reverted=reverted):
+                self.reject("tray-flip", lambda root: edit(root, height, reverted))
+        self.reject("tray-flip", lambda root: edit(root, call,
+            "placement::click(event, now.item, NSScreen::mainScreen(mtm).map_or(0.0, |s| s.frame().size.height), pointer(mtm))"))
+        root = self.temp_tree()
+        edit(root, height, "// not an NSScreen frame().size.height\n    " + height)
+        self.assertEqual([e for e in check_sources(root) if e.startswith("[tray-flip]")], [])
+
+    def test_locked_tauri_nspanel_shows_with_order_front_regardless(self):
+        # show_from relies on this to order the panel in for an app that is never
+        # active; re-check it whenever tauri-nspanel changes.
+        lock = tomllib.loads((ROOT / TAURI / "Cargo.lock").read_text(encoding="utf-8"))
+        version = next(package["version"] for package in lock["package"] if package["name"] == "tauri-nspanel")
+        cargo_home = Path(os.environ.get("CARGO_HOME") or ROOT / "build/cargo-home")
+        sources = sorted((cargo_home / "registry/src").glob(f"*/tauri-nspanel-{version}/src/panel.rs"))
+        if not sources:
+            missing = (f"tauri-nspanel {version} source is not in {cargo_home}/registry/src; "
+                       "run `cargo fetch --locked` in macos/src-tauri")
+            if os.environ.get("REQUIRE_CRATE_SOURCES") == "1":
+                self.fail(missing)
+            self.skipTest(missing)
+        text = sources[0].read_text(encoding="utf-8")
+        show = re.search(r"fn show_and_make_key\(&self\) \{.*?\n                \}\n", text, re.S)
+        self.assertIsNotNone(show)
+        self.assertIn("orderFrontRegardless", show[0])
+        self.assertIn("makeKeyWindow", show[0])
+        self.assertNotRegex(show[0], r"\borderFront:|makeKeyAndOrderFront")
+
+    def test_locked_tray_icon_resizes_its_click_target_in_set_tooltip(self):
+        # apply_glyph relies on this; re-check it whenever Tauri brings a new tray-icon.
+        lock = tomllib.loads((ROOT / TAURI / "Cargo.lock").read_text(encoding="utf-8"))
+        version = next(package["version"] for package in lock["package"] if package["name"] == "tray-icon")
+        cargo_home = Path(os.environ.get("CARGO_HOME") or ROOT / "build/cargo-home")
+        sources = sorted((cargo_home / "registry/src").glob(f"*/tray-icon-{version}/src/platform_impl/macos/mod.rs"))
+        if not sources:
+            missing = (f"tray-icon {version} source is not in {cargo_home}/registry/src; "
+                       "run `cargo fetch --locked` in macos/src-tauri")
+            # The macOS app workflow fetches the crates first and sets this, so the
+            # check can't skip there. (tests/helpers.py drops every AGT_* variable.)
+            if os.environ.get("REQUIRE_CRATE_SOURCES") == "1":
+                self.fail(missing)
+            self.skipTest(missing)
+        text = sources[0].read_text(encoding="utf-8")
+        set_tooltip = re.search(r"pub fn set_tooltip\b.*?\n    }\n", text, re.S)
+        self.assertIsNotNone(set_tooltip)
+        self.assertIn("tray_target.update_dimensions()", set_tooltip[0])
+        update = re.search(r"fn update_dimensions\b.*?\n    }\n", text, re.S)
+        self.assertIsNotNone(update)
+        self.assertIn("self.setFrame(button.frame())", update[0])
+
+    def test_locked_tray_icon_flips_against_cg_main_display(self):
+        # The [tray-flip] rule makes native.rs tray_flip return this same height,
+        # so tray_click can undo the flip; re-check both whenever Tauri brings a new tray-icon.
+        lock = tomllib.loads((ROOT / TAURI / "Cargo.lock").read_text(encoding="utf-8"))
+        version = next(package["version"] for package in lock["package"] if package["name"] == "tray-icon")
+        cargo_home = Path(os.environ.get("CARGO_HOME") or ROOT / "build/cargo-home")
+        sources = sorted((cargo_home / "registry/src").glob(f"*/tray-icon-{version}/src/platform_impl/macos/mod.rs"))
+        if not sources:
+            missing = (f"tray-icon {version} source is not in {cargo_home}/registry/src; "
+                       "run `cargo fetch --locked` in macos/src-tauri")
+            if os.environ.get("REQUIRE_CRATE_SOURCES") == "1":
+                self.fail(missing)
+            self.skipTest(missing)
+        text = sources[0].read_text(encoding="utf-8")
+        recheck = (f"tray-icon {version} no longer flips its click event against "
+                   "CGDisplayPixelsHigh(CGMainDisplayID()); re-check the [tray-flip] rule in "
+                   "tests/test_app_sources.py and tray_flip in macos/src-tauri/src/native.rs")
+        flip = re.search(r"\nfn flip_window_screen_coordinates\(y: f64\) -> f64 \{\n(.*?)\n\}\n", text, re.S)
+        self.assertIsNotNone(flip, recheck)
+        self.assertRegex(re.sub(r"//[^\n]*", "", flip[1]),
+                         r"^\s*CGDisplayPixelsHigh\s*\(\s*CGMainDisplayID\s*\(\s*\)\s*\)\s*as\s+f64\s*-\s*y\s*$", recheck)
+        # The event's position and rect both go through it; tray_click undoes both.
+        send = re.search(r"\nfn send_mouse_event\b.*?\n}\n", text, re.S)
+        self.assertIsNotNone(send, recheck)
+        self.assertRegex(send[0], r"flip_window_screen_coordinates\(\s*mouse_location\.y\s*\)", recheck)
+        rect = re.search(r"\nfn get_tray_rect\b.*?\n}\n", text, re.S)
+        self.assertIsNotNone(rect, recheck)
+        self.assertRegex(rect[0], r"flip_window_screen_coordinates\(\s*frame\.origin\.y\s*\)\s*-\s*frame\.size\.height", recheck)
 
     def test_rejects_sf_symbol_assets_and_exports(self):
         self.reject("symbols", lambda root: self.write(root, UI / "icons/route.symbolset/Contents.json", "{}"))

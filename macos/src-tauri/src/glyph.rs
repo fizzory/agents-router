@@ -7,7 +7,7 @@ pub enum Variant {
     Badge,
     Slash,
 }
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Glyph {
     pub variant: Variant,
     pub title: String,
@@ -18,6 +18,13 @@ pub enum Input<'a> {
     Reading,
     Unreadable(&'a str),
     Snapshot(&'a Usage),
+}
+
+/// Whether the tray must redraw: `shown` is the glyph last applied to the button,
+/// tooltip included (its Test build suffix too). Each usage read publishes twice
+/// (reading, then the result), and most reads change nothing the tray shows.
+pub fn changed(shown: Option<&Glyph>, next: &Glyph) -> bool {
+    shown != Some(next)
 }
 
 pub fn choose(input: Input<'_>, now: f64, format: impl Fn(f64, bool) -> String) -> Glyph {
@@ -302,5 +309,24 @@ mod tests {
         let mut u = single();
         u.providers[0].accounts[0].windows.clear();
         assert_eq!(glyph(&u).title, "");
+    }
+    #[test]
+    fn redraws_only_when_the_mark_title_or_label_changes() {
+        let u = single();
+        let shown = glyph(&u);
+        assert!(changed(None, &shown), "the first glyph is always drawn");
+        assert!(
+            !changed(Some(&shown), &glyph(&u)),
+            "a re-read with the same usage"
+        );
+        let mut next = shown.clone();
+        next.tooltip.push_str("\nTest build");
+        assert!(changed(Some(&shown), &next), "the label alone");
+        let mut next = shown.clone();
+        next.title = "\u{2007}9%".into();
+        assert!(changed(Some(&shown), &next), "the title alone");
+        let mut next = shown.clone();
+        next.variant = Variant::Slash;
+        assert!(changed(Some(&shown), &next), "the mark alone");
     }
 }

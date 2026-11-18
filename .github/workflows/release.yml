@@ -25,9 +25,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/app-tools
+      - name: Fetch Rust crates (the source guards read tray-icon's)
+        working-directory: macos/src-tauri
+        run: cargo fetch --locked --target aarch64-apple-darwin
       - name: App source and packaging guards
         env:
           PYTHONPATH: src:tests
+          REQUIRE_CRATE_SOURCES: '1'
         run: python3 -m unittest test_app_sources test_build_app
       - name: Frontend typecheck
         run: python3 scripts/build_app_ui.py --typecheck
