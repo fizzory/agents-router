@@ -7,7 +7,7 @@
    PYTHONPATH=src:tests python3 -m unittest discover -s tests -t tests
    ```
 
-   It takes over 10 minutes; run it as SKILL.md §3 says (background, log, grep). The only failure allowed is `test_help.test_other_commands_keep_argparse_help` on Python 3.15.
+   It takes over 10 minutes; run it as SKILL.md §3 says (background, log, grep). Every failure blocks.
 3. **Pass the skill gate** when the change touches a skill with cases in `tests/skill-evals/`. Run only the cases of the skills it touched; they must pass before release.
    - Find the touched skills with `git diff --name-only main...HEAD`:
 
