@@ -77,8 +77,11 @@ WRITE_TOOLS = ("Write",)
 PROBE_FLAGS = ("--v2", "--v3", "--output-format")
 PROBE_TIMEOUT = 10  # seconds for each of `--version` and `chat --help`
 VERSION_RE = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
-STREAM_EVENTS = ("runStarted", "sessionUpdate", "metadata", "runFinished")
-NOISE_RE = re.compile(r"\[(?:INFO|DEBUG|WARN|TRACE)\]")  # V3's log lines on stderr, printed even on success
+STREAM_EVENTS = ("runStarted", "sessionUpdate", "metadata", "runFinished", "runError")
+# `runError` (kiro-cli 2.x, V3) ends a failed run: `data.message` says why, e.g. the monthly usage limit,
+# followed by " (code -32000): {...}" with the raw error object.
+RUN_ERROR_TAIL_RE = re.compile(r"\s*\(code -?\d+\):.*$", re.DOTALL)
+NOISE_RE = re.compile(r"\[(?:INFO|DEBUG|WARN|TRACE)\]|\bExperimentalWarning\b|--trace-warnings")  # V3's log lines on stderr, printed even on success
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 V3_SESSION_RE = re.compile(r"sess_[0-9A-Za-z-]+")
 V2_SESSION_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -265,6 +268,11 @@ class KiroParser:
             self.session_id = data["sessionId"].strip()
         if kind == "runFinished":
             self.finished = data
+        elif kind == "runError":
+            value = data.get("message")
+            if isinstance(value, str) and value.strip():
+                self.event_errors.append(RUN_ERROR_TAIL_RE.sub("", value.strip())[:500] or value.strip()[:500])
+            return None
         elif kind == "sessionUpdate":
             update = data.get("update") if isinstance(data.get("update"), dict) else {}
             what = update.get("sessionUpdate")

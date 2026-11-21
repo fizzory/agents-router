@@ -202,3 +202,22 @@ def open_questions(job_id: str) -> list[dict[str, Any]]:
     folder = job_dir(job_id)
     answered = {record.get("reply_to") for record in _read(folder / "inbox.jsonl")}
     return [record for record in _read(folder / "outbox.jsonl") if record.get("kind") == "question" and record["id"] not in answered]
+
+
+PARENT_CALLS = "parent-calls.json"
+
+
+def count_parent_call(job_id: str) -> None:
+    """Count one agt-parent tool call, so the runner can tell talking to the parent from doing the task."""
+
+    path = job_dir(job_id) / PARENT_CALLS
+    with file_lock(path.with_suffix(".lock")):
+        count = int((read_json(path, {}) or {}).get("count") or 0)
+        write_json(path, {"count": count + 1})
+
+
+def parent_calls(job_id: str) -> int:
+    try:
+        return int((read_json(job_dir(job_id) / PARENT_CALLS, {}) or {}).get("count") or 0)
+    except (OSError, ValueError, TypeError):
+        return 0

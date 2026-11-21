@@ -16,12 +16,15 @@ import time
 from typing import Any
 
 from agents_router import accounts, health, limits, messages, plans, quota
-from agents_router.config import OPT_IN_FAILOVER, Account, RuntimeConfig, load_config, set_session
-from agents_router.fsutil import kill_tree, open_private, process_start_time, unlock, worker_process, write_text
-from agents_router.jobs import job_dir, mark_pending, read_spec, update_status
+from agents_router.config import OPT_IN_FAILOVER, Account, RuntimeConfig, load_config, set_session, state_dir
+from agents_router.fsutil import (
+    file_lock, kill_tree, open_private, process_start_time, unlock, worker_process, write_json, write_text,
+)
+from agents_router.jobs import job_dir, mark_pending, move_group_member, read_group, read_spec, read_status, update_status
 from agents_router.runtimes import get_runtime
 from agents_router.runtimes.base import (
     AUTH,
+    BLOCKED,
     CANCELLED,
     ERROR,
     NO_ACCOUNT,
@@ -52,6 +55,11 @@ CAPACITY_CONTINUE_NOTE = (
     "Note from Agents Router: the model was temporarily at capacity. Continue the task from where "
     "you stopped. Check the current state of the files before redoing anything that may already be done."
 )
+
+
+def first_line(text: str | None, limit: int = 300) -> str:
+    line = next((part.strip() for part in (text or "").splitlines() if part.strip()), "")
+    return line[:limit]
 
 
 def handoff_prompt(original: str, previous: AttemptResult, account: str) -> str:
@@ -87,6 +95,7 @@ class Runner:
         self.deadline = self.spec.created + self.spec.timeout_seconds + QUEUE_TIMEOUT_SECONDS
         self.attempts: list[dict[str, Any]] = []
         self.warnings: list[str] = []
+        self.moves: list[dict[str, Any]] = []  # role providers this job moved to after a usage limit
         self._early: AttemptResult | None = None  # set when check_stderr stops a worker early
 
     # Helpers ---------------------------------------------------------------
@@ -106,7 +115,28 @@ class Runner:
         except OSError:
             return False
 
+    def blocked(self, result: AttemptResult | None) -> str | None:
+        """Why a clean exit is not a success: no answer, or it stopped on an unanswered question without working.
+
+        The worker's account is fine (health already counted the attempt as a success); the parent decides
+        what to do next, so nothing retries it.
+        """
+
+        if not (result and (result.text or "").strip()):
+            return "the worker finished without an answer"
+        try:
+            waiting = messages.open_questions(self.job_id)
+        except OSError:
+            waiting = []
+        if waiting and self._tool_uses() == 0:
+            question = first_line(waiting[-1].get("text"), 200)
+            return ("the worker stopped on a question nobody answered, without doing the task"
+                    + (f": {question}" if question else ""))
+        return None
+
     def finish(self, outcome: str, message: str = "", result: AttemptResult | None = None) -> int:
+        if outcome == SUCCESS and (why := self.blocked(result)):
+            outcome, message = BLOCKED, why
         messages.close_or_continue(
             self.job_id, result.session_id if result else None,
             self.attempts[-1]["account"] if self.attempts else self.spec.resume_account,
@@ -163,6 +193,20 @@ class Runner:
         self.owner_home = self.spec.resume_home
         follow_ups = 0
 
+        def moved(result: AttemptResult) -> bool:
+            """Move a role job to its next provider; the conversation starts fresh there."""
+
+            nonlocal excluded, session, owner, prompt, failover, move_warning
+            previous = self._provider_label()
+            if not self._move_provider(result):
+                return False
+            excluded, session, owner, move_warning = set(), None, None, None
+            self.owner_home = None
+            failover = self.runtime_config.failover == "on-limit" and not self.spec.account
+            worked = bool((result.text or "").strip()) or self._tool_uses() > 0
+            prompt = self._with_rules(handoff_prompt(self.spec.prompt, result, previous)) if worked else self.spec.prompt
+            return True
+
         while True:
             if self.cancelled():
                 return self.finish(CANCELLED, "cancelled", last)
@@ -171,6 +215,8 @@ class Runner:
             if lease is None:
                 if self.cancelled():
                     return self.finish(CANCELLED, "cancelled", last)
+                if last is not None and last.outcome == USAGE_LIMIT and moved(last):
+                    continue
                 if last is not None:
                     return self.finish(last.outcome, last.message, last)
                 return self.finish(NO_ACCOUNT, self._no_account_message(excluded))
@@ -256,6 +302,8 @@ class Runner:
                 else:
                     accounts.set_cooldown(self.spec.runtime, lease.account.name, until, last.message or USAGE_LIMIT)
             if not failover:
+                if moved(last):
+                    continue
                 return self.finish(USAGE_LIMIT, f"{lease.account.name}: {last.message}", last)
             excluded.add(lease.account.name)
             if last.session_id and hasattr(self.runtime, "transfer_session"):
@@ -265,7 +313,8 @@ class Runner:
             else:
                 session, owner = None, None
                 prompt = self._with_rules(handoff_prompt(self.spec.prompt, last, lease.account.name))
-            self.warnings.append(f"{lease.account.name} hit its usage limit; continuing on another account")
+            # Logged only once another account really takes the job: with none left, the job ends here.
+            move_warning = f"{lease.account.name} hit its usage limit; continuing on another account"
 
     def _attempt_with_capacity_retries(
         self, lease: accounts.Lease, prompt: str, session: str | None,
@@ -425,6 +474,105 @@ class Runner:
             self.status(state="queued", message=message)
             time.sleep(3)
 
+    # Role provider moves -------------------------------------------------------
+
+    def _provider_label(self) -> str:
+        account = f" ({self.attempts[-1]['account']})" if self.attempts else ""
+        return f"{self.spec.runtime}{account}"
+
+    def _tool_uses(self) -> int:
+        """Tool calls the worker made in this job, not counting its agt-parent calls."""
+
+        total = sum(int(item.get("tool_uses") or 0) for item in self.attempts)
+        return max(0, total - messages.parent_calls(self.job_id))
+
+    def _move_provider(self, last: AttemptResult) -> bool:
+        """After a usage limit with no account left, move a one-at-a-time role job down its provider list.
+
+        The job keeps its id, so `agt follow`, subagent_wait and the group keep tracking it. A
+        provider precheck refuses is skipped; one that is only near its ceiling is used when no
+        other is free. The runner's own account lease still applies every execution cap.
+        """
+
+        from agents_router import role_run, usage_view
+        from agents_router.roles import ONE_AT_A_TIME, RoleError, parse_provider
+
+        try:
+            group_id = read_status(self.job_id).get("group")
+            record = read_group(group_id) if group_id else None
+        except (OSError, ValueError):
+            return False
+        listed = record.get("role_providers") if record else None
+        if not record or record.get("access") not in ONE_AT_A_TIME or not isinstance(listed, list):
+            return False
+        entry = next((item for item in record.get("jobs") or [] if item.get("job_id") == self.job_id), None)
+        if entry is None:
+            return False
+        current = int(entry.get("position") or 0)
+        now = time.time()
+        chosen = fallback = None
+        skipped: list[str] = []
+        for number, text in enumerate(listed, 1):
+            if number <= current:
+                continue
+            try:
+                provider = parse_provider(text)
+                if provider.runtime == "codex":
+                    usage_view.refresh_codex(self.config, pinned=provider.account, live=False)
+                too_long = role_run._too_long(provider, self.spec.prompt, self.spec.cwd)
+                check = role_run.Check(reason=too_long) if too_long else role_run.precheck(self.config, provider, now)
+            except (RoleError, ValueError, OSError) as exc:
+                skipped.append(f"{text}: {exc}")
+                continue
+            if check.reason and not check.soft:
+                skipped.append(f"{text}: {check.reason}")
+                continue
+            if check.soft:
+                fallback = fallback or (number, provider)
+                continue
+            chosen = (number, provider)
+            break
+        chosen = chosen or fallback
+        if chosen is None:
+            if skipped:
+                self.warnings.append("no other provider of the role could take the job: " + "; ".join(skipped))
+            return False
+        number, provider = chosen
+        before = str(entry.get("provider") or self.spec.runtime)
+        runtime_config = self.config.runtime(provider.runtime)
+        model = provider.model or runtime_config.default_model
+        spec = dataclasses.replace(
+            self.spec, runtime=provider.runtime, account=provider.account, model=model or None,
+            effort=provider.effort or record.get("effort") or None,
+            resume_session=None, resume_account=None, resume_home=None,
+        )
+        pool = quota.pool_for(runtime_config, model)
+        move = {"from": before, "to": str(provider), "position": number, "of": len(listed),
+                "from_runtime": self.spec.runtime, "runtime": provider.runtime, "time": now,
+                "reason": first_line(last.message) or USAGE_LIMIT}
+        try:
+            # Admission counts running jobs by status.runtime: switch it while no admission is counting.
+            with file_lock(state_dir() / "admission.lock", timeout=30):
+                write_json(self.folder / "spec.json", spec.to_dict())  # follow-ups resume on the new runtime
+                self._write_status(runtime=provider.runtime, assigned_account=provider.account,
+                                   pool=pool.name if pool else None)
+        except (OSError, TimeoutError) as exc:
+            self.warnings.append(f"could not move the job to {provider}: {exc}")
+            return False
+        self.spec, self.runtime_config, self.runtime, self.pool = spec, runtime_config, get_runtime(provider.runtime), pool
+        try:
+            move_group_member(record["group"], self.job_id, str(provider), number, move)
+        except (OSError, ValueError, TimeoutError) as exc:
+            self.warnings.append(f"could not update group {record['group']}: {exc}")
+        with open_private(self.folder / "events.jsonl") as events:
+            move["event_offset"] = events.tell()
+            self.moves.append(move)
+            # follow switches its event reader on this line, authenticated by the offset in status.
+            if self.status(provider_moves=self.moves):
+                events.write((json.dumps({"type": "agt.provider_move", **move}) + "\n").encode())
+        self.warnings.append(f"{before} hit its usage limit; moved to provider {number} of {len(listed)}: {provider}")
+        return True
+
     def _with_rules(self, prompt: str) -> str:
         """A new session gets the role's rules first, as the job's first prompt did; a follow-up's text lacks them."""
 
@@ -441,7 +589,7 @@ class Runner:
     ) -> AttemptResult:
         account = lease.account
         attempt: dict[str, Any] = {"account": account.name, "home": str(account.home), "attempted_at": time.time(),
-                                   "before_start": True}
+                                   "before_start": True, "runtime": self.spec.runtime}
         if self.pool:
             attempt["pool"] = self.pool.name
         self.attempts.append(attempt)
@@ -568,7 +716,9 @@ class Runner:
             cost_usd=result.cost_usd,
             num_turns=result.num_turns,
         )
-        self.status(progress=parser.progress(), init=getattr(parser, "init", None))
+        progress = parser.progress()
+        attempt["tool_uses"] = int((progress or {}).get("tool_uses") or 0)
+        self.status(progress=progress, init=getattr(parser, "init", None))
         return result
 
     def _pump(

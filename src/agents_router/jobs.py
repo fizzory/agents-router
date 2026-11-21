@@ -114,6 +114,19 @@ def save_cursor(group_id: str, state: dict[str, Any]) -> int:
     return number
 
 
+def move_group_member(group_id: str, job_id: str, provider: str, position: int, move: dict[str, Any]) -> None:
+    """Point a group member at the provider its job moved to, under the lock save_cursor takes."""
+
+    path = group_path(group_id)
+    with file_lock(path.with_suffix(".lock")):
+        record = read_group(group_id)
+        for item in record.get("jobs") or []:
+            if item.get("job_id") == job_id:
+                item["provider"], item["position"] = provider, position
+        record["moves"] = [*(record.get("moves") or []), move]
+        write_json(path, record)
+
+
 def load_cursor(group_id: str, number: int) -> dict[str, Any]:
     """A saved cursor; 0 is the start of every member's events."""
 

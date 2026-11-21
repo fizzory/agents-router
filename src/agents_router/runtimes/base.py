@@ -35,6 +35,9 @@ CANCELLED = "cancelled"
 MAX_TURNS = "max_turns"
 NO_ACCOUNT = "no_account"
 LOST = "lost"
+# The worker exited cleanly but delivered nothing: no final text, or it stopped on an
+# unanswered question without doing any other work. Not success; the account is fine.
+BLOCKED = "blocked"
 
 # These diagnostics describe a rejected request or the machine, not a broken account.
 # This check affects health metadata only; adapters keep their existing outcomes.
@@ -166,10 +169,20 @@ def parent_server(job_id: str) -> dict[str, Any]:
     }
 
 
+# The agt-parent MCP server's tools: the parent channel, then read-only file tools.
+PARENT_TOOL_NAMES = ("message_parent", "ask_parent", "check_parent_messages")
+READ_TOOL_NAMES = ("read_file", "list_files", "search_files")
+WORKER_TOOL_NAMES = PARENT_TOOL_NAMES + READ_TOOL_NAMES
+
 WORKER_TOOLS_NOTE = (
     " You can talk to the main session with the agt-parent tools: message_parent for short progress "
     "notes or early findings, ask_parent only when you truly can't decide something from the task and "
     "the files, and check_parent_messages between major steps to pick up follow-up instructions."
+)
+# Codex's own file tools are shell and apply_patch, so a worker told not to run shell had no way to read.
+WORKER_READ_TOOLS_NOTE = (
+    " To read files without running shell commands, use the agt-parent tools read_file, list_files "
+    "and search_files; they reach the job's folder and the folders added to it, read-only."
 )
 
 
