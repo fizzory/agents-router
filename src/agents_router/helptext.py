@@ -49,7 +49,7 @@ ROOT = {
         ]),
         ("Accounts and settings", [
             ("usage", "Show cached usage windows and account availability; --refresh rescans Codex"),
-            ("accounts", "List, check, add, log in, enable, disable, sync, reset or remove accounts (Codex reset checks live usage)"),
+            ("accounts", "List, check, add, log in, enable, disable, sync, reset or remove accounts; list --cached-only reads stored login and usage (Codex reset checks live usage)"),
             ("config", "See and change agt's settings (show, set, unset, revert)"),
             ("roles", "See and change roles: which providers each role uses (show, propose, config)"),
             ("rules", "Show, install or remove the optional delegation rules"),

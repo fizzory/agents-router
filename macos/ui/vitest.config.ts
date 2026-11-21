@@ -17,6 +17,6 @@ export default defineConfig({
     restoreMocks: true,
     // Stylesheets read as text (?raw): motion.css for its tokens, and the control
     // sheets for the hit-target sizes. Keep them out of Vitest's CSS stubbing.
-    css: { include: [/(?:motion|tokens|shared|controls|settings)\.css/] },
+    css: { include: [/(?:motion|tokens|shared|controls|settings|popover)\.css/] },
   },
 });

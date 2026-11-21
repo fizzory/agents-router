@@ -17,10 +17,12 @@ from unittest.mock import patch
 
 from helpers import FAKE_HOST
 
-from agents_router import cli, synclog
+from agents_router import account_check, cli, config, profiles, synclog
 
 FOLDER = Path(__file__).parent / "fixtures" / "app"
 NOW = 1800000000.0
+# Settings' real-clock smoke tests must keep seeing a fresh cached primary check.
+CHECKED_AT = 4102444800.0
 
 
 def share_inputs(home: Path) -> None:
@@ -126,14 +128,15 @@ def fixture_texts() -> dict[str, str]:
                     capture("config-set-needs-user-words", ["config", "set", "max_depth", "3", "--user"], 3)
                 capture("config-set-error", ["config", "set", "codex.usage_ceiling", "wrong", "--user"], 2)
                 capture("config-unset-absent", ["config", "unset", "kiro.default_model", "--user"])
-                capture("accounts-list", ["accounts", "list"])
-                capture("accounts-check", ["accounts", "check", "primary"])
+                capture("accounts-list", ["accounts", "list", "--cached-only"])
+                with patch("time.time", return_value=CHECKED_AT):
+                    capture("accounts-check", ["accounts", "check", "primary"])
                 capture("accounts-add-check", ["accounts", "add", "spare", "--check"])
                 capture("accounts-add-check-error", ["accounts", "add", "work", "--check"], 1)
                 discovered = home / ".claude-lab"
                 discovered.mkdir()
                 (discovered / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": "fixture-lab"}}), encoding="utf-8")
-                capture("accounts-list-locked", ["accounts", "list"])
+                capture("accounts-list-locked", ["accounts", "list", "--cached-only"])
                 (discovered / ".claude.json").unlink()
                 discovered.rmdir()
                 capture("accounts-enable-refusal", ["accounts", "enable", "primary"], 2)
@@ -222,6 +225,12 @@ def fixture_texts() -> dict[str, str]:
                 from agents_router import levels
                 synclog.refused(levels.SettingsError("Example invalid setting", file=project / ".agt/settings.local.toml", line=2), None)
                 capture("activity-log", ["log", "--all", "--limit", "200"])
+                # Keep a stale success, a fresh failure and never-checked accounts
+                # in one real cached-list document for the app's typed decoder.
+                with patch("time.time", return_value=CHECKED_AT + profiles.AUTH_TTL_SECONDS):
+                    runtime = config.load_config(cached_only=True).runtime("claude")
+                    account_check.check(runtime, runtime.find("work"), timeout=0)
+                    capture("accounts-list-cached", ["accounts", "list", "--cached-only"])
         finally:
             os.chdir(previous_cwd)
         return result

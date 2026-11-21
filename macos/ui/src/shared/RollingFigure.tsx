@@ -21,8 +21,8 @@ export function RollingFigure({ value, animate, active = true, className }: Roll
     previous.current = value;
   }, [value, animate]);
   useLayoutEffect(() => {
-    if (!active) setRoll(null);
-  }, [active]);
+    if (!active || !animate) setRoll(null);
+  }, [active, animate]);
 
   const classes = className ? `rolling-figure ${className}` : 'rolling-figure';
   if (!roll || roll.to !== value) return <span className={classes} aria-hidden="true">{value}</span>;

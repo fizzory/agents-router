@@ -1,3 +1,4 @@
+import type { AccountCheck } from '../shared/types';
 // The Settings window: sidebar, toolbar with the scope popup, the selected
 // pane only, and one sheet host. Every write goes through one busy guard;
 // config writes and role edits join the serialized session history.
@@ -52,6 +53,7 @@ function Settings({ api, now = () => Date.now(), timeZone }: SettingsAppProps) {
   const [configs, setConfigs] = useState(() => new Map<string | null, ConfigShow>());
   const [configError, setConfigError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<Envelope | null>(null);
+  const [checks, setChecks] = useState<AccountCheck[]>([]);
   /** The snapshot came from a newer usage-updated: Accounts slides its bars and rolls its digits, as the popover does. */
   const [freshUsage, setFreshUsage] = useState(false);
   const freshGeneration = useRef(-1);
@@ -311,6 +313,12 @@ function Settings({ api, now = () => Date.now(), timeZone }: SettingsAppProps) {
       (error) => setInstallError(errorMessage(error)));
     step(async () => { keep(await api.onUpdateStatus(setUpdate)); await readUpdate(); });
     step(async () => {
+      let received = false;
+      keep(await api.onAccountChecksStatus((value) => { received = true; if (!disposed) setChecks(value); }));
+      const value = await api.getAccountChecks();
+      if (!disposed && !received) setChecks(value);
+    });
+    step(async () => {
       keep(await api.onSettingsEdit(({ action }) => { events.current.edit(action); }));
       keep(await api.onSettingsTarget((target) => { events.current.navigate(target).catch(report); }));
       keep(await api.onSettingsHistory(({ key }) => events.current.showHistory(key)));
@@ -355,7 +363,7 @@ function Settings({ api, now = () => Date.now(), timeZone }: SettingsAppProps) {
 
   const config = configs.get(scope.workspace) ?? null;
   const usage = snapshot?.usage ?? null;
-  const accounts = useMemo(() => (data.accounts ? accountModels(data.accounts, usage, now() / 1000) : []), [data.accounts, usage]);
+  const accounts = useMemo(() => (data.accounts ? accountModels(data.accounts, usage, now() / 1000, checks) : []), [data.accounts, usage, checks]);
   const searching = query.trim() !== '';
   const counts = useMemo(() => {
     if (!searching) return null;

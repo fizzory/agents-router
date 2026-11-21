@@ -109,6 +109,28 @@ pub enum Stage {
     Download,
     Install,
 }
+impl Stage {
+    /// The phase a failed install shows. A check failure has nothing to install.
+    pub fn failed(self) -> Phase {
+        match self {
+            Stage::Check => Phase::Idle,
+            Stage::Download => Phase::DownloadFailed,
+            Stage::Install => Phase::InstallFailed,
+        }
+    }
+}
+/// The update's state for both windows, beside Settings' dialog.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Phase {
+    #[default]
+    Idle,
+    Available,
+    Downloading,
+    Installing,
+    DownloadFailed,
+    InstallFailed,
+}
 
 pub enum CheckResult {
     Available(String),
@@ -180,6 +202,27 @@ pub fn permanent(error: &tauri_plugin_updater::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn releases_is_the_latest_release_page_open_releases_opens() {
+        assert!(RELEASES.ends_with("/releases/latest"), "{RELEASES}");
+        // The updater feed lives under the same page, so the two cannot drift apart.
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(
+            conf["plugins"]["updater"]["endpoints"],
+            serde_json::json!([format!("{RELEASES}/download/latest.json")])
+        );
+        // Open Releases Page runs `open` on RELEASES and on nothing else.
+        let source = include_str!("update_app.rs");
+        let start = source.find("async fn open_releases_page(").unwrap();
+        let page = &source[start..start + source[start..].find("\n}\n").unwrap()];
+        assert!(page.contains("Command::new(\"/usr/bin/open\")"), "{page}");
+        assert!(page.contains(".arg(update::RELEASES)"), "{page}");
+        assert_eq!(page.matches(".arg(").count(), 1, "{page}");
+        let open = source.find("pub async fn open_releases()").unwrap();
+        let body = &source[open..open + source[open..].find("\n}\n").unwrap()];
+        assert!(body.contains("open_releases_page().await"), "{body}");
+    }
     #[test]
     fn overlapping_and_missed_checks_coalesce_and_manual_joins() {
         let mut s = Schedule::default();
@@ -274,5 +317,51 @@ mod tests {
             assert_eq!(d.default, "install");
             assert_eq!(d.buttons.last().unwrap().0, "Retry");
         }
+    }
+
+    /// The popover's four failure titles are Settings' `Dialog::failure` titles
+    /// with the version in place of "the update". rows.test.js reads the same file.
+    #[test]
+    fn popover_failure_titles_and_buttons_come_from_dialog_failure() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/popover/update-failures.json"
+        ))
+        .unwrap();
+        let cases = cases.as_array().unwrap();
+        assert_eq!(cases.len(), 4);
+        let mut seen = vec![];
+        for case in cases {
+            let stage = match case["phase"].as_str().unwrap() {
+                "download-failed" => Stage::Download,
+                "install-failed" => Stage::Install,
+                other => panic!("unknown phase {other}"),
+            };
+            let retryable = case["retryable"].as_bool().unwrap();
+            let version = case["version"].as_str().unwrap();
+            let dialog = Dialog::failure(stage, !retryable, "detail".into());
+            assert_eq!(
+                dialog.title.replace("the update", version),
+                case["title"].as_str().unwrap(),
+                "{case}"
+            );
+            assert_eq!(dialog.detail, "detail");
+            let (label, action) = dialog.buttons.last().unwrap();
+            assert_eq!(label, case["button"].as_str().unwrap(), "{case}");
+            assert_eq!(action, if retryable { "install" } else { "releases" });
+            assert_eq!(dialog.default, *action);
+            assert_eq!(serde_json::to_value(stage.failed()).unwrap(), case["phase"]);
+            seen.push((stage, retryable));
+        }
+        for stage in [Stage::Download, Stage::Install] {
+            for retryable in [true, false] {
+                assert!(seen.contains(&(stage, retryable)), "{stage:?} {retryable}");
+            }
+        }
+        assert_eq!(Stage::Check.failed(), Phase::Idle);
+        assert_eq!(
+            serde_json::to_value([Phase::DownloadFailed, Phase::InstallFailed, Phase::Available])
+                .unwrap(),
+            serde_json::json!(["download-failed", "install-failed", "available"])
+        );
     }
 }

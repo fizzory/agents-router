@@ -1,19 +1,24 @@
 {
   "popover": [
-    "allow-get-snapshot",
+    "allow-get-snapshot", "allow-get-account-checks",
     "allow-refresh-usage",
     "allow-hide-popover",
+    "allow-show-popover-menu",
     "allow-set-popover-height",
     "allow-open-settings",
     "allow-login-account",
+    "allow-get-login-command",
+    "allow-copy-text",
     "allow-check-account",
-    "allow-check-for-updates",
+    "allow-get-update-status",
+    "allow-install-update",
+    "allow-open-releases",
     "allow-quit-app",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ],
   "settings": [
-    "allow-get-snapshot",
+    "allow-get-snapshot", "allow-get-account-checks",
     "allow-get-settings-target",
     "allow-show-setting-menu",
     "allow-show-pane-menu",

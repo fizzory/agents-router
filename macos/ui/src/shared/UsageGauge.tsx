@@ -14,16 +14,19 @@ export interface UsageGaugeProps {
 }
 
 export function UsageGauge({ meters, hidden = false, fresh = false }: UsageGaugeProps) {
-  const last = useRef<{ values: string; slide: boolean }>({ values: '', slide: false });
-  const values = meters.map((meter) => `${meter.percent}`).join('/');
-  if (fresh) last.current = { values, slide: true };
-  else if (values !== last.current.values) last.current = { values, slide: false };
-  const classes = ['usage-gauge', last.current.slide ? 'is-fresh' : '', hidden ? 'is-hidden' : ''].filter(Boolean).join(' ');
+  const last = useRef({ meters, changed: new Set<string>() });
+  if (meters !== last.current.meters) {
+    const previous = new Map(last.current.meters.map(meter => [meter.name, meter]));
+    const changed = new Set(meters.filter(meter => fresh && meter.present && previous.get(meter.name)?.present
+      && previous.get(meter.name)?.percent !== meter.percent).map(meter => meter.name));
+    last.current = { meters, changed };
+  }
+  const classes = ['usage-gauge', fresh && last.current.changed.size ? 'is-fresh' : '', hidden ? 'is-hidden' : ''].filter(Boolean).join(' ');
   return (
     <span className={classes} aria-hidden="true">
       {meters.map((meter) => {
-        const bar = ['gauge-bar', meter.dominant ? 'is-main' : 'is-other', meter.dominant && meter.percent >= WARN_PERCENT ? 'is-warn' : '',
-          meter.dimmed ? 'is-stale' : '', meter.reset ? 'is-reset' : ''].filter(Boolean).join(' ');
+        const bar = ['gauge-bar', meter.dominant ? 'is-main' : 'is-other', meter.warn || (meter.dominant && meter.percent >= WARN_PERCENT) ? 'is-warn' : '',
+          fresh && last.current.changed.has(meter.name) ? 'is-changing' : '', meter.dimmed ? 'is-stale' : '', meter.reset ? 'is-reset' : ''].filter(Boolean).join(' ');
         const fill: CSSProperties = { transform: `translateX(${meter.percent - 100}%)` };
         return (
           <span key={meter.name} className={bar} data-window={meter.name}>

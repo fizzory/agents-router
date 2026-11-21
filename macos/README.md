@@ -98,6 +98,8 @@ assets as `data:` URIs and uses no preload polyfill; the CSP allows only
 `window-permissions.json` stay out of the build; only tests and guards read
 them.
 
+[UI design system](ui/DESIGN.md) defines the palette, type, shape, motion and friction rules.
+
 ```bash
 scripts/prepare_app_tools.sh --yes        # once, with consent: Node, npm ci, tauri-cli
 python3 scripts/build_app_ui.py           # vite build into build/ui-dist, then check it
@@ -502,10 +504,82 @@ Python's read actually saw, and read again on a mismatch.
 ## Popover integration contract
 
 `ui/tauri.js` is the only frontend Tauri adapter. The popover alone may invoke:
-`get_snapshot`, `refresh_usage`, `hide_popover`, `set_popover_height`, `open_settings`, `login_account`,
-`check_account`, `check_for_updates`, and `quit_app`. Account actions take
+`get_snapshot`, `get_account_checks`, `refresh_usage`, `hide_popover`, `show_popover_menu`, `set_popover_height`, `open_settings`, `login_account`, `get_login_command`, `copy_text`,
+`check_account`, `get_update_status`, `install_update`, `open_releases` and `quit_app`. Account actions take
 `runtime` and canonical `account`; Rust verifies membership in its snapshot.
-There is no executable, argument array or shell command IPC.
+No caller supplies an executable, argument array or command to execute.
+`tests/test_app_sources.py` (`[adapter-grants]`) ties each adapter's `invoke`
+to a command that `build.rs` and `generate_handler!` both register. A window's
+command grants must be exactly the commands its `src/<window>/api.ts` uses.
+
+`showPopoverMenu({x,y})` is popover-only. More sends the button rect's left
+and bottom edges in window logical coordinates; Rust uses `popup_menu_at` to
+open a native menu with Check for Updates…, a separator and Quit Agents Router
+(⌘Q). These fixed items call the existing update and quit handlers. Menu tracking
+guards native blur until dismissal. Selecting an item (including the part of
+the menu outside the panel), Escape or a click inside the popover keeps it
+visible and returns focus to More; a click outside hides it. A queued menu
+blur cannot hide the restored key panel, and subsequent real focus loss still
+hides it. Settings keeps its separate `showPaneMenu`; its shared web Menu also
+continues to serve role model/effort choices.
+
+The native panel owns the popover's continuous corners: its layer-backed content
+view clips at radius 16 and the window explicitly enables its shadow. Resize
+notifications refresh the shadow during frame changes; animation completion
+and snapped resizes refresh it again at the final frame. Native Reduce Motion
+always snaps. The page paints a rectangle without body/root corner clipping.
+
+The popover's update row reads `getUpdateStatus()` (`get_update_status`) and
+follows `update-status`. Both windows have both, and Rust sends every status
+to both. A status is `{version, phase, received, total, retryable, detail,
+dialog}`. `phase` is `idle`, `available`, `downloading`, `installing`,
+`download-failed` or `install-failed`. `received` and `total` are the
+download's bytes; `total` is null when the feed gives no size. `dialog` is
+Settings' sheet, and the popover ignores it.
+
+| Phase | Row | Control |
+| --- | --- | --- |
+| `available` | 6px accent dot, `<version> is available` | `Install and Restart` |
+| `downloading`, `installing` | Spinner, `Installing…`, and `x.x of y.y MB` (or `x.x MB`) while bytes arrive | None |
+| `download-failed`, retryable | `Couldn't download <version>.` | `Retry` |
+| `download-failed`, permanent | `Couldn't verify <version>.` | `Open Releases Page` |
+| `install-failed`, retryable | `Couldn't install <version>.` | `Retry` |
+| `install-failed`, permanent | `Couldn't install <version>.` | `Open Releases Page` |
+
+The titles follow `Dialog::failure`. `retryable` alone picks the button. The
+error text goes only in the tooltip and the button's `aria-describedby`. A
+failure has no dismiss control. `Install and Restart` and `Retry` call
+`installUpdate()` (`install_update`), and `Open Releases Page` calls
+`openReleases()` (`open_releases`), which opens `update::RELEASES` and does
+nothing else. A click shows `Installing…` at once, and the row ignores clicks
+until the call returns or a status ends the install. Reduce Motion drops the
+spinner.
+Usage trouble hides only an available update. An unreadable status hides the
+row.
+
+`install_update` and Settings' Install share one `UpdateController` and one
+guard. A second install from either window starts nothing and gets `An update
+is already installing.`; the popover ignores it. The guard is free before a
+failure is shown, so `Retry` takes one click. The popover's install never opens
+or focuses Settings, shows no dialog and asks nothing about running jobs. agt
+starts each job's runner in its own session (`fsutil.spawn_detached`), so the
+restart doesn't end it. The relaunched app's runtime cleanup keeps each live
+job's pinned runtime. `tests/test_app_restart.py` and install.rs's
+`restart_cleanup_keeps_a_live_jobs_pinned_runtime_and_removes_the_rest` check
+both.
+
+`getLoginCommand(runtime, account)` returns the quoted login command without
+opening Terminal or creating a handoff file. Rust validates the account and
+formats the command, including the private start folder in test builds.
+`loginAccount` and Settings' `accountsLogin` return
+`{status:"opened"|"terminal_failed", copy_command:string}` using that same
+formatter. Invalid accounts reject. A failed Terminal open removes the unused
+handoff; the row shows `Couldn't open Terminal.` and `Copy command`, which
+changes to `Copied` on success. `copyText(text)` writes only to the pasteboard.
+Logged-out popover rows show the copy icon on hover and `:focus-within`. It is
+the third roving part after the row and login action, named
+`Copy login command for <account>`. Copying cross-fades the icon to a check
+over `--cross-fade-time`, holds for `--copied-delay`, and announces `Copied`.
 
 `get_snapshot` returns `{ usage, error, reading, generation, fetched_at,
 update_version }`; timestamps are Unix seconds. `usage` is the schema-1 JSON
@@ -514,6 +588,44 @@ after a successful, nonsuperseded read, once per generation. Animate meters
 only on this event. `popover-status` carries loading/error/update state, with
 the last snapshot; it does not indicate a new usage measurement. Subscribe
 before fetching the initial snapshot, and reject older generations.
+
+`account_checks.rs` owns one 600-second throttle, retained result and in-flight
+check per `(runtime, account)` across both windows. `getAccountChecks()`
+(`get_account_checks`, granted to both windows) and `account-checks-status`
+return full arrays of `{runtime, account, phase, result}`. Phases are `idle`,
+`checking`, `complete` and `failed`; `result` is null before the first result,
+then `{account, logged_in, checked_at, error}`. A running check retains its
+previous result. Process failures also become failed snapshots with an error.
+Subscribe before reading the initial array; an event received during that read
+wins over the initial response.
+
+Cached account-list reads seed the controller from `login_check.checked_at`;
+they never start checks. Native popover opening (`native::show_from`), including
+reopening after Terminal, requests due checks for enabled accounts once per open.
+Its list read is separate from Settings' list read. If it fails, known usage
+accounts still get due checks; before the first snapshot, a usage read supplies
+those accounts. Throttled checks cause no usage refresh; completed work refreshes
+usage once for the batch. Usage polling, Refresh and Settings opening never
+trigger checks.
+`checkAccount` is the popover Retry path: it bypasses the throttle only after
+a failed check and joins an active check. `accountsCheck` uses the same
+controller, joins active work and otherwise always starts a new check. Settings keeps
+its existing Check button and busy behaviour; completed results are shared
+without adding the popover's automatic checking or Retry UI to Settings.
+
+The popover shows spinner plus `Checking…` during a check and while awaiting
+the first check of an unknown account. Failed checks show a ring and Retry;
+a successful `logged_in:false` result shows Log in… and never Retry. A missing
+provider binary is a failed check, with Retry. There is no popover Check button.
+
+Popover command lookup and clipboard failures cross-fade the copy icon to an
+alert for `--copied-delay`, with `Couldn't copy.` as its tooltip and live
+announcement. The detail's Copy command button says `Couldn't copy` for the
+same hold; either control retries on press. Settings retains its error reporting.
+A rejected login opens the active row's detail with `Couldn't start login.`;
+the raw error is its tooltip and Log in… describes that line. It clears on the
+next press, close or row removal. Neither failure changes the header or trouble
+row, and focus stays on the pressed control.
 
 Automatic checks call Rust's `set_pending_update` to update both slots without
 an alert. Manual checks open a Settings sheet immediately. `open_settings`
@@ -542,14 +654,26 @@ The popover groups accounts under provider headings. `logic/rows.js` owns
 the pure row/VoiceOver text and footer copy; React keys rows by
 `runtime:name`, so refreshes keep their DOM nodes and keyboard focus. The
 account list is one Tab stop: ↑/↓ and Home/End move between rows, ←/→ between
-a row's Settings target and its inline button (focused first). ⌘R refreshes,
-⌘, opens Settings, ⌘Q quits; Escape closes the More menu, otherwise hides the
-tooltip and the popover. These listen on `document`, because focus starts on
-body. Contracts the native checks read: `#accounts .account-row` (one per
+a row's detail target and its inline button (focused first). Click, Return or
+Space toggles detail; only one panel is open, and hiding the popover closes it.
+The detail's Settings button opens that account. Closed detail is inert and
+hidden from screen readers. ⌘R refreshes,
+⌘, opens Settings, ⌘Q quits. AppKit consumes Escape while More is open;
+otherwise Escape hides the tooltip and the popover. The webview shortcuts
+listen on `document`, because focus starts on body. Contracts the native
+checks read: `#accounts .account-row` (one per
 account; provider headings are not rows), `#accounts .row-link` labels,
 `#status` and `body[data-active]`. Account strings are React text, never
 markup. `motion.css` owns every duration, curve and visual delay; only
-`usage-updated` slides the gauge and rolls digits.
+fresh `usage-updated` values spring changed bars and roll changed digits.
+Existing rows never stagger on refresh; new rows enter 24 ms apart, with the
+delay capped at eight rows. Refresh shows a check for 1500 ms after success.
+The summary counts solid marks through one readiness rule, including running
+accounts with spare execution slots. Full accounts keep a waiting half disc.
+Quota slots name their window and show a countdown; stale slots show compact
+ages such as `2h ago`, also used by shared Settings rows. Read errors appear
+under the header with Retry and the retained data's age; retained rows dim.
+Popover rows have no manual Check button. Settings keeps its Check button.
 
 The popover reports intrinsic content height through a `ResizeObserver`,
 coalesced in a microtask so reporting also works while the retained panel's
@@ -735,12 +859,14 @@ installation ownership when the snapshot does not report it.
 
 The Rust updater checks at launch and after 24 hours; a suspended Mac's missed
 checks coalesce, as do overlapping automatic/manual requests. Automatic results
-wait in the popover's last row and tray menu. An install problem keeps priority
-in the popover. `Check for Updates…` is in the popover's ⋯ menu, the native tray
-menu and General. A manual check opens a sheet; only choosing the update starts
-the download. Download/install failures offer Retry. Key/signature failures
-default to `Open Releases Page`. The download has a progress sheet, and the app
-restarts after installation. Every step is in the
+wait in the popover's update row and tray menu. The popover's `Install and
+Restart` installs in one click, without opening Settings
+([Popover integration contract](#popover-integration-contract)). An install
+problem keeps priority in the popover. `Check for Updates…` is in the popover's
+⋯ menu, the native tray menu and General. A manual check opens a sheet; only
+choosing the update starts the download. Download/install failures offer Retry.
+Key/signature failures default to `Open Releases Page`. Settings' download has
+a progress sheet, and the app restarts after installation. Every step is in the
 [diagnostic log](#diagnostic-log). Test builds (the `.test` identifier) check no
 feed; a manual check says so and offers the Releases page. The new runtime is installed on first launch and
 the bundled `agt update --no-package` succeeds once per version, recorded under
@@ -939,10 +1065,10 @@ operations; no new command is granted to the popover:
 | `rolesShow(workspace = null)` | Schema-1 roles, allowed model/effort choices and per-key `sources`; no provider discovery |
 | `rolesConfig({edit,level,workspace?,userSaid?})` | Tagged edit below; returns agt's role report or structured refusal |
 | `accountsList()` | All runtimes, canonical names, `can_toggle`, `toggle_reason`, `found` and auth |
-| `accountsCheck(runtime,account)` | A bounded check of a listed account; also refreshes usage |
+| `accountsCheck(runtime,account)` | A bounded, shared and throttled check of a listed account; also refreshes usage |
 | `accountsAddCheck(runtime,account)` | Side-effect-free `accounts add --check`; `ok:false` includes the name error |
 | `accountsToggle(runtime,account,enabled)` | Enable/disable a listed, togglable account at User |
-| `accountsLogin(runtime,account)` | Login for a listed account through the private `TerminalLauncher` handoff |
+| `accountsLogin(runtime,account)` | Login for a listed account through the private `TerminalLauncher` handoff; shares the popover's structured login result and copy fallback |
 | `accountsAdd(runtime,account)` | Rechecks the name immediately, then hands Add account to Terminal |
 | `shareList()` / `shareStatus()` | Read-only listing and status (exit 1 with attention remains data) |
 | `shareKind(kind,enabled)` | `kinds add/remove` for `mcp` or `hooks`; preserves the result report, including partial failures |
@@ -1090,6 +1216,14 @@ app's typed decoder. Other kinds use the fixture stems in `models.rs`'s
 `FIXTURES` inventory, such as `config-show`, `accounts-list` and `roles-show`.
 Success prints one `OK:` line; decode failures print the fixture name and field
 path and exit 1. Folder checks use the same decoder and error format.
+
+The shared account-list request is `agt accounts list --cached-only --json`.
+It reads stored auth and usage without login probes or a Codex usage refresh.
+Each account's nullable `login_check` retains the last explicit check's
+`{account, logged_in, checked_at, error}`, including failures and stale timestamps.
+`accounts-list-cached.json` is produced with never-checked, failed and stale
+results and decoded by the Rust model tests. The usage and explicit-check
+contracts stay unchanged.
 
 Step 9 measurement on this Command Line Tools-only Apple Silicon Mac (0.17.0,
 CPython 3.13.18+20261026, ad hoc app and throwaway-signed updater):

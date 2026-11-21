@@ -18,12 +18,8 @@
           "can_toggle": false,
           "toggle_reason": "primary is a reserved name; this is the provider's own login",
           "takes_unpinned_jobs": true,
-          "auth": {
-            "loggedIn": true,
-            "authMethod": "claude.ai",
-            "subscriptionType": null,
-            "configDirectory": null
-          },
+          "login_check": null,
+          "auth": null,
           "held_back": false,
           "busy_slots": 0,
           "running_jobs": 0,
@@ -39,12 +35,8 @@
           "can_toggle": true,
           "toggle_reason": null,
           "takes_unpinned_jobs": true,
-          "auth": {
-            "loggedIn": false,
-            "authMethod": "claude.ai",
-            "subscriptionType": null,
-            "configDirectory": null
-          },
+          "login_check": null,
+          "auth": null,
           "held_back": false,
           "busy_slots": 0,
           "running_jobs": 0,
@@ -73,11 +65,8 @@
           "enabled": true,
           "can_toggle": false,
           "toggle_reason": "primary is a reserved name; this is the provider's own login",
-          "auth": {
-            "loggedIn": false,
-            "authMethod": null,
-            "detail": "Not logged in"
-          },
+          "login_check": null,
+          "auth": null,
           "held_back": false,
           "busy_slots": 0,
           "running_jobs": 0,
@@ -105,10 +94,8 @@
           "enabled": true,
           "can_toggle": false,
           "toggle_reason": "primary is a reserved name; this is the provider's own login",
-          "auth": {
-            "loggedIn": false,
-            "error": "You are not logged into Antigravity"
-          },
+          "login_check": null,
+          "auth": null,
           "held_back": false,
           "busy_slots": 0,
           "running_jobs": 0,
@@ -136,11 +123,8 @@
           "enabled": true,
           "can_toggle": false,
           "toggle_reason": "primary is a reserved name; this is the provider's own login",
-          "auth": {
-            "loggedIn": true,
-            "authMethod": "BuilderId",
-            "detail": "{\"accountType\": \"BuilderId\"}"
-          },
+          "login_check": null,
+          "auth": null,
           "held_back": false,
           "busy_slots": 0,
           "running_jobs": 0,

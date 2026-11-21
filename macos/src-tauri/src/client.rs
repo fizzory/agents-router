@@ -682,11 +682,32 @@ mod tests {
         )
         .unwrap();
         fs::set_permissions(&launcher, fs::Permissions::from_mode(0o700)).unwrap();
-        let mut client = AgtClient::new(launcher.clone(), None).unwrap();
-        // Allow macOS executable validation on a freshly written script before timing out.
-        Arc::get_mut(&mut client.inner).unwrap().deadline = Duration::from_secs(2);
+        let child_env = ["HOME", "AGT_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]
+            .into_iter()
+            .map(|name| (name, Some(dir.0.clone().into_os_string())))
+            .collect();
+        let client = AgtClient::with_env(launcher.clone(), child_env, Some(dir.0.clone())).unwrap();
         let request = Request::new(CommandKind::AccountsList, Some(dir.0.clone()));
-        let reply = client.read(request.clone()).await.unwrap().await.unwrap();
+        let receiver = client.read(request.clone()).await.unwrap();
+        // macOS can validate a new script for longer than a short test timeout.
+        // Wait for the real child to start, then expire its timer with a test
+        // clock; no elapsed-time assumption stands in for child startup.
+        let pid = timeout(Duration::from_secs(15), async {
+            loop {
+                if let Ok(pid) = fs::read_to_string(dir.0.join("child-pid")) {
+                    if !pid.trim().is_empty() {
+                        break pid;
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("fake timeout child started");
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(31)).await;
+        let reply = receiver.await.unwrap();
+        tokio::time::resume();
         assert!(matches!(
             reply,
             ReadReply::Fresh {
@@ -694,8 +715,7 @@ mod tests {
                 ..
             }
         ));
-        let pid = fs::read_to_string(dir.0.join("child-pid")).unwrap();
-        timeout(Duration::from_secs(3), async {
+        timeout(Duration::from_secs(15), async {
             loop {
                 let alive = Command::new("/bin/kill")
                     .args(["-0", pid.trim()])
@@ -707,7 +727,7 @@ mod tests {
                 if !alive {
                     break;
                 }
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                tokio::task::yield_now().await;
             }
         })
         .await

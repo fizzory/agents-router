@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from agents_router import accounts, health_view, jobs, limits, messages, plans, profiles, quota, usage_view
+from agents_router import account_check, accounts, health_view, jobs, limits, messages, plans, profiles, quota, usage_view
 from agents_router.config import load_config, session_folder, set_session
 from agents_router.hosts import detect_host
 from agents_router.runtimes import AVAILABLE as RUNTIMES, get_runtime
@@ -452,8 +452,9 @@ def runtime_limits(config: Any) -> dict[str, Any]:
     return data
 
 
-def account_report(runtime_name: str, host: str | None = None, *, command: list[str] | None = None) -> dict[str, Any]:
-    loaded = load_config()
+def account_report(runtime_name: str, host: str | None = None, *, command: list[str] | None = None,
+                   cached_only: bool = False) -> dict[str, Any]:
+    loaded = load_config(cached_only=cached_only)
     if host is not None:
         set_session(loaded, session_folder(host))
     config = loaded.runtime(runtime_name)
@@ -468,7 +469,7 @@ def account_report(runtime_name: str, host: str | None = None, *, command: list[
         "limits": runtime_limits(config),
         "accounts": [],
     }
-    if runtime_name == "codex":
+    if runtime_name == "codex" and not cached_only:
         usage_view.refresh_codex(load_config())
     report["limits"] = runtime_limits(config)
     counts = limits.count_active()
@@ -502,7 +503,11 @@ def account_report(runtime_name: str, host: str | None = None, *, command: list[
             entry["same_login_as"] = same
         if workers is not None and not config.is_session(account):
             entry["takes_unpinned_jobs"] = account.name in workers
-        if binary:
+        entry["login_check"] = account_check.last_check(config, account)
+        if cached_only:
+            logged_in = account_check.cached(config, account)
+            entry["auth"] = {"loggedIn": logged_in} if logged_in is not None else None
+        elif binary:
             entry["auth"] = runtime.auth_status(config, account)
         until = accounts.cooldown_until(record, now)
         if until:

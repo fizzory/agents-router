@@ -3,20 +3,30 @@
 .icon { display: block; width: var(--icon); height: var(--icon); flex: 0 0 var(--icon); stroke-width: 1.75; }
 
 /* Button */
-.button { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); font: inherit; color: inherit; white-space: nowrap; border-radius: var(--r-m); cursor: default; transition: background-color var(--hover-time) var(--ease-out); }
+.button { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); font: inherit; color: inherit; white-space: nowrap; border-radius: var(--sq-s); corner-shape: squircle; cursor: default; transition: background-color var(--hover-time) var(--ease-out); }
 .button:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
 .button[aria-disabled="true"] { color: var(--ink-muted); }
 /* Push and default buttons look 22px tall; the ::after gives them a 24px hit target. */
-.button-push, .button-default { position: relative; min-width: var(--hit); min-height: 22px; padding: 0 var(--space-4); font: var(--type-body); border: 1px solid var(--edge); background: var(--ground-raised); }
+.button-push, .button-default { position: relative; min-width: var(--hit); min-height: 22px; padding: 0 var(--space-4); font: var(--type-body); border: 1px solid var(--edge); background: var(--fill-control); }
 .button-push::after, .button-default::after { content: ""; position: absolute; inset: -2px -1px; }
 .button-default { border-color: transparent; background: var(--accent-fill); color: white; }
 .button-text { min-height: var(--hit); padding: 0 var(--space-2); font: var(--type-row); border: 0; background: transparent; color: var(--accent-text); }
 .button-icon { width: var(--hit); height: var(--hit); padding: 0; border: 0; background: transparent; }
-.button-icon:hover { background: var(--hover-tint); }
 /* Inline buttons look 20px tall; the ::after gives them a 24px hit target. */
-.button-inline { position: relative; height: 20px; padding: 0 var(--space-3); font: var(--type-small); border: 1px solid var(--edge); background: var(--ground-raised); }
+.button-inline { position: relative; height: 20px; padding: 0 var(--space-3); font: var(--type-small); border: 1px solid var(--edge); background: var(--fill-control); }
 .button-inline::after { content: ""; position: absolute; inset: -3px 0; }
 .button-inline .icon { width: 11px; height: 11px; flex-basis: 11px; }
+.button:not(.button-default):not(:disabled):not([aria-disabled="true"]):hover { background: var(--fill-hover); }
+.button:not(.button-default):not(:disabled):not([aria-disabled="true"]):active { background: var(--fill-press); }
+
+/* Copy feedback keeps the glyphs in place for success and failure cross-fades. */
+.copy-feedback { display: grid; }
+.copy-feedback > .icon { grid-area: 1 / 1; transition: opacity var(--cross-fade-time) var(--ease-out); }
+.copy-check, .copy-alert, .copy-feedback[data-copied="true"] .copy-glyph,
+.copy-feedback[data-failed="true"] .copy-glyph { opacity: 0; }
+.copy-feedback[data-copied="true"] .copy-check { opacity: 1; }
+.copy-feedback[data-failed="true"] .copy-alert { opacity: 1; }
+.login-failure { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 
 /* Turning icons: refresh and the inline spinner */
 .is-turning { animation: icon-turn var(--turn-time) var(--turn-curve) infinite; }
@@ -29,6 +39,15 @@
 .status-dot[data-state="busy"], .status-dot[data-state="recovering"], .status-dot[data-state="cooling"] { background: var(--signal-warn); }
 .status-dot[data-state="unknown"], .status-dot[data-state="off"] { background: transparent; border: 1px solid var(--ink-muted); }
 .status-dot[data-state="off"] { opacity: .5; }
+.status-dot[data-shape] { color: var(--ink-muted); }
+.status-dot[data-state="ok"][data-shape] { color: var(--signal-ok); }
+.status-dot:is([data-state="busy"], [data-state="cooling"], [data-state="recovering"])[data-shape] { color: var(--signal-warn); }
+.status-dot:is([data-state="logged_out"], [data-state="unhealthy"])[data-shape] { color: var(--signal-bad); }
+.status-dot[data-shape="solid"] { border: 0; background: currentColor; }
+.status-dot[data-shape="half"] { position: relative; border: 1px solid currentColor; background: transparent; }
+.status-dot[data-shape="half"]::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: currentColor; clip-path: inset(0 50% 0 0); }
+.status-dot[data-shape="ring"] { border: 2px solid currentColor; background: transparent; }
+.status-dot[data-shape="hollow"] { border: 1px solid currentColor; background: transparent; }
 
 /* Usage gauge: 56 × 10, two 4px bars with a 2px gap */
 .usage-gauge { display: flex; flex-direction: column; gap: 2px; width: var(--gauge-width); flex: 0 0 var(--gauge-width); }
@@ -38,13 +57,13 @@
 .gauge-bar.is-main .gauge-fill { background: var(--gauge-main); }
 .gauge-bar.is-warn .gauge-fill { background: var(--signal-warn); }
 .gauge-bar.is-stale { opacity: .5; }
-.usage-gauge.is-fresh .gauge-fill { transition: transform var(--travel-time) var(--travel-curve) calc(var(--i, 0) * var(--stagger-step)); }
+.gauge-bar.is-changing .gauge-fill { transition: transform var(--t-base) var(--spring-settle); }
 
 /* Rolling figure */
-.rolling-figure { position: relative; display: inline-block; white-space: pre; }
+.rolling-figure { position: relative; display: inline-block; font: var(--type-figure); font-variant-numeric: tabular-nums; white-space: pre; }
 .figure-digit { display: inline-block; width: 1ch; height: 14px; overflow: hidden; vertical-align: top; }
 .figure-strip, .figure-strip > span { display: block; height: 14px; }
-.figure-strip { animation: digit-roll var(--travel-time) var(--travel-curve) both; animation-delay: calc(var(--i, 0) * var(--stagger-step)); }
+.figure-strip { animation: digit-roll var(--travel-time) var(--travel-curve) both; }
 .figure-before { position: absolute; inset: 0; animation: number-out var(--cross-fade-time) var(--ease-out) both; }
 .figure-after { animation: number-in var(--cross-fade-time) var(--ease-out) both; }
 
@@ -53,10 +72,11 @@
 .group-heading-count { font-weight: 400; }
 
 /* Account row: 8 | dot 8 | 6 | name | 8 | gauge 56 | 8 | slot 84 | 8 */
-.account-row { position: relative; display: flex; align-items: center; height: 24px; padding: 0 var(--space-4); border-radius: var(--r-m); white-space: nowrap; transition: background-color var(--hover-time) var(--ease-out); }
+.account-row { position: relative; display: flex; align-items: center; height: 28px; padding: 0 var(--space-4); border-radius: var(--sq-m); corner-shape: squircle; white-space: nowrap; transition: background-color var(--hover-time) var(--ease-out); }
 .account-row:hover, .account-row:focus-within { background: var(--hover-tint); }
-.account-row.row-enter { animation: number-in var(--cross-fade-time) var(--ease-out) both; animation-delay: calc(var(--i, 0) * var(--stagger-step)); }
-.row-link { position: absolute; inset: 0; z-index: 1; width: 100%; padding: 0; border: 0; border-radius: var(--r-m); background: transparent; cursor: default; }
+.account-row:has(.row-link:active) { background: var(--fill-press); }
+.account-row.row-enter { animation: panel-in var(--cross-fade-time) var(--ease-out) both; animation-delay: calc(var(--i, 0) * var(--stagger-step)); }
+.row-link { position: absolute; inset: 0; z-index: 1; width: 100%; padding: 0; border: 0; border-radius: var(--sq-m); corner-shape: squircle; background: transparent; cursor: default; }
 /* Inset ring: the scrolling list must never clip it. */
 .row-link:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
 .account-row .status-dot { margin-right: var(--space-3); }
@@ -72,10 +92,14 @@
 .row-action { z-index: 2; }
 
 /* Menu */
-.menu { position: absolute; z-index: 10; min-width: 200px; padding: var(--space-2); border: 1px solid var(--hairline); border-radius: var(--r-m); background: var(--ground-raised); box-shadow: 0 6px 18px #0003; }
+.menu { position: absolute; z-index: 10; min-width: 200px; }
+.menu-surface { padding: var(--space-2); border: 1px solid var(--hairline); border-radius: var(--sq-l); corner-shape: squircle; background: var(--ground-raised); box-shadow: var(--shadow-float); }
 .menu:not([hidden]) { animation: number-in var(--hover-time) var(--ease-out) both; }
-.menu-item { display: flex; align-items: center; gap: var(--space-2); width: 100%; height: var(--hit); padding: 0 var(--space-4) 0 var(--space-1); border: 0; border-radius: var(--r-s); background: transparent; color: inherit; font: var(--type-body); text-align: left; }
-.menu-item:is(:hover, :focus) { outline: none; background: var(--accent-fill); color: white; }
+.menu-item { display: flex; align-items: center; gap: var(--space-2); width: 100%; height: var(--hit); padding: 0 var(--space-4) 0 var(--space-1); border: 0; border-radius: calc(var(--sq-l) - var(--space-2)); corner-shape: squircle; background: transparent; color: inherit; font: var(--type-body); text-align: left; }
+.menu-item:is(:hover, :focus) { outline: none; background: var(--fill-hover); }
+/* Keep the ring inside the item, clear of the menu's continuous-corner mask. */
+.menu-item:focus-visible { outline: var(--focus-ring); outline-color: var(--ink); outline-offset: -2px; }
+.menu-item:not([aria-disabled="true"]):active { background: var(--fill-press); }
 .menu-item[aria-disabled="true"] { color: var(--ink-muted); }
 .menu-check { width: 12px; flex: 0 0 12px; text-align: center; }
 .menu-label { flex: 1 1 auto; }
@@ -85,12 +109,20 @@
 .menu-heading { padding: var(--space-1) var(--space-4); font: var(--type-small); font-weight: 600; color: var(--ink-muted); }
 
 /* Tooltip: line breaks kept in both windows */
-.tooltip { position: fixed; z-index: 20; max-width: min(280px, calc(100vw - 12px)); padding: var(--space-2) var(--space-3); font: var(--type-small); white-space: pre-line; color: var(--ink); background: var(--ground-raised); border: 1px solid var(--hairline); border-radius: var(--r-m); box-shadow: 0 2px 8px #0002; pointer-events: none; opacity: 0; transition: opacity var(--tooltip-time) var(--ease-out); }
+.tooltip { position: fixed; z-index: 20; max-width: min(280px, calc(100vw - 12px)); padding: var(--space-2) var(--space-3); font: var(--type-small); white-space: pre-line; color: var(--ink); background: var(--ground-raised); border: 1px solid var(--hairline); border-radius: var(--sq-l); corner-shape: squircle; box-shadow: var(--shadow-float); pointer-events: none; opacity: 0; transition: opacity var(--tooltip-time) var(--ease-out); }
 .tooltip.visible { opacity: 1; }
+
+/* Only floating sheets and HTML menus get the continuous-corner mask on WebKit.
+   Keep the shadow on the unmasked wrapper. The popover keeps its native shadow. */
+@supports not (corner-shape: squircle) {
+  .menu { filter: drop-shadow(var(--shadow-ambient)) drop-shadow(var(--shadow-lift)); }
+  .menu-surface { box-shadow: none; -webkit-mask-box-image: url("../../assets/squircle-l.svg") 18.36 fill / 18.36px / 0 stretch; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .is-turning { animation: none; }
   .turning-icon.is-busy { opacity: .55; }
-  .usage-gauge.is-fresh .gauge-fill { transition: none; }
+  .gauge-bar.is-changing .gauge-fill { transition: none; }
+  .account-row.row-enter { animation-name: number-in; }
   .figure-strip { animation: none; transform: translateY(-14px); }
 }

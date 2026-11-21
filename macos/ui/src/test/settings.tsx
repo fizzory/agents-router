@@ -22,7 +22,7 @@ const copy = <T,>(value: T): T => structuredClone(value);
 export const envelope = (generation = 1): Envelope => ({ usage: copy(usage), error: null, reading: false, generation, update_version: null });
 
 type Handler = (payload: never) => void;
-const EVENTS = ['onUsageUpdated', 'onSettingsStatus', 'onSettingsTarget', 'onSettingsHistory', 'onSettingsEdit', 'onPaneMenu', 'onInstallStatus', 'onUpdateStatus'] as const;
+const EVENTS = ['onAccountChecksStatus', 'onUsageUpdated', 'onSettingsStatus', 'onSettingsTarget', 'onSettingsHistory', 'onSettingsEdit', 'onPaneMenu', 'onInstallStatus', 'onUpdateStatus'] as const;
 type EventName = typeof EVENTS[number];
 
 export interface FakeOptions {
@@ -42,6 +42,7 @@ export function fakeSettingsApi(options: FakeOptions = {}) {
     return Promise.resolve(() => { unlistened.push(name); handlers.set(name, (handlers.get(name) ?? []).filter((item) => item !== handler)); });
   });
   const api = {
+    getAccountChecks: vi.fn(() => Promise.resolve([])),
     getSnapshot: vi.fn(() => Promise.resolve(envelope())),
     checkForUpdates: vi.fn(done),
     configShow: vi.fn((_workspace: string | null) => Promise.resolve(copy(options.config ?? configShow))),
@@ -54,7 +55,7 @@ export function fakeSettingsApi(options: FakeOptions = {}) {
     accountsCheck: vi.fn(done),
     accountsAddCheck: vi.fn((_runtime: string, account: string) => Promise.resolve({ ok: true, account, runtime: 'claude' } as unknown)),
     accountsToggle: vi.fn((_runtime: string, account: string, enabled: boolean) => Promise.resolve({ ok: true, account, enabled } as unknown)),
-    accountsLogin: vi.fn(done),
+    accountsLogin: vi.fn(() => Promise.resolve({ status: 'opened', copy_command: 'fake login command' })),
     accountsAdd: vi.fn((_runtime: string, _account: string) => Promise.resolve(undefined as unknown)),
     shareList: vi.fn(() => Promise.resolve(copy(shareList) as unknown)),
     shareStatus: vi.fn(() => Promise.resolve(copy(shareStatus) as unknown)),

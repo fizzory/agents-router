@@ -103,6 +103,7 @@ export function Menu({ id, label, open, entries, trigger, onClose, className, an
   return (
     <div ref={node} id={id} className={['menu', anchored ? 'is-anchored' : '', className ?? ''].filter(Boolean).join(' ')} role="menu" aria-label={label}
       hidden={!open} onKeyDown={keyDown}>
+      <div className="menu-surface">
       {entries.map((entry, index) => {
         if (entry.kind === 'separator') return <hr key={index} role="separator" className="menu-separator" />;
         if (entry.kind === 'heading') return <div key={index} role="presentation" className="menu-heading">{entry.label}</div>;
@@ -124,6 +125,7 @@ export function Menu({ id, label, open, entries, trigger, onClose, className, an
           </button>
         );
       })}
+      </div>
     </div>
   );
 }

@@ -1134,6 +1134,15 @@ class RoleSetupTests(ProfileBase):
             self.assertEqual(self.role_agents(folder), [])
         self.assertNotIn("Roles:", out)
 
+    def test_S1a_roles_off_answers_leave_out_skip_roles(self):
+        off = self.proposal("--roles", "off")["roles"]  # first, so a change to the shared answers shows below
+        self.assertEqual(off["state"], "off")
+        self.assertEqual(list(off["answers"]), ["Approve", "Change a role", "Cancel"])
+        proposed = self.proposal()["roles"]
+        self.assertEqual(proposed["state"], "propose")
+        self.assertEqual(list(proposed["answers"]), ["Approve", "Change a role", "Skip roles", "Cancel"])
+        self.assertEqual(off["answers"], {name: how for name, how in proposed["answers"].items() if name != "Skip roles"})
+
     def test_S1b_two_builders_asks_order(self):
         proposal = self.proposal("--role", "builder=codex,antigravity")
         asks = proposal["roles"]["needs_order"]

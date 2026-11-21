@@ -1432,6 +1432,106 @@ mod tests {
         let text = launcher(&release);
         assert!(!text.contains("AGT_EXCLUDE_HOMES") && !text.contains("export HOME"));
     }
+    /// A runner process that a test stops with SIGTERM and then waits for.
+    struct Runner(std::process::Child);
+    impl Runner {
+        fn stop(&mut self) {
+            if matches!(self.0.try_wait(), Ok(None)) {
+                unsafe { libc::kill(self.0.id() as libc::pid_t, libc::SIGTERM) };
+            }
+            self.0.wait().unwrap();
+        }
+    }
+    impl Drop for Runner {
+        fn drop(&mut self) {
+            self.stop();
+        }
+    }
+    /// The restart after an in-app update, half (b): the relaunched app's cleanup
+    /// asks this checkout's real `agt usage --json`. A job whose runner outlived the
+    /// old app keeps its pinned runtime; other old runtimes go, and the pinned one
+    /// goes only after its runner exits.
+    #[tokio::test]
+    async fn restart_cleanup_keeps_a_live_jobs_pinned_runtime_and_removes_the_rest() {
+        let root = crate::terminal::tests::Scratch::new("restart-cleanup");
+        let base = root.0.canonicalize().unwrap();
+        let paths = test_build_paths(&base);
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let python = std::process::Command::new("python3")
+            .args(["-c", "import sys; print(sys.executable)"])
+            .output()
+            .unwrap();
+        assert!(python.status.success(), "python3 is required");
+        let python = PathBuf::from(String::from_utf8(python.stdout).unwrap().trim());
+        let quote = |p: &Path| posix_quote(&p.to_string_lossy());
+        for version in ["0.1.0", "0.2.0", "0.3.0"] {
+            let runtime = paths.support.join("runtimes").join(version);
+            for name in [
+                "plugin/.claude-plugin/marketplace.json",
+                "plugin/hooks/hooks.json",
+            ] {
+                let path = runtime.join(name);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, "{}").unwrap();
+            }
+            fs::write(
+                runtime.join("plugin/.claude-plugin/plugin.json"),
+                format!("{{\"version\":\"{version}\"}}"),
+            )
+            .unwrap();
+            fs::write(runtime.join("agt-bundle.json"), serde_json::to_vec(&serde_json::json!({"schema_version":1,"source":"app","app_version":version,"runtime_version":version,"python_version":"3.13.0","plugin_path":"plugin"})).unwrap()).unwrap();
+            // This checkout's agt, with a PATH that holds none of the person's CLIs.
+            fs::create_dir_all(runtime.join("bin")).unwrap();
+            atomic_bytes(
+                &runtime.join("bin/python3"),
+                format!(
+                    "#!/bin/sh\n[ \"$1\" = -I ] && shift\nexport PATH=/usr/bin:/bin PYTHONPATH={}\nexec {} \"$@\"\n",
+                    quote(&repo.join("src")),
+                    quote(&python)
+                )
+                .as_bytes(),
+                0o755,
+            )
+            .unwrap();
+            manifest(&runtime).unwrap();
+        }
+        atomic_link(Path::new("runtimes/0.3.0"), &paths.support.join("current")).unwrap();
+        atomic_bytes(&paths.launcher(), launcher(&paths).as_bytes(), 0o755).unwrap();
+        // The job's record is an hour old, so only its live runner makes it count.
+        let mut runner = Runner(
+            std::process::Command::new("/bin/sleep")
+                .arg("600")
+                .spawn()
+                .unwrap(),
+        );
+        let pinned = paths.support.join("runtimes/0.2.0");
+        let job = paths.agt_home.join("jobs/survivor");
+        fs::create_dir_all(&job).unwrap();
+        let stale = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64() - 3600.0;
+        let doc = serde_json::json!({"job_id":"survivor","state":"running","runtime":"codex","account":null,"updated_at":stale,"created_at":stale,"runner_pid":runner.0.id(),"install_runtime":pinned});
+        for file in ["status.json", "spec.json"] {
+            fs::write(job.join(file), serde_json::to_vec(&doc).unwrap()).unwrap();
+        }
+        fs::write(job.join("runner.pid"), runner.0.id().to_string()).unwrap();
+        let report = usage(&paths).await.unwrap();
+        assert_eq!(
+            report["uninstall_blockers"][0]["job_id"], "survivor",
+            "{report}"
+        );
+        assert_eq!(
+            cleanup(&paths).await.unwrap(),
+            [paths.support.join("runtimes/0.1.0")]
+        );
+        assert!(pinned.is_dir());
+        assert_eq!(paths.current(), Some(paths.support.join("runtimes/0.3.0")));
+        runner.stop();
+        assert_eq!(cleanup(&paths).await.unwrap(), [pinned.clone()]);
+        assert_eq!(paths.current(), Some(paths.support.join("runtimes/0.3.0")));
+        assert!(paths.current().unwrap().is_dir());
+    }
     #[test]
     fn versions_and_disk_error() {
         assert_eq!(version_cmp("0.17", "0.16.99"), Ordering::Greater);

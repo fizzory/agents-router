@@ -1,4 +1,5 @@
 //! The explicit interactive-command exception: private, self-unlinking Terminal handoffs.
+use serde::Serialize;
 use std::{
     fs::{self, DirBuilder, OpenOptions},
     io::{self, Write},
@@ -48,6 +49,71 @@ pub struct Handoff {
     pub copy_command: String,
 }
 
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LoginStatus {
+    Opened,
+    TerminalFailed,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LoginResult {
+    pub status: LoginStatus,
+    pub copy_command: String,
+}
+
+struct FormattedCommand {
+    command: String,
+    start_line: String,
+    copy_command: String,
+}
+
+/// Pure formatting shared by the clipboard and the Terminal handoff. No files,
+/// environment reads or shell evaluation are needed to obtain the command.
+fn format_command(
+    launcher: &Path,
+    start: Option<&Path>,
+    action: &TerminalAction,
+) -> io::Result<FormattedCommand> {
+    let launcher = launcher
+        .to_str()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "launcher is not UTF-8"))?;
+    let start = start
+        .map(|folder| {
+            folder.to_str().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "start folder is not UTF-8")
+            })
+        })
+        .transpose()?;
+    let arguments = action.arguments();
+    if launcher.contains('\0')
+        || start.is_some_and(|s| s.contains('\0'))
+        || arguments.iter().any(|arg| arg.contains('\0'))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Terminal argument contains NUL",
+        ));
+    }
+    let command = std::iter::once(launcher)
+        .chain(arguments.iter().map(String::as_str))
+        .map(posix_quote)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let (start_line, copy_command) = match start {
+        Some(folder) => (
+            format!("cd -- {} || exit 1\n", posix_quote(folder)),
+            format!("cd {} && {command}", posix_quote(folder)),
+        ),
+        None => (String::new(), command.clone()),
+    };
+    Ok(FormattedCommand {
+        command,
+        start_line,
+        copy_command,
+    })
+}
+
 pub struct TerminalLauncher {
     launcher: PathBuf,
     directory: PathBuf,
@@ -80,27 +146,15 @@ impl TerminalLauncher {
         self.start = Some(folder);
         Ok(self)
     }
+    pub fn command(&self, action: &TerminalAction) -> io::Result<String> {
+        Ok(format_command(&self.launcher, self.start.as_deref(), action)?.copy_command)
+    }
     pub fn prepare(&self, action: &TerminalAction) -> io::Result<Handoff> {
-        let launcher = self
-            .launcher
-            .to_str()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "launcher is not UTF-8"))?;
-        let arguments = action.arguments();
-        let start = match &self.start {
-            Some(folder) => Some(folder.to_str().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "start folder is not UTF-8")
-            })?),
-            None => None,
-        };
-        if launcher.contains('\0')
-            || start.is_some_and(|s| s.contains('\0'))
-            || arguments.iter().any(|arg| arg.contains('\0'))
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Terminal argument contains NUL",
-            ));
-        }
+        let FormattedCommand {
+            command,
+            start_line: cd,
+            copy_command,
+        } = format_command(&self.launcher, self.start.as_deref(), action)?;
         match DirBuilder::new()
             .mode(0o700)
             .recursive(true)
@@ -117,18 +171,6 @@ impl TerminalLauncher {
                 "handoff directory must be private (0700) and not a symlink",
             ));
         }
-        let command = std::iter::once(launcher)
-            .chain(arguments.iter().map(String::as_str))
-            .map(posix_quote)
-            .collect::<Vec<_>>()
-            .join(" ");
-        let (cd, copy_command) = match start {
-            Some(folder) => (
-                format!("cd -- {} || exit 1\n", posix_quote(folder)),
-                format!("cd {} && {command}", posix_quote(folder)),
-            ),
-            None => (String::new(), command.clone()),
-        };
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -160,7 +202,10 @@ impl TerminalLauncher {
     /// Opening Terminal is a handoff, not proof of success. Refresh on app reactivation.
     /// If opening fails the caller can offer copy_command and should remove the unused file.
     pub async fn open(&self, handoff: &Handoff) -> io::Result<()> {
-        let result = Command::new("/usr/bin/open")
+        self.open_with(handoff, Path::new("/usr/bin/open")).await
+    }
+    async fn open_with(&self, handoff: &Handoff, opener: &Path) -> io::Result<()> {
+        let result = Command::new(opener)
             .args(["-b", "com.apple.Terminal"])
             .arg(&handoff.path)
             .stdin(std::process::Stdio::null())
@@ -179,6 +224,20 @@ impl TerminalLauncher {
                 })
             }
         }
+    }
+    pub async fn login(&self, action: &TerminalAction) -> io::Result<LoginResult> {
+        self.login_with(action, Path::new("/usr/bin/open")).await
+    }
+    async fn login_with(&self, action: &TerminalAction, opener: &Path) -> io::Result<LoginResult> {
+        let handoff = self.prepare(action)?;
+        let status = match self.open_with(&handoff, opener).await {
+            Ok(()) => LoginStatus::Opened,
+            Err(_) => LoginStatus::TerminalFailed,
+        };
+        Ok(LoginResult {
+            status,
+            copy_command: handoff.copy_command,
+        })
     }
     pub fn directory(&self) -> &Path {
         &self.directory
@@ -220,12 +279,28 @@ pub(crate) mod tests {
         fs::set_permissions(&launcher, fs::Permissions::from_mode(0o700)).unwrap();
         let terminal = TerminalLauncher::new(launcher, temp.0.join("private handoffs")).unwrap();
         let account = "a name's $(touch injected); `false`\nsecond line";
-        let handoff = terminal
-            .prepare(&TerminalAction::Login {
-                account: account.into(),
-                runtime: "claude".into(),
-            })
-            .unwrap();
+        let action = TerminalAction::Login {
+            account: account.into(),
+            runtime: "claude".into(),
+        };
+        let copy_command = terminal.command(&action).unwrap();
+        assert!(
+            !terminal.directory().exists(),
+            "copying must not create handoff files or directories"
+        );
+        let handoff = terminal.prepare(&action).unwrap();
+        assert_eq!(copy_command, handoff.copy_command);
+        assert!(std::process::Command::new("/bin/sh")
+            .args(["-c", &copy_command])
+            .env("HOME", &temp.0)
+            .current_dir(&temp.0)
+            .status()
+            .unwrap()
+            .success());
+        assert_eq!(
+            fs::read_to_string(&result).unwrap(),
+            format!("accounts\nlogin\n{account}\n--runtime\nclaude\n")
+        );
         assert_eq!(
             fs::metadata(&handoff.path).unwrap().permissions().mode() & 0o777,
             0o700
@@ -240,6 +315,7 @@ pub(crate) mod tests {
         );
         // Execute the generated file directly, with a fake launcher; never opens Terminal in a test.
         assert!(std::process::Command::new(&handoff.path)
+            .env("HOME", &temp.0)
             .current_dir(&temp.0)
             .status()
             .unwrap()
@@ -284,6 +360,10 @@ pub(crate) mod tests {
         assert!(!fs::read_to_string(&plain.path).unwrap().contains("cd "));
         let handoff = test.prepare(&TerminalAction::Setup).unwrap();
         assert_eq!(
+            test.command(&TerminalAction::Setup).unwrap(),
+            handoff.copy_command
+        );
+        assert_eq!(
             handoff.copy_command,
             format!(
                 "cd {} && {} 'setup'",
@@ -293,6 +373,19 @@ pub(crate) mod tests {
         );
         // Terminal opens in the person's own HOME; the handoff starts in the private one.
         assert!(std::process::Command::new(&handoff.path)
+            .env("HOME", &private)
+            .current_dir(&person)
+            .status()
+            .unwrap()
+            .success());
+        assert_eq!(
+            fs::read_to_string(&result).unwrap().trim_end(),
+            private.to_str().unwrap()
+        );
+        // The copied command has the same private start, even from another cwd.
+        assert!(std::process::Command::new("/bin/sh")
+            .args(["-c", &handoff.copy_command])
+            .env("HOME", &private)
             .current_dir(&person)
             .status()
             .unwrap()
@@ -320,5 +413,57 @@ pub(crate) mod tests {
             .unwrap()
             .prepare(&TerminalAction::Setup)
             .is_err());
+    }
+    #[test]
+    fn command_only_rejects_nul_without_creating_files() {
+        let temp = Scratch::new("command-only");
+        let terminal = TerminalLauncher::new(temp.0.join("agt"), temp.0.join("handoffs")).unwrap();
+        assert!(terminal
+            .command(&TerminalAction::Login {
+                account: "bad\0account".into(),
+                runtime: "claude".into()
+            })
+            .is_err());
+        assert!(!terminal.directory().exists());
+    }
+    #[tokio::test]
+    async fn failed_terminal_open_returns_copy_command_and_removes_unused_file() {
+        let temp = Scratch::new("failed-open");
+        let terminal = TerminalLauncher::new(temp.0.join("agt"), temp.0.join("handoffs")).unwrap();
+        let action = TerminalAction::Login {
+            account: "work".into(),
+            runtime: "claude".into(),
+        };
+        let fake = temp.0.join("fake-open");
+        fs::write(&fake, "#!/bin/sh\nexit 1\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+        // Both spawn failure and a nonzero exit remove the unused handoff.
+        for opener in [temp.0.join("missing-open"), fake] {
+            let result = terminal.login_with(&action, &opener).await.unwrap();
+            assert_eq!(result.status, LoginStatus::TerminalFailed);
+            assert_eq!(result.copy_command, terminal.command(&action).unwrap());
+            assert_eq!(fs::read_dir(terminal.directory()).unwrap().count(), 0);
+            assert_eq!(
+                serde_json::to_value(result).unwrap()["status"],
+                "terminal_failed"
+            );
+        }
+    }
+    #[tokio::test]
+    async fn opened_terminal_returns_the_same_command_and_keeps_its_handoff() {
+        let temp = Scratch::new("opened");
+        let terminal = TerminalLauncher::new(temp.0.join("agt"), temp.0.join("handoffs")).unwrap();
+        let fake = temp.0.join("fake-open");
+        fs::write(&fake, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+        let action = TerminalAction::Login {
+            account: "work".into(),
+            runtime: "codex".into(),
+        };
+        let result = terminal.login_with(&action, &fake).await.unwrap();
+        assert_eq!(result.status, LoginStatus::Opened);
+        assert_eq!(result.copy_command, terminal.command(&action).unwrap());
+        assert_eq!(fs::read_dir(terminal.directory()).unwrap().count(), 1);
+        assert_eq!(serde_json::to_value(result).unwrap()["status"], "opened");
     }
 }

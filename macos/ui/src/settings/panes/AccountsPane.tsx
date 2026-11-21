@@ -2,7 +2,8 @@
 // enable switch or a Primary/Discovered badge, and an always-visible ⋯ for the
 // native menu. Add account… stays under the list in every state. Fresh usage
 // slides the bars and rolls the digits as in the popover; reduced motion snaps.
-import { AccountRow, Button, GroupHeading, Icon, InlineMessage, PaneState, Switch, useFlash, type RowModel } from '../../shared';
+import { useState } from 'react';
+import { AccountRow, Button, CopyButton, GroupHeading, Icon, InlineMessage, PaneState, Switch, useFlash, type RowModel } from '../../shared';
 import { useSettings } from '../context';
 import { accountMatches, type AccountModel } from '../model';
 
@@ -34,14 +35,19 @@ function SettingsAccount({ model, index, animate }: { model: AccountModel; index
   const { api, busyKey } = settings;
   const flash = useFlash<HTMLLIElement>(model.key);
   const { account } = model;
+  const [loginFailure, setLoginFailure] = useState<string | null>(null);
+  const login = async () => {
+    const result = await api.accountsLogin(model.runtime, account.name);
+    setLoginFailure(result.status === 'terminal_failed' ? result.copy_command : null);
+  };
   const message = settings.messages.get(model.key);
   const toggle = () => settings.mutate(model.key, 'accounts', () => api.accountsToggle(model.runtime, account.name, !account.enabled));
   const menu = (event: React.MouseEvent | null) => {
-    const actions: Record<string, () => unknown> = { login: () => api.accountsLogin(model.runtime, account.name) };
+    const actions: Record<string, () => unknown> = { login };
     if (account.can_toggle) actions[account.enabled ? 'disable' : 'enable'] = toggle;
     settings.showMenu(event, actions);
   };
-  const action = (target: RowModel) => (target.action === 'login' ? api.accountsLogin(target.runtime, account.name)
+  const action = (target: RowModel) => (target.action === 'login' ? login()
     : settings.mutate(model.key, 'accounts', () => api.accountsCheck(target.runtime, account.name))).catch(settings.report);
   const badge = model.toggle.kind === 'badge' ? model.toggle : null;
   const trailing = (
@@ -66,6 +72,9 @@ function SettingsAccount({ model, index, animate }: { model: AccountModel; index
     <>
       {model.reason && model.state ? <span className="account-reason">{model.reason}</span> : null}
       {message ? <InlineMessage id={`${model.key}-error`} tone={message.tone}>{message.text}</InlineMessage> : null}
+      {loginFailure && <InlineMessage tone="error"><span className="login-failure">
+        <span>Couldn't open Terminal.</span><CopyButton key={loginFailure} variant="text" value={loginFailure} copy={api.copyText} onError={settings.report} />
+      </span></InlineMessage>}
     </>
   );
   return (
