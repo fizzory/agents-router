@@ -28,7 +28,8 @@ INSTRUCTIONS = (
 
 WORKER_INSTRUCTIONS = (
     "Tools to talk to the main session that started you: send progress notes, ask a blocking question "
-    "when you can't decide something yourself, and read follow-up instructions it sent."
+    "when you can't decide something yourself, and read follow-up instructions it sent. Also read-only "
+    "file tools (read_file, list_files, search_files) for the job's folders, for when you may not run shell commands."
 )
 
 

@@ -360,6 +360,9 @@ def launch(args: argparse.Namespace) -> Launch:
             "created_at": now,
             "cwd": cwd,
             "providers": len(role.providers),
+            # The runner moves a one-at-a-time job down this list when a provider hits its usage limit.
+            "role_providers": [str(provider) for provider in role.providers],
+            "effort": args.effort,
             "jobs": [{"job_id": status["job_id"], "provider": str(provider), "position": position}
                      for position, provider, status in started],
             "skipped": [item.to_dict() for item in sorted(skips, key=lambda item: item.position)],

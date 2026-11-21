@@ -97,7 +97,8 @@ class MessageTests(TempHome):
         stdout = io.BytesIO()
         mcp_server.serve(stdin, stdout, worker_job=job)
         names = [tool["name"] for tool in json.loads(stdout.getvalue().decode().splitlines()[0])["result"]["tools"]]
-        self.assertEqual(names, ["message_parent", "ask_parent", "check_parent_messages"])
+        self.assertEqual(names, ["message_parent", "ask_parent", "check_parent_messages",
+                                 "read_file", "list_files", "search_files"])
 
         reply_received = threading.Event()
 

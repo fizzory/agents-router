@@ -24,7 +24,7 @@ Only a custom role can have full access. Every provider of a full role gets it: 
 ## How a role runs
 
 - **Read role:** every usable provider runs in parallel as an ordinary job, all under one group id (`g-…`). The result has one section per provider, plus FAILED and SKIPPED sections, and ends DONE if at least one succeeded. `agt follow`, `agt cancel`, `agt jobs` and `agt message` accept the group id.
-- **Edit or full role:** one job with the role's access, on the first provider in the role's order that agt's limits admit, preferring one below the usage ceiling. A job that fails partway is not retried on the next provider.
+- **Edit or full role:** one job with the role's access, on the first provider in the role's order that agt's limits admit, preferring one below the usage ceiling. When its provider hits a usage limit and no other account of that provider can take over, the same job moves to the next provider in the role's order that agt's limits admit, with a handoff note carrying any partial answer; `agt follow` prints `moved to provider 2 of 3: codex:high after usage_limit on kiro`. Any other failure is not retried on the next provider.
 - A provider whose account is unknown, logged out, cooling down, unhealthy or at its limit is skipped with the reason. A recovering provider whose trial is taken is skipped in favour of another provider; waiting behind its trial is the last fallback. If none can run, the call exits 1.
 - `agt run --role <name>` can't be combined with `--runtime`, `--account`, `--model` or `--access`: the role's providers set the first three, and the role's settings set its access.
 

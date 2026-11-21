@@ -202,3 +202,34 @@ def open_questions(job_id: str) -> list[dict[str, Any]]:
     folder = job_dir(job_id)
     answered = {record.get("reply_to") for record in _read(folder / "inbox.jsonl")}
     return [record for record in _read(folder / "outbox.jsonl") if record.get("kind") == "question" and record["id"] not in answered]
+
+
+def ignored_questions(job_id: str) -> list[dict[str, Any]]:
+    """Open questions the main session sent nothing after.
+
+    `reply_to` is optional when the main session writes to a worker, so a plain message sent after a
+    question may well be its answer; only a question followed by silence shows the worker was left waiting.
+    """
+
+    inbox = _read(job_dir(job_id) / "inbox.jsonl")
+    latest = max((float(record.get("time") or 0) for record in inbox), default=0.0)
+    return [record for record in open_questions(job_id) if float(record.get("time") or 0) > latest]
+
+
+PARENT_CALLS = "parent-calls.json"
+
+
+def count_parent_call(job_id: str) -> None:
+    """Count one agt-parent tool call, so the runner can tell talking to the parent from doing the task."""
+
+    path = job_dir(job_id) / PARENT_CALLS
+    with file_lock(path.with_suffix(".lock")):
+        count = int((read_json(path, {}) or {}).get("count") or 0)
+        write_json(path, {"count": count + 1})
+
+
+def parent_calls(job_id: str) -> int:
+    try:
+        return int((read_json(job_dir(job_id) / PARENT_CALLS, {}) or {}).get("count") or 0)
+    except (OSError, ValueError, TypeError):
+        return 0

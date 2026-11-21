@@ -491,7 +491,7 @@ class Follower:
             self.max_wait = min(self.max_wait, window)
         self.out = out
         self.token = secrets.token_hex(16)  # never stored in worker-readable job files
-        self.describer = describer_for(self.spec.runtime)
+        self.describer = describer_for(self._first_runtime())
         self.inits = 0  # attempt-start events seen so far
         self.reported = 0  # attempts whose account line was printed (or needs none)
         self.announced: str | None = None  # account named in the header
@@ -568,11 +568,45 @@ class Follower:
         attempts = self.status.get("attempts") or []
         self.reported = min(self.inits, len(attempts))
 
+    def _first_runtime(self) -> str:
+        """The runtime the job started on: a role job that moved providers has a new one in its spec."""
+
+        try:
+            moves = jobs.read_status(self.job_id).get("provider_moves") or []
+        except (OSError, ValueError):
+            moves = []
+        first = moves[0].get("from_runtime") if moves and isinstance(moves[0], dict) else None
+        return first if isinstance(first, str) and first else self.spec.runtime
+
+    def provider_move(self, offset: int, event: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The runner's own record of a provider move written at `offset`, or None (worker JSON can't fake one)."""
+
+        if not event or event.get("type") != "agt.provider_move":
+            return None
+        moves = self.status.get("provider_moves") or []
+        found = next((item for item in moves if isinstance(item, dict) and item.get("event_offset") == offset), None)
+        if found is None:
+            try:
+                self.status = jobs.read_status(self.job_id)
+            except (OSError, ValueError):
+                return None
+            moves = self.status.get("provider_moves") or []
+            found = next((item for item in moves if isinstance(item, dict) and item.get("event_offset") == offset), None)
+        return found
+
     def _feed(self, offset: int, raw: bytes) -> list[str]:
         event = decode(raw)
         if event is None:
             return []
         try:
+            move = self.provider_move(offset, event)
+            if move is not None:
+                # Later lines come from another runtime: read them with its describer.
+                lines = self.describer.flush()
+                calls = self.describer.tool_calls
+                self.describer = describer_for(str(move.get("runtime") or self.spec.runtime))
+                self.describer.tool_calls = calls
+                return lines
             lines = []
             if self.describer.starts_attempt(event):
                 self.inits += 1
@@ -604,7 +638,9 @@ class Follower:
                 previous = attempts[index - 1] or {}
                 before = previous.get("account") or "?"
                 outcome = previous.get("outcome") or "an error"
-                if outcome == SUCCESS:
+                if current.get("runtime") and previous.get("runtime") and current["runtime"] != previous["runtime"]:
+                    lines.append(f"running on {current['runtime']} account {account}")  # the move line said why
+                elif outcome == SUCCESS:
                     lines.append(f"follow-up turn on account {account}")
                 elif account != before:
                     lines.append(f"switched to account {account} after {outcome} on {before}")
@@ -628,9 +664,16 @@ class Follower:
                     self.control(f"model at capacity, retrying in {retry['seconds']} s "
                                  f"({retry['number']} of {retry['total']})")
                     continue
+            move = self.provider_move(offset, event)
             output = self._feed(offset, raw)
             if output:
                 self.emit_worker(*output)
+            if move is not None:
+                self.on_provider_move(move)
+
+    def on_provider_move(self, move: dict[str, Any]) -> None:
+        self.control(f"moved to provider {move.get('position')} of {move.get('of')}: {move.get('to')} "
+                     f"after usage_limit on {move.get('from')}")
 
     def resume_offset(self) -> int:
         pending = self.describer.pending_offset
@@ -822,6 +865,10 @@ class MemberFollower(Follower):
 
     def control(self, text: str) -> None:
         self.group.control(f"{self.tag} {text}")
+
+    def on_provider_move(self, move: dict[str, Any]) -> None:
+        super().on_provider_move(move)
+        self.provider = str(move.get("to") or self.provider)
 
     def end(self) -> None:
         """Print the member's last events and its own one-line outcome (the result waits for the group's end)."""

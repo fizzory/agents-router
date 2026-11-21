@@ -77,7 +77,7 @@ Every worker run is a job with an ID and its own folder (`spec.json`, `status.js
 
 ### Messages and wake-ups
 
-Each job folder has two append-only logs, `outbox.jsonl` (worker to main session) and `inbox.jsonl` (main session to worker), plus small files that record what each side has seen, so a message is shown once. A small built-in MCP server (`agt mcp --worker <job_id>`, named `agt-parent`) gives every worker three tools: `message_parent` (a note, no reply), `ask_parent` (a question that waits for the answer) and `check_parent_messages`.
+Each job folder has two append-only logs, `outbox.jsonl` (worker to main session) and `inbox.jsonl` (main session to worker), plus small files that record what each side has seen, so a message is shown once. A small built-in MCP server (`agt mcp --worker <job_id>`, named `agt-parent`) gives every worker three tools: `message_parent` (a note, no reply), `ask_parent` (a question that waits for the answer) and `check_parent_messages`. It also serves read-only `read_file`, `list_files` and `search_files`, confined by real path to the job's `cwd` and `add_dirs` and capped in size, for a worker that may not run shell (Codex has no other way to read). Calls on the parent channel don't count as task work for the `blocked` outcome; reads do.
 
 For a Claude worker, a `PostToolUse` hook shows new follow-ups after the next tool call. Hook text is only a hint to the model, so anything the worker doesn't read explicitly is sent again by the runner as a follow-up turn (at most five).
 
