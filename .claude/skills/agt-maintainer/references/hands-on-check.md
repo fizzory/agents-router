@@ -2,7 +2,7 @@
 
 Use this when a fix to the macOS app's GUI (the menu bar icon, the popover, a window) has to be seen on the person's Mac and you can't see the screen. Computer use may be unavailable, so the check is the person's click plus the app's log.
 
-The org Mac blocks apps that were copied or downloaded, so the build under test is a release build made on this Mac by `scripts/build_app.sh`. That is the one exception to "every build you make is `Agents Router Test.app`" (SKILL.md §3). The release build replaces the person's copy and runs on their real folders (`~/.agents-router`, `~/.agt`, `~/Library/Application Support/Agents Router`), so ask before installing it.
+The org Mac blocks apps that were copied or downloaded, so the build under test is a release build made on this Mac by `scripts/build_app.sh`. That is the one exception to "every build you make is `Agents Router Test.app`" (SKILL.md §3). The release build replaces the person's copy and runs on their real folders (`~/.agents-router`, `~/.agt`, `~/Library/Application Support/Agents Router`), so ask before installing it. For a look at a change on fake data before any release, use the Test build instead ("Look before release on a Test build", after step 3).
 
 ## 1. Make the app log what the person sees
 
@@ -77,12 +77,25 @@ pgrep -fl "Agents Router.*/Contents/MacOS/agents-[r]outer"
 
 Expected: `pgrep -fl` shows one process, `/Applications/Agents Router.app/Contents/MacOS/agents-router`.
 
+## Look before release on a Test build
+
+A look at a change on fixture data, before any release, can use the Test build and leave the person's copy alone. It replaces steps 2 and 3; step 4 then applies as written, with the icon named as below. It checks fake data, not a fix on the person's real folders.
+
+- Build the debug bundle: only debug builds read the fixture variables. Build the UI first (SKILL.md §3), then from `macos/src-tauri` run `CARGO_HOME="$PWD/../../build/cargo-home" ../../build/tools/bin/cargo-tauri build --debug --bundles app -- --locked` (`cargo-tauri` isn't on `PATH`). The bundle is `macos/src-tauri/target/debug/bundle/macos/Agents Router Test.app`.
+- Give it scratch folders and fixture data only, as `macos/README.md` documents: the folders and `AGT_APP_TEST_LAUNCHER` in "Isolated native smoke check" (`child_env` in `scripts/check_app_native.py` builds that whole set), and `AGT_APP_TEST_USAGE_FIXTURE` in "Popover placement". Create the scratch `state/` and `jobs/` folders first.
+- Launch with `open --env NAME=VALUE … --stdout "$L" --stderr "$L" "<path>/Agents Router Test.app"`, with `L` set as step 3's block sets it and one `--env` per variable, never as a shell child or by running the binary: step 3's reason holds. Quit a running test build first (step 3's block does), because a second launch's variables are ignored ("Test build folders"). No `-n`: the test build is a different app from the person's copy.
+- The menu bar now holds two Agents Router icons, the one exception to "Keep one copy running". Each question says to click the icon whose tooltip ends "Test build".
+- When the look is done, quit the test build: `osascript -e 'quit app id "io.github.watcharagorn.agents-router.test"'`.
+
 ## 4. Ask for the click
 
 - Ask only once the build is installed and launched. Never ask for a click while a build runs.
 - Name which icon to click: the Agents Router icon in the menu bar, on which display.
 - One action per request. In each request, name the build (path and sha), the action and the expected result, and ask "did you see it?". For example: "`/Applications/Agents Router.app`, sha256 `3f9a…`. Click the Agents Router icon in the menu bar of the built-in display. Expected: the popover opens under the icon. Did you see it?"
-- A "yes" covers only the action you named.
+  - Motion that reacts to changed data (a spring, a digit roll, a delta) shows only when the data changes between the person's actions. Prepare data that changes, or record that part as "not checked" instead of asking about it.
+- Quote the expected result from the scenario's Expected column or the design doc. Name every state, glyph, hold time, menu item and shortcut it lists, for example "the arrow cross-fades to a check mark, held 1.5 s" or "Quit Agents Router ⌘Q". Never name a category such as "a busy state".
+- When no scenario fixes the action's outcome, trace its handler in code to the visible end state before asking. Pick an observable that tells the risk under test apart from normal behaviour. An expected result rewritten after the answer is a finding, not a pass.
+- A "yes" covers only the action and the states you named.
 
 Then read the outcome lines and convert the `agt-app <epoch>` stamps (they carry milliseconds, which `date -r` doesn't take):
 
