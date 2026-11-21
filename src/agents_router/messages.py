@@ -204,6 +204,18 @@ def open_questions(job_id: str) -> list[dict[str, Any]]:
     return [record for record in _read(folder / "outbox.jsonl") if record.get("kind") == "question" and record["id"] not in answered]
 
 
+def ignored_questions(job_id: str) -> list[dict[str, Any]]:
+    """Open questions the main session sent nothing after.
+
+    `reply_to` is optional when the main session writes to a worker, so a plain message sent after a
+    question may well be its answer; only a question followed by silence shows the worker was left waiting.
+    """
+
+    inbox = _read(job_dir(job_id) / "inbox.jsonl")
+    latest = max((float(record.get("time") or 0) for record in inbox), default=0.0)
+    return [record for record in open_questions(job_id) if float(record.get("time") or 0) > latest]
+
+
 PARENT_CALLS = "parent-calls.json"
 
 

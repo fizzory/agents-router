@@ -12,6 +12,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+import stat
 import time
 from pathlib import Path
 from typing import Any
@@ -27,8 +28,10 @@ DEFAULT_SEARCH_RESULTS = 100
 MAX_SEARCH_RESULTS = 500
 MAX_MATCH_CHARS = 300
 MAX_SEARCH_FILE_BYTES = 2_000_000
+MAX_SKIPPED_SHOWN = 20
 WALK_SECONDS = 20.0
 SNIFF_BYTES = 8192
+CHUNK_CHARS = 65_536
 # Walked into only when the call starts inside one: they are large and rarely what a task means.
 SKIP_DIRS = frozenset({".git", "node_modules", ".venv", "__pycache__"})
 
@@ -85,9 +88,38 @@ def _shown(path: Path, folders: list[Path]) -> str:
     return str(path)
 
 
+def _is_regular(path: Path) -> bool:
+    """A plain file: opening a FIFO, socket or device could block the server or never end."""
+
+    try:
+        return stat.S_ISREG(os.stat(path).st_mode)
+    except OSError:
+        return False
+
+
 def _is_binary(path: Path) -> bool:
     with open(path, "rb") as handle:
         return b"\0" in handle.read(SNIFF_BYTES)
+
+
+def _lines(handle, keep: int):
+    """Lines without their line ending, each cut to `keep` characters; memory stays bounded on any file.
+
+    Yields (text, cut) pairs. The rest of a cut line is read in chunks and dropped.
+    """
+
+    while True:
+        line = handle.readline(keep + 1)
+        if not line:
+            return
+        text = line.rstrip("\r\n")
+        cut = len(text) > keep
+        if not line.endswith("\n") and len(line) > keep:
+            while True:
+                rest = handle.readline(CHUNK_CHARS)
+                if not rest or rest.endswith("\n"):
+                    break
+        yield text[:keep], cut
 
 
 def _matches(relative: str, pattern: str | None) -> bool:
@@ -115,6 +147,8 @@ def _walk(top: Path, folders: list[Path], deadline: float):
                 yield None, f"stopped after {int(WALK_SECONDS)} seconds"
                 return
             path = base / name
+            if not _is_regular(path):
+                continue
             if path.is_symlink():
                 try:
                     if not _inside(path.resolve(strict=True), folders):
@@ -129,6 +163,8 @@ def read_file(job_id: str, path: Any, offset: Any = 1, limit: Any = DEFAULT_READ
     real, text = _resolve(folders, path)
     if real.is_dir():
         raise FileToolError(f"{text} is a folder; use list_files")
+    if not _is_regular(real):
+        raise FileToolError(f"{text} is not a regular file")
     if _is_binary(real):
         raise FileToolError(f"{text} is a binary file")
     first = max(1, int(offset or 1))
@@ -138,15 +174,14 @@ def read_file(job_id: str, path: Any, offset: Any = 1, limit: Any = DEFAULT_READ
     last = first - 1
     more = False
     with open(real, encoding="utf-8", errors="replace") as handle:
-        for number, line in enumerate(handle, 1):
+        for number, (line, cut) in enumerate(_lines(handle, MAX_LINE_CHARS), 1):
             if number < first:
                 continue
             if number >= first + count or size >= MAX_READ_CHARS:
                 more = True
                 break
-            line = line.rstrip("\r\n")
-            if len(line) > MAX_LINE_CHARS:
-                line = line[:MAX_LINE_CHARS] + " …[line cut]"
+            if cut:
+                line += " …[line cut]"
             lines.append(f"{number}\t{line}")
             size += len(lines[-1]) + 1
             last = number
@@ -198,7 +233,7 @@ def list_files(job_id: str, path: Any = ".", pattern: Any = None) -> dict[str, A
 def search_files(job_id: str, pattern: Any, path: Any = ".", glob: Any = None, ignore_case: Any = False,
                  max_results: Any = DEFAULT_SEARCH_RESULTS) -> dict[str, Any]:
     folders = roots(job_id)
-    real, _text = _resolve(folders, path)
+    real, text = _resolve(folders, path)
     try:
         regex = re.compile(str(pattern or ""), re.IGNORECASE if ignore_case else 0)
     except re.error as exc:
@@ -206,11 +241,18 @@ def search_files(job_id: str, pattern: Any, path: Any = ".", glob: Any = None, i
     if not regex.pattern:
         raise FileToolError("pattern is required")
     limit = max(1, min(MAX_SEARCH_RESULTS, int(max_results or DEFAULT_SEARCH_RESULTS)))
+    deadline = time.monotonic() + WALK_SECONDS
     if real.is_dir():
-        candidates = _walk(real, folders, time.monotonic() + WALK_SECONDS)
+        candidates = _walk(real, folders, deadline)
     else:
+        if not _is_regular(real):
+            raise FileToolError(f"{text} is not a regular file")
+        if real.stat().st_size > MAX_SEARCH_FILE_BYTES:
+            raise FileToolError(f"{text} is larger than {MAX_SEARCH_FILE_BYTES // 1_000_000} MB, too big to search; "
+                                "read it in parts with read_file")
         candidates = iter([(real, real.name)])
     matches: list[dict[str, Any]] = []
+    skipped: list[str] = []
     truncated = None
     for item, relative in candidates:
         if item is None:
@@ -219,16 +261,22 @@ def search_files(job_id: str, pattern: Any, path: Any = ".", glob: Any = None, i
         if not _matches(relative, str(glob) if glob else None):
             continue
         try:
-            if item.stat().st_size > MAX_SEARCH_FILE_BYTES or _is_binary(item):
+            if item.stat().st_size > MAX_SEARCH_FILE_BYTES:
+                skipped.append(_shown(item, folders))
+                continue
+            if _is_binary(item):
                 continue
             with open(item, encoding="utf-8", errors="replace") as handle:
-                for number, line in enumerate(handle, 1):
+                for number, (line, _cut) in enumerate(_lines(handle, MAX_SEARCH_FILE_BYTES), 1):
+                    if number % 1000 == 0 and time.monotonic() > deadline:
+                        truncated = f"stopped after {int(WALK_SECONDS)} seconds"
+                        break
                     if regex.search(line):
                         if len(matches) >= limit:
                             truncated = f"more than {limit} matches"
                             break
                         matches.append({"path": _shown(item, folders), "line": number,
-                                        "text": line.rstrip("\r\n")[:MAX_MATCH_CHARS]})
+                                        "text": line[:MAX_MATCH_CHARS]})
         except OSError:
             continue
         if truncated:
@@ -236,4 +284,9 @@ def search_files(job_id: str, pattern: Any, path: Any = ".", glob: Any = None, i
     result: dict[str, Any] = {"matches": matches}
     if truncated:
         result["truncated"] = truncated
+    if skipped:
+        shown = ", ".join(skipped[:MAX_SKIPPED_SHOWN]) + (f" and {len(skipped) - MAX_SKIPPED_SHOWN} more"
+                                                          if len(skipped) > MAX_SKIPPED_SHOWN else "")
+        result["skipped"] = (f"not searched, larger than {MAX_SEARCH_FILE_BYTES // 1_000_000} MB "
+                             f"(read them in parts with read_file): {shown}")
     return result

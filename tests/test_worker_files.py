@@ -7,6 +7,7 @@ the parent for file access, nobody answered, and it wrote nothing.
 import io
 import json
 import os
+import threading
 
 from helpers import TempHome
 
@@ -98,6 +99,51 @@ class WorkerFileToolTests(TempHome):
         self.assertLess(len(content), 2100)
         self.assertTrue(content.endswith("…[line cut]"))
 
+    def test_the_line_after_a_cut_line_is_read_whole(self):
+        (self.project / "min.js").write_text("x" * 200_000 + "\nsecond line\n", encoding="utf-8")
+        lines = self.call("read_file", path="min.js")["content"].splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[0].endswith("…[line cut]"))
+        self.assertEqual(lines[1], "2\tsecond line")
+        self.assertEqual(self.call("search_files", pattern="second", path="min.js")["matches"][0]["line"], 2)
+
+    def test_a_fifo_is_refused_and_never_blocks_the_server(self):
+        """Opening a FIFO waits for a writer that never comes: the agt-parent server would hang."""
+
+        fifo = self.project / "pipe"
+        os.mkfifo(fifo)
+        self.addCleanup(self.unblock, fifo)
+        results = {}
+
+        def calls():
+            try:
+                self.call("read_file", path="pipe")
+            except ToolError as exc:
+                results["read"] = str(exc)
+            results["search"] = self.call("search_files", pattern="frames")
+            try:
+                self.call("search_files", pattern="frames", path="pipe")
+            except ToolError as exc:
+                results["target"] = str(exc)
+
+        thread = threading.Thread(target=calls, daemon=True)
+        thread.start()
+        thread.join(10)
+        self.assertFalse(thread.is_alive(), "a tool call is stuck opening the FIFO")
+        self.assertEqual(results["read"], "pipe is not a regular file")
+        self.assertEqual([item["path"] for item in results["search"]["matches"]], ["docs/brief.md"])
+        self.assertEqual(results["target"], "pipe is not a regular file")
+
+    @staticmethod
+    def unblock(fifo):
+        """Let a reader stuck on the FIFO see end of file, so a failing run can still exit."""
+
+        for _ in range(3):
+            try:
+                os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+            except OSError:
+                return
+
     # list_files ----------------------------------------------------------------------------
 
     def test_list_files_shows_a_folder_and_matches_a_pattern_at_any_depth(self):
@@ -128,6 +174,14 @@ class WorkerFileToolTests(TempHome):
         capped = self.call("search_files", pattern="line", max_results=3)
         self.assertEqual(len(capped["matches"]), 3)
         self.assertEqual(capped["truncated"], "more than 3 matches")
+
+    def test_search_names_the_files_too_big_to_search(self):
+        (self.project / "dump.log").write_text("frames: 7\n" * 250_000, encoding="utf-8")
+        result = self.call("search_files", pattern="frames")
+        self.assertEqual([item["path"] for item in result["matches"]], ["docs/brief.md"])
+        self.assertEqual(result["skipped"], "not searched, larger than 2 MB (read them in parts with read_file): dump.log")
+        self.refused("search_files", "dump.log is larger than 2 MB, too big to search; read it in parts with read_file",
+                     pattern="frames", path="dump.log")
 
     def test_a_bad_regular_expression_is_refused(self):
         self.refused("search_files", "not a valid regular expression", pattern="(")

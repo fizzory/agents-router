@@ -79,6 +79,20 @@ def handoff_prompt(original: str, previous: AttemptResult, account: str) -> str:
     return f"{original}\n\n{note}"
 
 
+def follow_up_task(original: str, answer: str, follow_up: str) -> str:
+    """The task during a follow-up turn: what was asked, the answer already given, and the follow-up still open.
+
+    A new session (another account or provider) starts from this, so the follow-up isn't lost and the
+    finished part isn't redone from scratch.
+    """
+
+    note = "Note from Agents Router: this task was answered once already."
+    if answer.strip():
+        note += f" That answer was:\n\n<earlier_answer>\n{answer.strip()[-4000:]}\n</earlier_answer>\n"
+    return (f"{original}\n\n{note}\nThen the main session sent this follow-up, which is the part still to do:"
+            f"\n\n<follow_up>\n{follow_up}\n</follow_up>")
+
+
 class Runner:
     def __init__(self, job_id: str) -> None:
         self.job_id = job_id
@@ -125,7 +139,7 @@ class Runner:
         if not (result and (result.text or "").strip()):
             return "the worker finished without an answer"
         try:
-            waiting = messages.open_questions(self.job_id)
+            waiting = messages.ignored_questions(self.job_id)
         except OSError:
             waiting = []
         if waiting and self._tool_uses() == 0:
@@ -192,19 +206,27 @@ class Runner:
         owner = self.spec.resume_account
         self.owner_home = self.spec.resume_home
         follow_ups = 0
+        answered, follow_up = "", None  # during a follow-up turn: the answer already given and the follow-up's text
+        untried = False  # moved to a provider that hasn't run an attempt yet
+
+        def task() -> str:
+            """What a fresh session must do: the job's task, or during a follow-up turn, the follow-up."""
+
+            return follow_up_task(self.spec.prompt, answered, follow_up) if follow_up else self.spec.prompt
 
         def moved(result: AttemptResult) -> bool:
             """Move a role job to its next provider; the conversation starts fresh there."""
 
-            nonlocal excluded, session, owner, prompt, failover, move_warning
+            nonlocal excluded, session, owner, prompt, failover, move_warning, untried
             previous = self._provider_label()
             if not self._move_provider(result):
                 return False
             excluded, session, owner, move_warning = set(), None, None, None
             self.owner_home = None
             failover = self.runtime_config.failover == "on-limit" and not self.spec.account
-            worked = bool((result.text or "").strip()) or self._tool_uses() > 0
-            prompt = self._with_rules(handoff_prompt(self.spec.prompt, result, previous)) if worked else self.spec.prompt
+            worked = bool((result.text or "").strip()) or self._tool_uses() > 0 or follow_up is not None
+            prompt = self._with_rules(handoff_prompt(task(), result, previous)) if worked else self.spec.prompt
+            untried = True
             return True
 
         while True:
@@ -215,6 +237,11 @@ class Runner:
             if lease is None:
                 if self.cancelled():
                     return self.finish(CANCELLED, "cancelled", last)
+                if untried:
+                    # The provider the job moved to never ran: its own lack of an account ends the job,
+                    # not the earlier provider's limit again (that would walk down the whole list unrun).
+                    return self.finish(NO_ACCOUNT, self._no_account_message(excluded),
+                                       dataclasses.replace(last, session_id=None) if last else None)
                 if last is not None and last.outcome == USAGE_LIMIT and moved(last):
                     continue
                 if last is not None:
@@ -224,8 +251,9 @@ class Runner:
                 self.warnings.append(move_warning)
                 move_warning = None
             try:
-                fallback = handoff_prompt(self.spec.prompt, last, owner or "another account") if last else self.spec.prompt
+                fallback = handoff_prompt(task(), last, owner or "another account") if last else task()
                 last = self._attempt_with_capacity_retries(lease, prompt, session, owner, fallback)
+                untried = False
                 # One write after all capacity retries, while both trial locks and
                 # the attempt's original generation still belong to this lease.
                 if self.runtime_config.circuit_breaker and lease.trial is not None:
@@ -250,6 +278,8 @@ class Runner:
                     # Follow-ups sent while the worker was busy: continue the same conversation.
                     follow_ups += 1
                     session, owner, self.owner_home = last.session_id, lease.account.name, str(lease.account.home)
+                    answered = (last.text or "").strip() or answered
+                    follow_up = "\n\n".join(item["text"] for item in pending)
                     prompt = (
                         "Follow-up from the main session (you may already have seen it during your run; "
                         "if you already handled it, just confirm briefly):\n\n"
@@ -284,7 +314,7 @@ class Runner:
                     )
                 else:
                     session, owner = None, None
-                    prompt = self._with_rules(handoff_prompt(self.spec.prompt, last, lease.account.name))
+                    prompt = self._with_rules(handoff_prompt(task(), last, lease.account.name))
                 move_warning = f"{lease.account.name} is unhealthy ({cause}); continuing on another account"
                 continue
             if last.outcome != USAGE_LIMIT:
@@ -312,7 +342,7 @@ class Runner:
                 self.owner_home = str(lease.account.home)
             else:
                 session, owner = None, None
-                prompt = self._with_rules(handoff_prompt(self.spec.prompt, last, lease.account.name))
+                prompt = self._with_rules(handoff_prompt(task(), last, lease.account.name))
             # Logged only once another account really takes the job: with none left, the job ends here.
             move_warning = f"{lease.account.name} hit its usage limit; continuing on another account"
 

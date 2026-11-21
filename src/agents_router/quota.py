@@ -92,17 +92,26 @@ def pool_state(runtime: RuntimeConfig, counts: Any, now: float, exclude_job: str
         if not path.is_dir() or path.name == exclude_job:
             continue
         status = read_json(path / "status.json")
-        if not isinstance(status, dict) or status.get("runtime") != runtime.runtime or status.get("outcome") in ("refused", "limit"):
+        if not isinstance(status, dict) or status.get("outcome") in ("refused", "limit"):
+            continue
+        entries = status.get("attempts") or []
+        if not isinstance(entries, list):
+            entries = []
+        # A role job that moved provider keeps its earlier attempts, each marked with its own runtime.
+        if status.get("runtime") != runtime.runtime and not any(
+                isinstance(item, dict) and item.get("runtime") == runtime.runtime for item in entries):
             continue
         spec = read_json(path / "spec.json", {})
         if not isinstance(spec, dict):
             spec = {}
-        pool = job_pool(runtime, status, spec)
-        entries = status.get("attempts") or []
-        if not entries and status.get("account") and status.get("state") in ("running", "done") and status.get("started_at"):
+        current = status.get("runtime") == runtime.runtime
+        pool = job_pool(runtime, status, spec) if current else None
+        if not entries and current and status.get("account") and status.get("state") in ("running", "done") and status.get("started_at"):
             entries = [status]
         keys = set()
         for attempt in entries:
+            if not isinstance(attempt, dict) or attempt.get("runtime", status.get("runtime")) != runtime.runtime:
+                continue
             when = attempt.get("started_at")
             account = attempt.get("account")
             attempt_pool = attempt.get("pool") or pool

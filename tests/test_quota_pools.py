@@ -270,6 +270,19 @@ class QuotaTests(TempHome):
         state = quota.pool_state(item, limits.count_active(self.now), self.now)
         self.assertEqual(state.weekly, {("a1", "argon"): 1, ("a2", "argon"): 1})
 
+    def test_a_job_that_moved_provider_counts_each_attempt_on_its_own_runtime(self):
+        """A role job that moved after a usage limit has attempts on two runtimes: each counts only on its own."""
+
+        item = self.configure(pools=True).runtime("antigravity")
+        self.job_record(runtime="codex", model="gpt-6.1-sol", attempts=[
+            {"account": "a1", "started_at": self.now-2, "runtime": "antigravity", "pool": "argon"},
+            {"account": "primary", "started_at": self.now-1, "runtime": "codex"}])
+        self.job_record(attempts=[
+            {"account": "a2", "started_at": self.now-2, "runtime": "codex"},
+            {"account": "a1", "started_at": self.now-1, "runtime": "antigravity"}])
+        state = quota.pool_state(item, limits.count_active(self.now), self.now)
+        self.assertEqual(state.weekly, {("a1", "argon"): 2})
+
     def test_cleanup_preserves_the_weekly_budget_history(self):
         self.configure(pools=True)
         recent = self.job_record(started=self.now-2*86400)
