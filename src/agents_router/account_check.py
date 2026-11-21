@@ -22,16 +22,28 @@ def _key(runtime: config.RuntimeConfig, account: config.Account) -> str:
     return runtime.runtime + ":" + os.path.normcase(str(profiles.canonical(account.home)))
 
 
-def cached(runtime: config.RuntimeConfig, account: config.Account) -> bool | None:
-    if runtime.runtime == "claude":
-        return profiles.logged_in(account.home, None, cached_only=True)
+def last_check(runtime: config.RuntimeConfig, account: config.Account) -> dict[str, Any] | None:
+    """Read the existing check record, retaining failures and expired timestamps."""
+
     data = fsutil.read_json(_path(), {})
     row = data.get(_key(runtime, account)) if isinstance(data, dict) else None
     if not isinstance(row, dict):
         return None
     checked = row.get("checked_at")
-    if (type(checked) not in (int, float) or not math.isfinite(checked)
-            or not 0 <= time.time() - checked < profiles.AUTH_TTL_SECONDS):
+    if type(checked) not in (int, float) or not math.isfinite(checked):
+        return None
+    value = row.get("logged_in")
+    return {"account": account.name, "logged_in": value if type(value) is bool else None,
+            "checked_at": checked, "error": row.get("error")}
+
+
+def cached(runtime: config.RuntimeConfig, account: config.Account) -> bool | None:
+    if runtime.runtime == "claude":
+        return profiles.logged_in(account.home, None, cached_only=True)
+    row = last_check(runtime, account)
+    if row is None:
+        return None
+    if not 0 <= time.time() - row["checked_at"] < profiles.AUTH_TTL_SECONDS:
         return None
     value = row.get("logged_in")
     return value if type(value) is bool else None

@@ -1,12 +1,18 @@
 // The only window.__TAURI__ boundary. No caller can supply a program or argv.
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
+export const getAccountChecks = () => invoke("get_account_checks");
+export const onAccountChecksStatus = handler => listen("account-checks-status", ({ payload }) => handler(payload));
 export const getSnapshot = () => invoke("get_snapshot");
 export const refreshUsage = () => invoke("refresh_usage");
 export const hidePopover = () => invoke("hide_popover");
+export const showPopoverMenu = ({ x, y }) => invoke("show_popover_menu", { x, y });
 export const setPopoverHeight = ({ height, durationMs, curve }) => invoke("set_popover_height", { height, durationMs, curve });
 export const openSettings = ({ runtime = null, account = null, install = false } = {}) => invoke("open_settings", { runtime, account, install });
 export const loginAccount = (runtime, account) => invoke("login_account", { runtime, account });
+export const getLoginCommand = (runtime, account) => invoke("get_login_command", { runtime, account });
+// Native context-menu callbacks do not carry WebKit user activation.
+export const copyText = text => invoke("copy_text", { text });
 export const checkAccount = (runtime, account) => invoke("check_account", { runtime, account });
 export const checkForUpdates = () => invoke("check_for_updates");
 export const quitApp = () => invoke("quit_app");
@@ -49,8 +55,6 @@ export const onSettingsStatus = (handler) => listen("settings-status", ({ payloa
 export const showPaneMenu = (token, actions) => invoke("show_pane_menu", { token, actions });
 export const onPaneMenu = handler => listen("pane-menu", ({ payload }) => handler(payload));
 export const activityUndoSync = entry => invoke("activity_undo_sync", { entry });
-// Native context-menu callbacks do not carry WebKit user activation.
-export const copyText = text => invoke("copy_text", { text });
 
 export const setupRoles = () => invoke("setup_roles");
 
@@ -61,6 +65,9 @@ export const installAction = action => invoke("install_action", { action });
 export const getUpdateStatus = () => invoke("get_update_status");
 export const onUpdateStatus = handler => listen("update-status", ({ payload }) => handler(payload));
 export const updateAction = action => invoke("update_action", { action });
+// Popover only: Install and Restart or Retry, and Open Releases Page.
+export const installUpdate = () => invoke("install_update");
+export const openReleases = () => invoke("open_releases");
 
 // Test builds only: [{key, path, display, source, origin}]; null in the release.
 export const testBuildPaths = () => invoke("test_build_paths");

@@ -84,6 +84,17 @@ export function TooltipProvider({ id = 'tooltip', children }: { id?: string; chi
     };
   }, [hide]);
 
+  // Copy feedback can change the tooltip while its control keeps keyboard focus.
+  useEffect(() => {
+    if (!tip) return;
+    const observer = new MutationObserver(() => {
+      const text = tip.target.dataset.tooltip ?? '';
+      setTip((current) => current?.target === tip.target && current.text !== text ? { ...current, text } : current);
+    });
+    observer.observe(tip.target, { attributes: true, attributeFilter: ['data-tooltip'] });
+    return () => observer.disconnect();
+  }, [tip?.target]);
+
   // Position through CSSOM after the text is in, then fade in on the next frame.
   useLayoutEffect(() => {
     const element = node.current;

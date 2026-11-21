@@ -270,14 +270,16 @@ def roles_proposal(screen: dict[str, Any]) -> dict[str, Any]:
     if report.notes:
         data["notes"] = report.notes
     data["needs_order"] = plan.needs_order
-    data["answers"] = ROLE_ANSWERS
+    # With roles off, Skip roles is already chosen, so it isn't offered again.
+    data["answers"] = ({name: how for name, how in ROLE_ANSWERS.items() if name != "Skip roles"}
+                       if plan.state == "off" else ROLE_ANSWERS)
     return data
 
 
 ROLE_STATES = {
     "propose": "a role table to write to your user settings, with one agt-<role> agent per role for this CLI",
     "set": "roles are already set up: kept as they are; only the agt-<role> agents follow them",
-    "off": "roles skipped: no role settings and no role agents are written; ask your agent to set up your roles later",
+    "off": "roles skipped: no role settings and no role agents are written. When you want roles, say 'set up my roles' to your agent.",
     "none": "no CLI with an account to propose roles from; `agt roles propose` can later",
 }
 ROLE_ANSWERS = {
@@ -297,13 +299,14 @@ CUSTOM_ROLE = {
 
 
 NEXT = ("Ask the user once, in one message: the share table, the switches, the Claude profiles that get the plugin "
-        "(claude_profiles, with their folders) and the role table (roles.table), with the answers Approve, Change a role, "
-        "Skip roles or Cancel. Show each role as one line with its access, its providers and its use_when word for word: "
-        "what the role does and when your agent calls it. When roles.custom is there, also ask its `ask`. Ask each "
-        "roles.needs_order question before the command runs. Apply their answer by changing the flags and running "
-        "--dry-run --json again, then run `command` exactly as given. Never run it before they answer. Add a custom "
-        "role only after `command` succeeds, with roles.custom.command and the user's own words as --description; "
-        "never write that description yourself.")
+        "(claude_profiles, with their folders) and the role table (roles.table), with the answers Approve, Change a "
+        "role, Skip roles or Cancel. When roles.state is off, show no role table, leave out Skip roles and say, word "
+        "for word: \"When you want roles, say 'set up my roles'.\" Show each role as one line with its access, its "
+        "providers and its use_when word for word: what the role does and when your agent calls it. When roles.custom "
+        "is there, also ask its `ask`. Ask each roles.needs_order question before the command runs. Apply their answer "
+        "by changing the flags and running --dry-run --json again, then run `command` exactly as given. Never run it "
+        "before they answer. Add a custom role only after `command` succeeds, with roles.custom.command and the user's "
+        "own words as --description; never write that description yourself.")
 
 
 def _and(names: list[str]) -> str:

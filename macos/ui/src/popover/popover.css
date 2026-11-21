@@ -1,7 +1,8 @@
 /* The menu bar popover: 360 wide, height follows content up to the native cap. */
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; }
+html, body { margin: 0; height: 100%; }
 /* contentHeight() measures body's padding plus its parts; #root adds no box. */
+/* AppKit clips the rectangular page to the panel's continuous corners. */
 body { display: flex; flex-direction: column; padding: 0 var(--space-3) var(--space-3); color: var(--ink); background: color-mix(in srgb, var(--ground) 88%, transparent); }
 #root { display: contents; }
 button { font: inherit; color: inherit; cursor: default; }
@@ -13,13 +14,34 @@ button { font: inherit; color: inherit; cursor: default; }
 .account-list { position: relative; margin: 0; padding: 0; list-style: none; }
 .empty-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 28px; padding: 0 var(--space-4); font: var(--type-row); }
 .last-row { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-3); min-height: 28px; margin-top: var(--space-2); padding: var(--space-1) var(--space-4) 0; border-top: 1px solid var(--hairline); font: var(--type-small); }
-.footer-text { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
-.footer-message, .footer-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.footer-detail { color: var(--ink-muted); }
-.update-action { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: var(--hit); padding: 0; border: 0; border-radius: var(--r-m); background: transparent; font: var(--type-small); text-align: left; }
-.update-action:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
+/* The update row: one 28px line in every state. The button or the progress takes the right end. */
 .update-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-.app-menu { top: 30px; right: var(--space-3); }
+.update-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.update-progress { flex: 0 0 auto; color: var(--ink-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.last-row .button-inline { flex: 0 0 auto; }
+
+/* Detail belongs to the list item's layout; only the 28px main line is a hit target. */
+.popover-account { display: block; height: auto; padding: 0; white-space: normal; }
+.account-main { position: relative; display: flex; align-items: center; min-height: 28px; padding: 0 var(--space-4); }
+.account-main.is-dimmed { opacity: .5; }
+.account-main .status-dot { margin-right: var(--space-4); }
+.account-main .row-slot { flex-basis: 96px; width: 96px; animation: number-in var(--cross-fade-time) var(--ease-out) both; }
+.popover-account .row-copy { position: relative; z-index: 2; flex: 0 0 var(--hit); opacity: 0; pointer-events: none; transition: opacity var(--hover-time) var(--ease-out); }
+.popover-account:hover .row-copy, .popover-account:focus-within .row-copy { opacity: 1; pointer-events: auto; }
+.window-tag { flex: 0 0 14px; width: 14px; color: var(--ink-muted); }
+.account-main .reset-time { flex-basis: 40px; width: 40px; white-space: nowrap; text-align: right; overflow: visible; }
+.account-main .row-slot.is-stale .figure { opacity: .5; }
+.account-detail { padding: 0 var(--space-4) var(--space-2) 24px; font: var(--type-small); color: var(--ink-muted); opacity: 1; animation: number-in var(--cross-fade-time) var(--ease-out) both; }
+.account-detail[data-open="false"] { position: absolute; top: 28px; left: 0; right: 0; pointer-events: none; opacity: 0; animation: number-out var(--cross-fade-time) var(--ease-out) both; }
+.account-context { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 24px; }
+.account-context .button { flex: 0 0 auto; font: var(--type-small); }
+.trouble-row { display: flex; flex: 0 0 auto; align-items: flex-start; gap: var(--space-3); padding: var(--space-2) var(--space-4); color: var(--ink-muted); font: var(--type-small); animation: number-in var(--cross-fade-time) var(--ease-out) both; }
+.trouble-detail { flex: 1 1 auto; min-width: 0; max-height: 56px; overflow: auto; overflow-wrap: anywhere; animation: number-in var(--cross-fade-time) var(--ease-out) both; }
+.trouble-action { flex: 0 0 78px; width: 78px; font: var(--type-small); }
+.refresh-feedback { display: grid; }
+.refresh-feedback > span { grid-area: 1 / 1; transition: opacity var(--cross-fade-time) var(--ease-out); }
+.refresh-check, .refresh-feedback[data-checked="true"] .refresh-glyph { opacity: 0; }
+.refresh-feedback[data-checked="true"] .refresh-check { opacity: 1; }
 
 @media (prefers-reduced-motion: reduce) {
   .content-change .empty-row { animation: number-in var(--cross-fade-time) var(--ease-out) both; }

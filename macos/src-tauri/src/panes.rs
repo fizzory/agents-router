@@ -235,11 +235,12 @@ impl SettingsCore {
         Ok(result)
     }
     pub async fn accounts_list(&self) -> Result<CommandOutcome, ClientError> {
-        let result = self
-            .pane_read(self.user_request(CommandKind::AccountsList)?)
-            .await?;
+        let mut request = self.user_request(CommandKind::AccountsList)?;
+        request.arguments.push("--cached-only".into());
+        let result = self.pane_read(request).await?;
         if let CommandOutcome::Data(data) = &result {
             if let Snapshot::Accounts(accounts) = data.as_ref() {
+                self.account_checks.seed(accounts);
                 self.panes.lock().expect("pane state").accounts = Some(accounts.clone());
             }
         }
@@ -291,8 +292,7 @@ impl SettingsCore {
         account: String,
     ) -> Result<CommandOutcome, ClientError> {
         self.account_action(&runtime, &account, false)?;
-        self.pane_read(self.account_request(CommandKind::AccountsCheck, runtime, account)?)
-            .await
+        self.account_checks.check_explicit(runtime, account).await
     }
     pub async fn accounts_add_check(
         &self,
@@ -725,7 +725,7 @@ mod tests {
         let core = core(&scratch);
         assert!(core.account_action("claude", "work", false).is_err());
         core.accounts_list().await.unwrap();
-        arguments(&scratch, &["accounts", "list", "--json"]);
+        arguments(&scratch, &["accounts", "list", "--cached-only", "--json"]);
         for enabled in [true, false] {
             core.accounts_toggle("claude".into(), "work".into(), enabled)
                 .await
@@ -748,6 +748,7 @@ mod tests {
                 .await
                 .is_err());
         }
+        // Explicit Settings Check runs even with the current cached result.
         core.accounts_check("claude".into(), "primary".into())
             .await
             .unwrap();

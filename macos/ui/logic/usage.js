@@ -66,6 +66,24 @@ export function resetText(window, now, { locale = "en-GB", timeZone } = {}) {
   return new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(when);
 }
 
+/** Detail always includes a clock, including resets on a later day. */
+export function detailResetText(window, now, options = {}) {
+  const when = resetText(window, now, options);
+  if (!when || when.includes(':')) return when;
+  return `${when} ${clockText(window.resets_at, now, options)}`;
+}
+
+/** Compact time remaining, rather than a weekday or a clock. */
+export function countdownText(until, now) {
+  if (!finite(until) || !finite(now) || until <= now) return '';
+  const minutes = Math.floor((until - now) / 60);
+  if (!minutes) return '<1m';
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ''}`;
+  const hours = Math.floor(minutes / 60) % 24;
+  return `${Math.floor(minutes / 1440)}d${hours ? ` ${hours}h` : ''}`;
+}
+
 /** Healthy rows use only their dot. Buttons and timed back text are chosen by the view. */
 export function stateWord(availability) {
   return Object.hasOwn(STATES, availability) ? STATES[availability] : STATES.unknown;
@@ -82,4 +100,16 @@ export function clockText(until, now, { timeZone } = {}) {
 export function backText(until, now, options = {}) {
   const clock = clockText(until, now, options);
   return clock ? `Back ${clock}` : "";
+}
+
+/** Shared retained login results; Settings keeps its existing Check presentation. */
+export function withAccountCheck(account, check, popover = false) {
+  if (!account.enabled || account.problem) return account;
+  const result = check?.result;
+  const failed = check?.phase === 'failed';
+  const checking = check?.phase === 'checking' || (popover && (!check || check.phase === 'idle') && account.availability === 'unknown');
+  const availability = failed ? 'unknown' : result?.logged_in === false ? 'logged_out'
+    : result?.logged_in === true && ['unknown', 'logged_out'].includes(account.availability) ? 'ok' : account.availability;
+  return { ...account, availability, reason: failed ? result?.error : account.reason,
+    check_failed: popover && failed, checking: popover && checking };
 }

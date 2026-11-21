@@ -1,3 +1,4 @@
+import { withAccountCheck } from './usage.js';
 // Pure pane models. Every capability and choice comes from agt's documents.
 import { LEVELS, PROVIDERS, displayValue, labelFor } from './settings.js';
 import { accountRow } from './rows.js';
@@ -26,14 +27,14 @@ export function rolesUndo(result, target) {
   return { ...target, kind: 'roles', pane: 'roles', key: target.key, file: result.file, level: result.level,
     edit: { kind: 'restore', undo_from: result.undo_from, if_unchanged: result.if_unchanged } };
 }
-export function accountModels(list, usage, now) {
+export function accountModels(list, usage, now, checks = []) {
   const providers = usage ? decodeUsage(usage, now).providers : [];
   return (list?.runtimes || []).flatMap(runtime => runtime.accounts.map((account, index) => {
     const provider = providers.find(p => p.runtime === runtime.runtime);
     const observed = provider?.accounts.find(a => a.name === account.name);
     const fallback = { ...account, windows: [], availability: !account.enabled ? 'off' : account.auth?.loggedIn === true ? 'ok' : account.auth?.loggedIn === false ? 'logged_out' : 'unknown',
       capacity: account.limits?.max_jobs, reason: account.auth?.error || account.auth?.detail || null };
-    const model = accountRow(provider || { runtime: runtime.runtime, label: runtime.runtime }, observed || fallback, now);
+    const model = accountRow(provider || { runtime: runtime.runtime, label: runtime.runtime }, withAccountCheck(observed || fallback, checks.find(check => check.runtime === runtime.runtime && check.account === account.name)), now);
     return { ...model, account, providerFirst: index === 0, reason: (observed || fallback).reason,
       toggle: account.can_toggle === true ? { kind: 'switch', label: `${PROVIDERS[runtime.runtime]} ${account.name}`, enabled: account.enabled }
         : { kind: 'badge', tabIndex: 0, text: account.name === 'primary' ? 'primary' : 'discovered', reason: account.toggle_reason || 'This account cannot be toggled' },

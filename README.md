@@ -107,6 +107,7 @@ Per host details: [docs/hosts.md](docs/hosts.md).
 | Use your other Claude profiles | Nothing to set up: `account=claude-work` | [Claude Code](docs/claude-code.md#2-your-other-profiles-work-with-no-setup) |
 | Add a Claude account | `agt accounts add max-2` | [Claude Code](docs/claude-code.md#3-add-more-accounts) |
 | Check a login without using quota | `agt accounts check primary --json` | [Configuration](docs/configuration.md#account-checks-and-switches) |
+| List accounts from cached login and usage | `agt accounts list --cached-only --json` | [Configuration](docs/configuration.md#account-checks-and-switches) |
 | Validate a new account | `agt accounts add max-2 --check --json` | [Configuration](docs/configuration.md#account-checks-and-switches) |
 | Inspect settings for an app | `agt config show --json` | [Configuration](docs/configuration.md#agt-config) |
 | Revert a logged setting | `agt config revert YYYY-MM:LINE --json` | [Configuration](docs/configuration.md#the-log) |

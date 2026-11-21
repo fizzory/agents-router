@@ -4,7 +4,7 @@ import { accountModels as accountModelsJs, filterActivity as filterActivityJs, s
 import { displayValue as displayValueJs, errorMessage as errorMessageJs, labelFor as labelForJs, LEVELS, matches as matchesJs,
   PANES, paneFor as paneForJs, paneForKey as paneForKeyJs, PROVIDERS, rowState as rowStateJs } from '../../logic/settings.js';
 import { testBuildMatches as testBuildMatchesJs, testBuildRows as testBuildRowsJs } from '../../logic/test-build.js';
-import type { RowModel } from '../shared';
+import type { AccountCheck, RowModel } from '../shared';
 import type { ConfigRow, ConfigShow, Level, LevelValue, TestBuildPath } from './api';
 
 export type PaneId = 'general' | 'roles' | 'accounts' | 'sharing' | 'activity' | 'claude' | 'codex' | 'antigravity' | 'kiro';
@@ -62,7 +62,7 @@ export interface AccountModel extends RowModel {
   reason: string | null;
   toggle: { kind: 'switch'; label: string; enabled: boolean } | { kind: 'badge'; text: string; reason: string };
 }
-export const accountModels = (list: unknown, usage: unknown, now: number) => accountModelsJs(list, usage, now) as AccountModel[];
+export const accountModels = (list: unknown, usage: unknown, now: number, checks: AccountCheck[] = []) => accountModelsJs(list, usage, now, checks) as AccountModel[];
 export const accountMatches = (model: AccountModel, query: string) => has(query, model.provider, model.account.name, model.tooltip);
 
 export interface ShareCellModel { label: string; included: boolean; editable: boolean; reason: string; command: string }

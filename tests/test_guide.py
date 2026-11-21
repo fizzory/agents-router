@@ -15,7 +15,7 @@ import unittest
 
 import helpers  # noqa: F401  (isolates the test process from your real folders)
 
-from agents_router import __version__, cli
+from agents_router import __version__, cli, setup_screen
 
 ROOT = Path(__file__).resolve().parents[1]
 GUIDE = ROOT / "src" / "agents_router" / "guides" / "setup.md"
@@ -69,6 +69,19 @@ class GuideTests(unittest.TestCase):
         self.assertIn(INSTALL, head)
         self.assertIn("agt guide setup", head)
         self.assertIn("account=<profile>", head)
+
+    def test_the_skipped_roles_line_has_one_wording(self):
+        """The guide, `roles.means` and `next` carry the same words, so editing one copy alone fails."""
+        text = GUIDE.read_text(encoding="utf-8")
+        copies = re.findall(r'When you want roles[^"\n]*"', text)  # each copy through its closing quote
+        self.assertEqual(len(copies), text.count("When you want roles"), "a copy without its closing quote")
+        self.assertGreaterEqual(len(copies), 3)
+        self.assertEqual(set(copies), {copies[0]}, "the guide's copies of the skipped-roles line differ")
+        line = copies[0]
+        self.assertTrue(line.endswith('."'), line)
+        sentence = line.removesuffix('."')
+        self.assertIn(line, setup_screen.NEXT)
+        self.assertIn(sentence, setup_screen.ROLE_STATES["off"])
 
     def test_skill_frontmatter(self):
         for path in (SKILL, ROOT / "skills" / "agents-router" / "SKILL.md", MAINTAINER / "SKILL.md"):

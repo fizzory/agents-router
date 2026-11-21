@@ -3,5 +3,5 @@
   "identifier": "popover",
   "description": "Only the fixed-purpose popover commands and its event subscriptions.",
   "windows": ["popover"],
-  "permissions": ["allow-get-snapshot", "allow-refresh-usage", "allow-hide-popover", "allow-set-popover-height", "allow-open-settings", "allow-login-account", "allow-check-account", "allow-check-for-updates", "allow-quit-app", "core:event:allow-listen", "core:event:allow-unlisten"]
+  "permissions": ["allow-get-snapshot", "allow-get-account-checks", "allow-refresh-usage", "allow-hide-popover", "allow-show-popover-menu", "allow-set-popover-height", "allow-open-settings", "allow-login-account", "allow-get-login-command", "allow-copy-text", "allow-check-account", "allow-get-update-status", "allow-install-update", "allow-open-releases", "allow-quit-app", "core:event:allow-listen", "core:event:allow-unlisten"]
 }

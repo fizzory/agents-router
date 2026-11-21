@@ -122,6 +122,16 @@ Regenerate the app fixture with `PYTHONPATH=src:tests python3 tests/generate_usa
 account. Primary logins and discovered Claude profiles cannot be toggled; a
 discovered profile also has `found: true`. Use these fields for locked controls.
 
+`accounts list --cached-only --json` reads cached login and usage without calling
+provider auth probes or refreshing Codex usage. Each account also has nullable
+`login_check`: `null` when never explicitly checked, otherwise the stored
+`{account, logged_in, checked_at, error}` result from `accounts check`. A failed
+probe has `logged_in: null` and an error; a successful logged-out check has
+`logged_in: false` and no error. Expired results keep their original `checked_at`
+Unix timestamp so consumers can decide when to check again. The existing `auth`
+field uses only fresh cached login state in this mode, or `null` when unknown.
+The `usage --json` and `accounts check --json` contracts are unchanged.
+
 ```bash
 agt accounts check primary --json                 # this runtime's primary login; Claude by default
 agt accounts check --runtime codex --json         # every account on one runtime

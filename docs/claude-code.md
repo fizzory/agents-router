@@ -80,6 +80,9 @@ agt doctor --live
 
 `accounts list --json` marks those locked rows with `can_toggle: false` and
 `toggle_reason`; discovered profiles also carry `found: true`.
+Add `--cached-only` to read stored login and usage without auth probes or a Codex
+usage refresh. Nullable `login_check` retains the last explicit check, including
+its timestamp and any failure. See [account contracts](configuration.md#account-checks-and-switches).
 
 ## 5. Use it
 

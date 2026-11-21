@@ -19,7 +19,7 @@ from test_roles_cli import RolesBase
 from test_share_plan import MacCopy
 from test_share_sync import YES
 
-from agents_router import account_check, cli, config, jobs, levels, settings_write, synclog, usage_snapshot
+from agents_router import account_check, cli, config, jobs, levels, profiles, settings_write, synclog, usage_snapshot
 from agents_router.share import apply, settings as share_settings
 
 
@@ -150,6 +150,68 @@ class AccountContractTests(ConfigBase):
                                                 "FAKE_HOST_LOG": str(self.root / "host.jsonl")})
         self.fake_env.start()
         self.addCleanup(self.fake_env.stop)
+
+    def test_cached_only_list_never_calls_auth_or_refreshes_usage(self):
+        discovered = self.user_home / ".claude-lab"
+        discovered.mkdir()
+        (discovered / ".claude.json").write_text('{"oauthAccount":{"accountUuid":"fake"}}', encoding="utf-8")
+        usage = self.home / "state" / "codex-usage.json"
+        usage.parent.mkdir(parents=True, exist_ok=True)
+        usage.write_text('{"primary":{"windows":{"five_hour":{"utilization":1}}}}', encoding="utf-8")
+        before = usage.read_bytes()
+        with patch("agents_router.usage_view.refresh_codex", side_effect=AssertionError("list refreshed usage")):
+            for argv in (("list",), ()):
+                code, report = self.json("accounts", *argv, "--cached-only")
+                self.assertEqual(code, 0)
+                self.assertEqual(len(report["runtimes"]), 4)
+                claude = next(row for row in report["runtimes"] if row["runtime"] == "claude")
+                self.assertIn("claude-lab", {row["name"] for row in claude["accounts"]})
+                for runtime in report["runtimes"]:
+                    for row in runtime["accounts"]:
+                        self.assertIsNone(row["auth"])
+                        self.assertIsNone(row["login_check"])
+        records = [json.loads(line) for line in (self.root / "host.jsonl").read_text().splitlines()]
+        self.assertTrue(records)
+        self.assertEqual({row["kind"] for row in records}, {"claude", "codex", "agy", "kiro"})
+        self.assertTrue(all(row["argv"] == ["--version"] for row in records), records)
+        self.assertEqual(usage.read_bytes(), before)
+        for cache in ("account-checks.json", "claude-profiles.json"):
+            self.assertFalse((self.home / "state" / cache).exists())
+
+    def test_cached_list_retains_failed_and_stale_login_checks(self):
+        self.write_config(extra="include_primary = true")
+        now = 1800000000.0
+        for name in ("claude", "codex", "antigravity", "kiro"):
+            with self.subTest(runtime=name), patch("time.time", return_value=now):
+                runtime = config.load_config(cached_only=True).runtime(name)
+                primary = runtime.primary_account()
+                login_folder = self.user_home / ".gemini" if name == "antigravity" else primary.home
+                login_folder.mkdir(parents=True, exist_ok=True)
+                (login_folder / "logged_in").touch()
+                def listed():
+                    code, report = self.json("accounts", "list", "--runtime", name, "--cached-only")
+                    self.assertEqual(code, 0)
+                    return next(row for row in report["accounts"] if row["name"] == "primary")
+                self.assertIsNone(listed()["login_check"])
+                success = account_check.check(runtime, primary)
+                self.assertTrue(success["logged_in"])
+                self.assertEqual(listed()["login_check"], success)
+                self.assertEqual(listed()["auth"], {"loggedIn": True})
+                failed = account_check.check(runtime, primary, timeout=0)
+                self.assertEqual(listed()["login_check"], failed)
+                self.assertEqual(failed["error"], "login check failed")
+                self.assertIsNone(listed()["auth"])
+                # A real successful logged-out check stays distinct from a failed probe.
+                env = {"FAKE_HOST_KIRO_LOGGED_OUT": "1"} if name == "kiro" else {}
+                (login_folder / "logged_in").unlink()
+                with patch.dict(os.environ, env):
+                    logged_out = account_check.check(runtime, primary)
+                self.assertFalse(logged_out["logged_in"])
+                self.assertEqual(listed()["auth"], {"loggedIn": False})
+                self.assertIsNone(logged_out["error"])
+                with patch("time.time", return_value=now + profiles.AUTH_TTL_SECONDS):
+                    self.assertEqual(listed()["login_check"], logged_out)
+                    self.assertIsNone(listed()["auth"])
 
     def test_enable_disable_and_refusals_write_nothing(self):
         code, report = self.json("accounts", "disable", "a1")
@@ -483,6 +545,14 @@ class GoldenFixtureTests(unittest.TestCase):
             self.assertFalse(by_name[name]["can_toggle"])
             self.assertTrue(by_name[name]["toggle_reason"])
         self.assertTrue(by_name["claude-lab"]["found"])
+        cached = fixtures["accounts-list-cached.json"]["runtimes"]
+        checked = {row["name"]: row for row in cached[0]["accounts"]}
+        self.assertTrue(checked["primary"]["login_check"]["logged_in"])
+        self.assertIsNone(checked["primary"]["auth"])
+        self.assertEqual(checked["work"]["login_check"]["error"], "login check failed")
+        self.assertGreater(checked["work"]["login_check"]["checked_at"],
+                           checked["primary"]["login_check"]["checked_at"])
+        self.assertIsNone(cached[1]["accounts"][0]["login_check"])
         roles = {row["name"]: row for row in fixtures["roles-show-panes.json"]["roles"]}
         self.assertEqual(roles["builder"]["access"], "edit")
         self.assertEqual(roles["reviewer"]["sources"]["enabled"]["level"], "local")

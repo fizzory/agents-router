@@ -27,6 +27,7 @@ pub fn autostart_plugin<R: tauri::Runtime>(
 
 pub struct SettingsCore {
     pub(crate) client: AgtClient,
+    pub(crate) account_checks: crate::account_checks::AccountChecks,
     pub(crate) home: PathBuf,
     pub(crate) files: Mutex<HashSet<PathBuf>>,
     pub(crate) panes: Mutex<crate::panes::PaneState>,
@@ -34,6 +35,7 @@ pub struct SettingsCore {
 impl SettingsCore {
     pub fn new(client: AgtClient, home: PathBuf) -> Self {
         Self {
+            account_checks: crate::account_checks::AccountChecks::new(client.clone(), home.clone()),
             client,
             home,
             files: Mutex::new(HashSet::new()),

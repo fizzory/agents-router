@@ -13,10 +13,24 @@
   --tooltip-delay: 400ms;
   --tooltip-time: 100ms;
   --turn-time: 720ms;
-  /* Row entry stagger on fresh usage; the popover caps it at 8 rows. */
+  /* Newly appearing rows only; the popover caps it at 8 rows. */
   --stagger-step: 24ms;
   --turn-curve: linear;
   --copied-delay: 1500ms;
+  /* CSS-only response ladder. Native panel resizing keeps its contract above. */
+  --t-instant: 90ms;
+  --t-quick: 160ms;
+  --t-base: 240ms;
+  --t-slow: 360ms;
+  --spring-settle: cubic-bezier(.22, 1.12, .36, 1);
+  --spring-snap: cubic-bezier(.2, 1.2, .3, 1);
+  --breath-time: 2400ms;
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --spring-settle: linear(0, .12 8%, .38 18%, .7 32%, .9 47%, 1.02 70%, 1.01 84%, 1);
+    --spring-snap: linear(0, .35 12%, .76 28%, 1.04 52%, 1.01 76%, 1);
+  }
 }
 .panel-show { animation: panel-in var(--panel-time) var(--ease-out) both; }
 .setting-flash { animation: setting-flash var(--flash-time) var(--ease-out); }
@@ -26,11 +40,28 @@
 @keyframes number-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes number-out { from { opacity: 1; } to { opacity: 0; } }
 @keyframes panel-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes sheet-in { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
+/* Discrete controls press inward. Rows and menu items use fill feedback only. */
+.button, .switch, .popup-button, .stepper button, .provider-chip, button.source-tag, button.account-badge {
+  transition: background-color var(--hover-time) var(--ease-out), transform var(--t-instant) var(--spring-snap);
+}
+.provider-chip.chip-moving { transition: background-color var(--hover-time) var(--ease-out), transform var(--travel-time) var(--travel-curve); }
+:is(.button, .switch, .popup-button, .stepper button, .provider-chip, button.source-tag, button.account-badge):not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):active { transform: scale(.97); }
+.status-dot[data-breathing="true"] { animation: breath var(--breath-time) var(--ease-out) infinite; }
+@keyframes breath {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .65; transform: scale(.88); }
+}
 body[data-active="false"] *, body[data-active="false"] { animation: none !important; transition: none !important; }
 @media (prefers-reduced-motion: reduce) {
   .content-change .account-scroll, .content-change > .empty-row, .content-change .last-row { animation: number-in var(--cross-fade-time) var(--ease-out) both; }
   .panel-show { animation-name: number-in; }
   .sheet { animation-name: number-in; }
-  .switch, .switch-thumb, .chip-moving { transition: none; }
+  .button, .switch, .popup-button, .stepper button, .provider-chip, button.source-tag, button.account-badge {
+    transition: background-color var(--cross-fade-time) var(--ease-out);
+  }
+  :is(.button, .switch, .popup-button, .stepper button, .provider-chip, button.source-tag, button.account-badge):not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):active { transform: none; }
+  .switch-thumb, .provider-chip.chip-moving { transition: none; }
+  .disclosure-summary::before { transition: none; }
+  .status-dot[data-breathing="true"] { animation: none; }
 }

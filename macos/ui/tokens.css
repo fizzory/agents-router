@@ -2,19 +2,25 @@
    never light-dark(): Safari 17 is the floor. */
 :root {
   color-scheme: light dark;
-  font: 13px/1.3 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font: 13px/1.3 var(--font-text);
   font-variant-numeric: tabular-nums;
-  color: CanvasText;
+  color: var(--ink);
 
   /* Colour */
-  --ink: CanvasText;
-  --ink-muted: #595961;
-  --ground: #f5f5f7;
-  --ground-raised: #ffffff;
-  --ground-field: #ffffff;
-  --ground-sidebar: #e8e8ec;
-  --edge: #8e8e96;
-  --hairline: color-mix(in srgb, CanvasText 9%, transparent);
+  --ink: #1D1F24;
+  --ink-muted: #5E6270;
+  --ground: color-mix(in srgb, #1D1F24 4.5%, white);
+  --ground-raised: #FFFFFF;
+  --ground-field: color-mix(in srgb, var(--ink) 5%, transparent);
+  --ground-sidebar: var(--ground);
+  --fill-tag: color-mix(in srgb, var(--ink) 5%, transparent);
+  --fill-control: color-mix(in srgb, var(--ink) 8%, transparent);
+  --fill-hover: color-mix(in srgb, var(--ink) 12%, transparent);
+  --fill-press: color-mix(in srgb, var(--ink) 16%, transparent);
+  /* 48% falls just below 3:1 on Porcelain. 49% clears both surfaces. */
+  --switch-off: color-mix(in srgb, var(--ink) 49%, transparent);
+  --edge: transparent;
+  --hairline: transparent;
   --signal-ok: #18843c;
   --signal-warn: #835000;
   --signal-bad: #b52d23;
@@ -24,18 +30,25 @@
   --accent-fill: color-mix(in srgb, AccentColor 82%, black);
   --accent-text: color-mix(in srgb, AccentColor 82%, black);
   --selection: color-mix(in srgb, AccentColor 24%, transparent);
-  --hover-tint: color-mix(in srgb, CanvasText 8%, transparent);
-  --gauge-track: color-mix(in srgb, CanvasText 14%, transparent);
-  --gauge-other: color-mix(in srgb, CanvasText 40%, transparent);
-  --gauge-main: color-mix(in srgb, CanvasText 85%, transparent);
+  --hover-tint: var(--fill-hover);
+  --gauge-track: color-mix(in srgb, var(--ink) 10%, transparent);
+  --gauge-other: color-mix(in srgb, var(--ink) 55%, transparent);
+  --gauge-main: color-mix(in srgb, var(--ink) 85%, transparent);
   /* Sheet backdrop: ink at 12% darkens light mode; dark mode needs black to dim. */
-  --sheet-backdrop: color-mix(in srgb, CanvasText 12%, transparent);
+  --sheet-backdrop: color-mix(in srgb, var(--ink) 12%, transparent);
+  --shadow-ambient: 0 2px 8px rgb(0 0 0 / 6%);
+  --shadow-lift: 0 12px 32px rgb(0 0 0 / 12%);
+  --shadow-float: var(--shadow-ambient), var(--shadow-lift);
 
   /* Type: size/line-height pairs */
+  --font-text: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-figure: ui-rounded, -apple-system, system-ui, sans-serif;
   --type-title: 600 13px/16px -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --type-body: 400 13px/16px -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --type-row: 400 12px/16px -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --type-small: 400 11px/14px -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --type-figure: 600 12px/14px var(--font-figure);
+  --type-display: 600 15px/20px var(--font-text);
 
   /* Spacing, radius, sizes */
   --space-1: 2px;
@@ -45,24 +58,37 @@
   --space-5: 12px;
   --space-6: 16px;
   --space-7: 24px;
-  --r-s: 4px;
-  --r-m: 6px;
-  --r-l: 10px;
+  --space-8: 32px;
+  --sq-k: 1;
+  --sq-xs: calc(6px * var(--sq-k));
+  --sq-s: calc(8px * var(--sq-k));
+  --sq-m: calc(10px * var(--sq-k));
+  --sq-l: calc(12px * var(--sq-k));
+  --sq-xl: calc(16px * var(--sq-k));
+  --sq-pill: 999px;
   --hit: 24px;
   --icon: 14px;
   --gauge-width: 56px;
   --gauge-bar: 4px;
   --focus-ring: 2px solid var(--accent);
 }
+@supports (corner-shape: squircle) {
+  :root { --sq-k: 1.5; }
+}
 @media (prefers-color-scheme: dark) {
   :root {
-    --ink-muted: #b3b3bc;
-    --ground: #252529;
-    --ground-raised: #303034;
-    --ground-field: #3c3c43;
-    --ground-sidebar: #1f1f23;
-    --edge: #74747e;
-    --hairline: color-mix(in srgb, CanvasText 12%, transparent);
+    --ink: #ECEDF0;
+    --ink-muted: #A3A7B3;
+    --ground: #17181C;
+    --ground-raised: #202227;
+    --ground-field: color-mix(in srgb, var(--ink) 8%, transparent);
+    --fill-tag: color-mix(in srgb, var(--ink) 8%, transparent);
+    --fill-control: color-mix(in srgb, var(--ink) 12%, transparent);
+    --fill-hover: color-mix(in srgb, var(--ink) 16%, transparent);
+    --fill-press: color-mix(in srgb, var(--ink) 20%, transparent);
+    --switch-off: color-mix(in srgb, var(--ink) 40%, transparent);
+    --shadow-ambient: 0 2px 8px rgb(0 0 0 / 18%);
+    --shadow-lift: 0 12px 32px rgb(0 0 0 / 36%);
     --signal-ok: #3bc865;
     --signal-warn: #ffb12b;
     --signal-bad: #ff453a;
@@ -72,5 +98,8 @@
   }
 }
 @media (prefers-contrast: more) {
-  :root { --hairline: var(--edge); }
+  :root { --edge: #8e8e96; --hairline: var(--edge); }
+  @media (prefers-color-scheme: dark) {
+    :root { --edge: #74747e; }
+  }
 }

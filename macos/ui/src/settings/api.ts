@@ -1,9 +1,10 @@
+import type { AccountCheck } from '../shared/types';
 // The Settings window's slice of tauri.js (the only window.__TAURI__ boundary).
 // main.tsx passes the real adapter; tests pass a fake with the same shape.
 import type { Envelope, Unlisten } from '../popover/api';
-import type { PaneMenuEvent } from '../shared';
+import type { LoginResult, PaneMenuEvent, UpdateDialog, UpdateStatus } from '../shared';
 
-export type { Envelope, Unlisten };
+export type { Envelope, Unlisten, UpdateDialog, UpdateStatus };
 export type Level = 'user' | 'workspace' | 'local';
 type Listen<T> = (handler: (payload: T) => void) => Promise<Unlisten>;
 
@@ -36,13 +37,13 @@ export interface InstallStatus {
   setup_unknown?: boolean;
   can_restore?: boolean;
 }
-export interface UpdateDialog { title: string; detail: string; buttons: [string, string][]; default: string; busy: boolean }
-export interface UpdateStatus { dialog: UpdateDialog | null; received?: number | null; total?: number | null }
 export interface TestBuildPath { key: string; path: string; display?: string; source?: string; origin?: string }
 
 type Call<A extends unknown[] = [], R = unknown> = (...args: A) => Promise<R>;
 
 export interface SettingsApi {
+  getAccountChecks(): Promise<AccountCheck[]>;
+  onAccountChecksStatus(handler: (checks: AccountCheck[]) => void): Promise<Unlisten>;
   getSnapshot: Call<[], Envelope>;
   checkForUpdates: Call;
   configShow: Call<[workspace: string | null], ConfigShow>;
@@ -55,7 +56,7 @@ export interface SettingsApi {
   accountsCheck: Call<[runtime: string, account: string]>;
   accountsAddCheck: Call<[runtime: string, account: string]>;
   accountsToggle: Call<[runtime: string, account: string, enabled: boolean]>;
-  accountsLogin: Call<[runtime: string, account: string]>;
+  accountsLogin: Call<[runtime: string, account: string], LoginResult>;
   accountsAdd: Call<[runtime: string, account: string]>;
   shareList: Call;
   shareStatus: Call;
