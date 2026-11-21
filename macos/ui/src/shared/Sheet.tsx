@@ -68,6 +68,7 @@ export function Sheet({ name, title, detail, children, buttons, defaultAction = 
     <form ref={node} className={`sheet sheet-${name}`} role="alertdialog" aria-modal="true" aria-labelledby={titleId}
       aria-describedby={detail ? detailId : undefined} aria-busy={busy || pending || undefined} tabIndex={-1}
       onSubmit={(event) => event.preventDefault()} onKeyDown={keyDown}>
+      <div className="sheet-elevation" aria-hidden="true" />
       <h2 id={titleId} className="sheet-title">{title}</h2>
       {detail ? <p id={detailId} className="sheet-detail">{detail}</p> : null}
       {children}

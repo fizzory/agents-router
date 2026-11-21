@@ -1,3 +1,4 @@
+pub mod account_checks;
 pub mod app;
 pub mod app_paths;
 pub mod client;
@@ -10,6 +11,8 @@ pub mod models;
 mod native;
 pub mod panes;
 pub mod placement;
+mod popover_menu;
+mod popover_shape;
 pub mod roundtrip;
 #[cfg(feature = "ci-selftest")]
 mod selftest;

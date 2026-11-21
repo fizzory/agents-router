@@ -3,10 +3,11 @@
 use crate::install_app::InstallController;
 use crate::{
     app, diag_log, native,
-    update::{self, CheckResult, Dialog, Schedule, Stage},
+    update::{self, CheckResult, Dialog, Phase, Schedule, Stage},
 };
 use serde::Serialize;
 use std::{
+    future::Future,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering::Relaxed},
@@ -14,7 +15,7 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 #[cfg(debug_assertions)]
@@ -55,21 +56,51 @@ pub fn configure_self_test() {
     std::env::set_var("PATH", "/usr/bin:/bin"); // No real provider CLI can be reached.
 }
 
-#[derive(Clone, Default, Serialize)]
+/// Settings' dialog, and for both windows the version and where it stands.
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct UpdateStatus {
     pub dialog: Option<Dialog>,
     pub received: u64,
     pub total: Option<u64>,
+    pub version: Option<String>,
+    pub phase: Phase,
+    pub retryable: bool,
+    /// Rust's error text for a failed install. The popover shows it only as a tooltip.
+    pub detail: String,
 }
-#[derive(Default)]
-pub struct UpdateController {
+pub struct UpdateController<R: Runtime = tauri::Wry> {
     schedule: Mutex<Schedule>,
     pending: Mutex<Option<Update>>,
     status: Mutex<UpdateStatus>,
+    /// The one install guard, shared by the popover's row and Settings' dialog.
     installing: Mutex<bool>,
+    /// Brings Settings forward for its own dialog. Tests count the calls.
+    foreground: fn(&AppHandle<R>),
 }
-fn publish(app: &tauri::AppHandle, dialog: Option<Dialog>, foreground: bool) {
-    let c = app.state::<UpdateController>();
+impl Default for UpdateController {
+    fn default() -> Self {
+        Self {
+            schedule: Default::default(),
+            pending: Default::default(),
+            status: Default::default(),
+            installing: Default::default(),
+            foreground: open_settings,
+        }
+    }
+}
+fn open_settings(app: &tauri::AppHandle) {
+    app::main_thread(app, |app, mtm| {
+        native::open_settings(&app, mtm, serde_json::json!({"pane":"general"}))
+    });
+}
+/// Both windows get every status: Settings' dialog and the popover's update row.
+fn emit<R: Runtime>(app: &AppHandle<R>, status: &UpdateStatus) {
+    for window in ["settings", "popover"] {
+        let _ = app.emit_to(window, "update-status", status.clone());
+    }
+}
+fn publish<R: Runtime>(app: &AppHandle<R>, dialog: Option<Dialog>, foreground: bool) {
+    let c = app.state::<UpdateController<R>>();
     let status = {
         let mut s = c.status.lock().unwrap();
         s.dialog = dialog;
@@ -77,12 +108,159 @@ fn publish(app: &tauri::AppHandle, dialog: Option<Dialog>, foreground: bool) {
         s.total = None;
         s.clone()
     };
-    let _ = app.emit_to("settings", "update-status", status);
+    emit(app, &status);
     if foreground {
-        app::main_thread(app, |app, mtm| {
-            native::open_settings(&app, mtm, serde_json::json!({"pane":"general"}))
-        });
+        (c.foreground)(app);
     }
+}
+/// A finished check's offer for the popover's row. It replaces a failure row,
+/// never an install in progress.
+pub fn offer<R: Runtime>(app: &AppHandle<R>, version: Option<String>) {
+    let c = app.state::<UpdateController<R>>();
+    // Held while the status changes, so an install can't start in between.
+    let installing = c.installing.lock().unwrap();
+    if *installing {
+        return;
+    }
+    let status = {
+        let mut s = c.status.lock().unwrap();
+        s.phase = if version.is_some() {
+            Phase::Available
+        } else {
+            Phase::Idle
+        };
+        s.version = version;
+        s.retryable = false;
+        s.detail.clear();
+        s.clone()
+    };
+    drop(installing);
+    emit(app, &status);
+}
+/// An install step for both windows. Only Settings' own install shows its
+/// progress dialog and brings Settings forward; the popover's never does.
+fn progress<R: Runtime>(app: &AppHandle<R>, version: &str, phase: Phase, settings: bool) {
+    let c = app.state::<UpdateController<R>>();
+    let status = {
+        let mut s = c.status.lock().unwrap();
+        s.version = Some(version.into());
+        s.phase = phase;
+        s.retryable = false;
+        s.detail.clear();
+        s.received = 0;
+        s.total = None;
+        if settings {
+            s.dialog = Some(Dialog::progress(if phase == Phase::Downloading {
+                "Downloading update…"
+            } else {
+                "Installing update…"
+            }));
+        }
+        s.clone()
+    };
+    emit(app, &status);
+    if settings {
+        (c.foreground)(app);
+    }
+}
+/// Records a failed install while the guard is still held. Settings' install
+/// also gets `Dialog::failure`, its wording unchanged. The returned closure
+/// shows the failure once the guard is free.
+fn failed<R: Runtime>(
+    app: &AppHandle<R>,
+    stage: Stage,
+    error: tauri_plugin_updater::Error,
+    settings: bool,
+) -> impl FnOnce() {
+    let permanent = update::permanent(&error);
+    app::log(&format!(
+        "update failed stage={} permanent={permanent} error={}",
+        stage_name(stage),
+        describe(&error)
+    ));
+    let c = app.state::<UpdateController<R>>();
+    let status = {
+        let mut s = c.status.lock().unwrap();
+        s.phase = stage.failed();
+        s.received = 0;
+        s.total = None;
+        if s.phase == Phase::Idle {
+            // Nothing was waiting to install.
+            s.version = None;
+            s.retryable = false;
+            s.detail.clear();
+        } else {
+            s.retryable = !permanent;
+            s.detail = error.to_string();
+        }
+        if settings {
+            s.dialog = Some(Dialog::failure(stage, permanent, error.to_string()));
+        }
+        s.clone()
+    };
+    let app = app.clone();
+    let foreground = c.foreground;
+    move || {
+        emit(&app, &status);
+        if settings {
+            foreground(&app);
+        }
+    }
+}
+const BUSY: &str = "An update is already installing.";
+/// One install at a time from either window. A busy guard never starts `run`.
+/// `fail` records a failure with the guard held; what it returns runs after the
+/// guard is free, so a Retry shown by it takes one click.
+async fn attempt<E, A: FnOnce()>(
+    guard: &Mutex<bool>,
+    run: impl Future<Output = Result<(), (Stage, E)>>,
+    fail: impl FnOnce(Stage, E) -> A,
+) -> Result<(), &'static str> {
+    {
+        let mut busy = guard.lock().unwrap();
+        if *busy {
+            return Err(BUSY);
+        }
+        *busy = true;
+    }
+    struct Release<'a>(&'a Mutex<bool>);
+    impl Drop for Release<'_> {
+        fn drop(&mut self) {
+            *self.0.lock().unwrap_or_else(|e| e.into_inner()) = false;
+        }
+    }
+    let release = Release(guard);
+    let show = run.await.err().map(|(stage, error)| fail(stage, error));
+    drop(release);
+    if let Some(show) = show {
+        show();
+    }
+    Ok(())
+}
+/// Settings' dialog Install and the popover's Install and Restart or Retry.
+/// `run` is `install`; a busy guard drops it unpolled.
+async fn run_install<R: Runtime>(
+    app: &AppHandle<R>,
+    settings: bool,
+    run: impl Future<Output = Result<(), (Stage, tauri_plugin_updater::Error)>>,
+) -> Result<(), String> {
+    let c = app.state::<UpdateController<R>>();
+    attempt(&c.installing, run, |stage, error| {
+        failed(app, stage, error, settings)
+    })
+    .await
+    .map_err(String::from)
+}
+async fn open_releases_page() -> Result<(), String> {
+    let status = tokio::process::Command::new("/usr/bin/open")
+        .arg(update::RELEASES)
+        .status()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !status.success() {
+        return Err("Couldn't open the releases page.".into());
+    }
+    Ok(())
 }
 /// The configured feed URLs, read from the app config: never the updater's key,
 /// headers or proxy. Each is sanitized on its own, separated by spaces.
@@ -219,6 +397,9 @@ pub fn request(app: &tauri::AppHandle, manual: bool) {
         if r.pending.is_some() || c.pending.lock().unwrap().is_none() {
             app::set_pending_update(&app, r.pending);
         }
+        // Every finished check replaces the popover's row, a failure row included.
+        let offered = c.pending.lock().unwrap().as_ref().map(|u| u.version.clone());
+        offer(&app, offered);
         publish(&app, r.dialog, manual);
     });
 }
@@ -246,7 +427,10 @@ pub fn start(app: &tauri::AppHandle) {
         }
     });
 }
-async fn install(app: &tauri::AppHandle) -> Result<(), (Stage, tauri_plugin_updater::Error)> {
+async fn install(
+    app: &tauri::AppHandle,
+    settings: bool,
+) -> Result<(), (Stage, tauri_plugin_updater::Error)> {
     let c = app.state::<UpdateController>();
     let found = c
         .pending
@@ -261,7 +445,7 @@ async fn install(app: &tauri::AppHandle) -> Result<(), (Stage, tauri_plugin_upda
         .as_ref()
         .ok()
         .and_then(|e| tauri_plugin_updater::extract_path_from_executable(e).ok());
-    publish(app, Some(Dialog::progress("Downloading update…")), true);
+    progress(app, &found.version, Phase::Downloading, settings);
     app::log(&format!(
         "update install start version={} current={} exe={} bundle={} bundle_version={}",
         found.version,
@@ -293,7 +477,7 @@ async fn install(app: &tauri::AppHandle) -> Result<(), (Stage, tauri_plugin_upda
                     s.total = total;
                     s.clone()
                 };
-                let _ = app.emit_to("settings", "update-status", status);
+                emit(app, &status);
             },
             // download() verifies the signature right after this callback.
             || {
@@ -306,7 +490,7 @@ async fn install(app: &tauri::AppHandle) -> Result<(), (Stage, tauri_plugin_upda
         .await
         .map_err(|e| (Stage::Download, e))?;
     app::log(&format!("update signature verified bytes={}", bytes.len()));
-    publish(app, Some(Dialog::progress("Installing update…")), true);
+    progress(app, &found.version, Phase::Installing, settings);
     app::log(&format!(
         "update install replacing bundle={}",
         shown(bundle.as_deref())
@@ -346,42 +530,24 @@ pub async fn update_action(app: tauri::AppHandle, action: String) -> Result<(), 
             request(&app, true);
         }
         "releases" => {
-            let status = tokio::process::Command::new("/usr/bin/open")
-                .arg(update::RELEASES)
-                .status()
-                .await
-                .map_err(|e| e.to_string())?;
-            if !status.success() {
-                return Err("Couldn't open the releases page.".into());
-            }
+            open_releases_page().await?;
             publish(&app, None, false);
         }
-        "install" => {
-            {
-                let mut busy = c.installing.lock().unwrap();
-                if *busy {
-                    return Err("An update is already installing.".into());
-                }
-                *busy = true;
-            }
-            if let Err((stage, error)) = install(&app).await {
-                let permanent = update::permanent(&error);
-                app::log(&format!(
-                    "update failed stage={} permanent={permanent} error={}",
-                    stage_name(stage),
-                    describe(&error)
-                ));
-                publish(
-                    &app,
-                    Some(Dialog::failure(stage, permanent, error.to_string())),
-                    true,
-                );
-            }
-            *c.installing.lock().unwrap() = false;
-        }
+        "install" => run_install(&app, true, install(&app, true)).await?,
         _ => return Err("Unknown update action".into()),
     }
     Ok(())
+}
+/// The popover's Install and Restart, and its Retry: Settings' guard, without
+/// Settings' dialog and without opening Settings.
+#[tauri::command]
+pub async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    run_install(&app, false, install(&app, false)).await
+}
+/// The popover's Open Releases Page: the browser, and nothing else.
+#[tauri::command]
+pub async fn open_releases() -> Result<(), String> {
+    open_releases_page().await
 }
 
 // A debug-only rehearsal in a copied bundle; never accepts a runtime URL/key.
@@ -414,7 +580,7 @@ fn self_test(app: &tauri::AppHandle) {
                 let found = app.updater_builder().timeout(Duration::from_secs(30)).build().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?.ok_or("no test update")?;
                 if found.version != to { return Err(format!("unexpected test version {}, expected {to}", found.version)); }
                 *app.state::<UpdateController>().pending.lock().unwrap() = Some(found);
-                install(&app).await.map_err(|(_, e)| e.to_string())?;
+                install(&app, true).await.map_err(|(_, e)| e.to_string())?;
             } else if version == to {
                 // A second attempt must read the refresh record and do no work.
                 crate::install::refresh_plugins(&c.paths).await?;
@@ -432,4 +598,177 @@ fn self_test(app: &tauri::AppHandle) {
         }
         app::quit(&app);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        cell::Cell,
+        pin::pin,
+        sync::{atomic::AtomicBool, Arc},
+        task::{Context, Poll, Waker},
+    };
+    use tauri::{test::MockRuntime, Listener};
+    use tauri_plugin_updater::Error;
+
+    // The offered update; versions are never spelled in this file.
+    const NEXT: &str = "next";
+    thread_local! {
+        static SETTINGS_OPENED: Cell<usize> = const { Cell::new(0) };
+    }
+    fn count_settings(_: &AppHandle<MockRuntime>) {
+        SETTINGS_OPENED.with(|c| c.set(c.get() + 1));
+    }
+    fn mock_app() -> tauri::App<MockRuntime> {
+        tauri::test::mock_builder()
+            .manage(UpdateController::<MockRuntime> {
+                schedule: Default::default(),
+                pending: Default::default(),
+                status: Default::default(),
+                installing: Default::default(),
+                foreground: count_settings,
+            })
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap()
+    }
+    fn poll<F: Future>(future: std::pin::Pin<&mut F>) -> Poll<F::Output> {
+        future.poll(&mut Context::from_waker(Waker::noop()))
+    }
+
+    #[test]
+    fn attempt_runs_one_install_and_frees_the_guard_before_showing_a_failure() {
+        for stage in [Stage::Download, Stage::Install] {
+            let guard = Mutex::new(false);
+            let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+            let shown = Cell::new(false);
+            let mut first = pin!(attempt(
+                &guard,
+                async {
+                    rx.await.unwrap();
+                    Err((stage, "boom"))
+                },
+                |failed, error| {
+                    assert_eq!((failed, error), (stage, "boom"));
+                    assert!(*guard.lock().unwrap(), "recorded while the guard is held");
+                    || {
+                        assert!(!*guard.lock().unwrap(), "shown once the guard is free");
+                        shown.set(true);
+                    }
+                }
+            ));
+            assert!(poll(first.as_mut()).is_pending());
+            assert!(*guard.lock().unwrap());
+            // A second click while the first install runs starts nothing.
+            let started = Cell::new(false);
+            let second = pin!(attempt(
+                &guard,
+                async {
+                    started.set(true);
+                    Ok::<(), (Stage, &str)>(())
+                },
+                |_, _| || {}
+            ));
+            assert_eq!(poll(second), Poll::Ready(Err(BUSY)));
+            assert!(!started.get());
+            tx.send(()).unwrap();
+            assert_eq!(poll(first), Poll::Ready(Ok(())));
+            assert!(shown.get());
+            // The failure left the guard free: Retry starts a new install.
+            let retried = Cell::new(false);
+            let retry = pin!(attempt(
+                &guard,
+                async {
+                    retried.set(true);
+                    Ok::<(), (Stage, &str)>(())
+                },
+                |_, _| || {}
+            ));
+            assert_eq!(poll(retry), Poll::Ready(Ok(())));
+            assert!(retried.get(), "{stage:?}: a failed install must free the guard");
+        }
+    }
+
+    #[test]
+    fn popover_and_settings_share_one_guard_and_only_settings_comes_forward() {
+        let app = mock_app();
+        let h = app.handle().clone();
+        let c = app.state::<UpdateController<MockRuntime>>();
+        let events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+        let sink = events.clone();
+        h.listen_any("update-status", move |e| {
+            sink.lock()
+                .unwrap()
+                .push(serde_json::from_str(e.payload()).unwrap());
+        });
+        let cases = [
+            // (first install from Settings?, failing stage, error, phase, retryable)
+            (true, Stage::Download, Error::ReleaseNotFound, "download-failed", true),
+            (false, Stage::Download, Error::UnsupportedArch, "download-failed", false),
+            (true, Stage::Install, Error::EmptyEndpoints, "install-failed", false),
+            (false, Stage::Install, Error::ReleaseNotFound, "install-failed", true),
+        ];
+        for (settings, stage, error, phase, retryable) in cases {
+            SETTINGS_OPENED.with(|n| n.set(0));
+            *c.status.lock().unwrap() = UpdateStatus::default();
+            offer(&h, Some(NEXT.into()));
+            assert_eq!(c.status.lock().unwrap().phase, Phase::Available);
+            let detail = error.to_string();
+            let permanent = update::permanent(&error);
+            let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+            let mut first = pin!(run_install(&h, settings, async {
+                progress(&h, NEXT, Phase::Downloading, settings);
+                rx.await.unwrap();
+                progress(&h, NEXT, Phase::Installing, settings);
+                Err((stage, error))
+            }));
+            assert!(poll(first.as_mut()).is_pending());
+            {
+                let s = c.status.lock().unwrap();
+                assert_eq!(s.phase, Phase::Downloading);
+                assert_eq!(s.dialog.is_some(), settings, "only Settings' install shows its dialog");
+            }
+            // Both windows hear every status.
+            events.lock().unwrap().clear();
+            offer(&h, None);
+            assert_eq!(events.lock().unwrap().len(), 0, "a check never replaces an install");
+            emit(&h, &c.status.lock().unwrap());
+            assert_eq!(events.lock().unwrap().len(), 2);
+            // A popover click, rapid or while Settings installs, starts nothing.
+            for again in [false, true] {
+                let started = AtomicBool::new(false);
+                let busy = pin!(run_install(&h, again, async {
+                    started.store(true, Relaxed);
+                    Ok(())
+                }));
+                assert_eq!(poll(busy), Poll::Ready(Err(BUSY.to_string())));
+                assert!(!started.load(Relaxed));
+            }
+            tx.send(()).unwrap();
+            assert_eq!(poll(first), Poll::Ready(Ok(())));
+            let s = c.status.lock().unwrap().clone();
+            assert_eq!(serde_json::to_value(s.phase).unwrap(), phase);
+            assert_eq!((s.retryable, permanent), (retryable, !retryable));
+            assert_eq!(s.detail, detail);
+            assert_eq!(s.version.as_deref(), Some(NEXT));
+            assert_eq!(
+                s.dialog,
+                settings.then(|| Dialog::failure(stage, permanent, detail.clone())),
+                "Settings' wording stays Dialog::failure; the popover gets no dialog"
+            );
+            // Settings' own install comes forward for progress, progress and failure.
+            assert_eq!(SETTINGS_OPENED.with(Cell::get), if settings { 3 } else { 0 });
+            assert!(!*c.installing.lock().unwrap());
+            // Retry: the same command starts a new install at once.
+            let retried = AtomicBool::new(false);
+            let retry = pin!(run_install(&h, false, async {
+                retried.store(true, Relaxed);
+                Err((Stage::Check, Error::ReleaseNotFound))
+            }));
+            assert_eq!(poll(retry), Poll::Ready(Ok(())));
+            assert!(retried.load(Relaxed));
+            let s = c.status.lock().unwrap().clone();
+            assert_eq!((s.phase, s.version.as_deref()), (Phase::Idle, None), "nothing to install hides the row");
+        }
+    }
 }

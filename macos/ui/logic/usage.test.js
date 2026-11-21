@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { backText, busierWindow, decodeUsage, percentText, resetText, stateWord } from "./usage.js";
+import { backText, busierWindow, countdownText, decodeUsage, detailResetText, percentText, resetText, stateWord } from "./usage.js";
 
 // Read the producer's golden contract in each test, never a live CLI or home folder.
 const fixture = () => JSON.parse(readFileSync(new URL("../../../tests/fixtures/app/usage.json", import.meta.url), "utf8"));
@@ -99,4 +99,28 @@ test("back text uses 24-hour local time and never invents a return time", () => 
   assert.equal(backText(account(raw, "recovering").until, raw.generated_at), "");
   assert.equal(backText(account(raw, "unknown").until, raw.generated_at), "");
   assert.equal(backText(until, until), "");
+});
+
+test('countdowns show minutes, hours and days while detail resets always include a clock', () => {
+  const now = fixture().generated_at;
+  for (const [seconds, expected] of [[1, '<1m'], [42 * 60, '42m'], [130 * 60, '2h 10m'], [76 * 3600, '3d 4h']]) {
+    assert.equal(countdownText(now + seconds, now), expected);
+  }
+  for (const until of [null, NaN, now, now - 1]) assert.equal(countdownText(until, now), '');
+  const windows = account(fixture(), 'work').windows;
+  assert.equal(detailResetText(windows[0], now, { timeZone: 'UTC' }), '09:00');
+  assert.equal(detailResetText(windows[1], now, { timeZone: 'UTC' }), 'Sat 08:00');
+});
+
+test('retained checks share final login state without giving Settings the popover checking or Retry UI', async () => {
+  const { withAccountCheck } = await import('./usage.js');
+  const account = { enabled: true, availability: 'unknown', windows: [] };
+  assert.equal(withAccountCheck(account, { phase: 'checking', result: null }).checking, false);
+  const failed = { phase: 'failed', result: { error: 'fake error', logged_in: null } };
+  assert.equal(withAccountCheck(account, failed).check_failed, false);
+  assert.equal(withAccountCheck(account, failed, true).check_failed, true);
+  const loggedOut = { phase: 'complete', result: { error: null, logged_in: false } };
+  assert.equal(withAccountCheck(account, loggedOut).availability, 'logged_out');
+  assert.equal(withAccountCheck(account, loggedOut, true).availability, 'logged_out');
+  assert.equal(withAccountCheck({ ...account, enabled: false, availability: 'off' }, loggedOut).availability, 'off');
 });

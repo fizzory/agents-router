@@ -657,25 +657,49 @@ class SetupRegexGraderTests(unittest.TestCase):
         regex = next(regex for path, _, regex in regex_graders()
                      if path.parents[1].name == "setup-skip-roles" and path.name.startswith("04-"))
         for message in (
-            "Roles: skipped. You can set them up later by asking me.",
-            "Roles: skipped. You can set them up any time by asking me.",
-            "Roles: skipped. You can set them up any time later by asking me.",
-            "You can set roles up later by asking me.",
-            "You can set up roles later by asking.",
-            "Roles can be set up later by asking your agent.",
-            "Roles can be set up later with `orchestrator-setup`.",
-            "You can set roles up later using the orchestrator-setup skill.",
+            "When you want roles, say 'set up my roles'.",
+            'When you want roles, say "set up my roles".',
+            "When you want roles, say “set up my roles”.",
+            "When you want roles, say ‘set up my roles’.",
+            "when you want roles say `set up my roles`",
+            'When you want roles, say **"set up my roles"**.',
+            "When you want roles, say _set up my roles_.",
+            "When you want roles, say __set up my roles__.",
+            "When you want roles, say '_set up my roles_'.",
+            "_When you want roles, say 'set up my roles'._",
+            "When you want roles, say\n'set up my roles'.",
+            "Roles: skipped.\nWhen you want roles, say 'set up my roles'.",
+            "1. Type /reload-plugins here.\n2. Start a new session in claude-ntb.\n"
+            "When you want roles, say 'set up my roles'.",
         ):
             with self.subTest(good=message):
                 self.assertTrue(regex.search(message))
         for message in (
-            "Roles: skipped.", "Roles can be set up later.",
-            "Roles: skipped. Ask me about optional extras.",
+            "You can set roles up later by asking me.",
+            "When you want roles, ask me to set them up.",
+            "You can ask me to set them up later.",
             "You can set them up later by asking me.",
-            "Roles: skipped. You cannot set them up later by asking me.",
+            "You can set roles up any time later by asking me.",
+            "When you want roles, say 'set up roles'.",
+            "When you want roles, say 'set up your roles'.",
+            "When you want roles, say 'redo my roles'.",
+            "When you want roles, say 'set them up'.",
+            "Roles can be set up later with `orchestrator-setup`.",
+            "You can set roles up later using the orchestrator-setup skill.",
+            "When you want roles, tell me.\nThen say 'set up my roles'.",
+            "Roles: skipped.",
         ):
             with self.subTest(bad=message):
                 self.assertFalse(regex.search(message))
+        # The shipped copies must pass too, so rewording them all fails here and not only in a paid run.
+        from agents_router.setup_screen import ROLE_STATES
+
+        guide = (REPO / "src" / "agents_router" / "guides" / "setup.md").read_text(encoding="utf-8")
+        lines = [line for line in guide.splitlines() if "When you want roles" in line]
+        self.assertGreaterEqual(len(lines), 3)
+        for message in (*lines, ROLE_STATES["off"]):
+            with self.subTest(shipped=message):
+                self.assertTrue(regex.search(message))
 
     def test_edit_access_words_grader_requires_a_successful_write_with_the_request(self):
         _, meta, regex = next(grader for grader in regex_graders(EVALS / "agents-router")

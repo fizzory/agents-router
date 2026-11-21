@@ -6,7 +6,7 @@
     "settings"
   ],
   "permissions": [
-    "allow-get-snapshot",
+    "allow-get-snapshot", "allow-get-account-checks",
     "allow-get-settings-target",
     "allow-show-setting-menu",
     "allow-show-pane-menu",

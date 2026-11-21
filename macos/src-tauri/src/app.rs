@@ -1,5 +1,6 @@
 //! Long-lived native refresh/lifecycle and fixed-purpose popover commands.
 use crate::{
+    account_checks::{AccountChecks, CheckSnapshot},
     app_paths::{self, AppPaths},
     client::{AgtClient, ClientError, CommandOutcome, ReadReply, Request},
     diag_log,
@@ -7,8 +8,9 @@ use crate::{
     models::{CommandKind, ConfigShow, Level, Snapshot, Usage},
     native,
     panes::RoleEdit,
+    popover_menu::{self, MenuSession},
     settings::{self, SettingsCore},
-    terminal::{TerminalAction, TerminalLauncher},
+    terminal::{LoginResult, TerminalAction, TerminalLauncher},
     update_app,
     watcher::{SettingsWatcher, WatchPaths},
 };
@@ -79,10 +81,12 @@ fn launcher(paths: &AppPaths) -> Result<PathBuf, String> {
 }
 pub struct AppState {
     client: AgtClient,
+    checks: AccountChecks,
     terminal: TerminalLauncher,
     snapshot: Mutex<PopoverSnapshot>,
     watcher: Mutex<Option<SettingsWatcher>>,
     quitting: AtomicBool,
+    popover_menu: Mutex<MenuSession>,
     pub settings_target: Mutex<serde_json::Value>,
 }
 
@@ -224,6 +228,25 @@ pub fn request_usage(app: &tauri::AppHandle, refresh: bool, reason: &'static str
     });
 }
 
+/// Only the native popover open path calls this; usage reads never do.
+pub fn request_account_checks(app: &tauri::AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let fallback = state.snapshot.lock().expect("snapshot").usage.clone();
+        match state.checks.on_open(fallback).await {
+            Ok(0) => (),
+            Ok(_) => request_usage(&app, false, "automatic-account-check"),
+            Err(error) => {
+                log(&format!("account list failed: {}", error.kind()));
+            }
+        }
+    });
+}
+#[tauri::command]
+fn get_account_checks(state: State<'_, AppState>) -> Vec<CheckSnapshot> {
+    state.checks.snapshots()
+}
 #[tauri::command]
 fn get_snapshot(state: State<'_, AppState>) -> PopoverSnapshot {
     state.snapshot.lock().expect("snapshot").clone()
@@ -302,6 +325,58 @@ fn show_setting_menu(window: tauri::WebviewWindow, key: String) -> Result<(), St
     Menu::with_items(&window, &[&item])
         .and_then(|menu| window.popup_menu(&menu))
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn show_popover_menu(window: tauri::WebviewWindow, x: f64, y: f64) -> Result<(), String> {
+    if window.label() != "popover" {
+        return Err("Only the popover has a More menu".into());
+    }
+    let anchor = popover_menu::logical_anchor(x, y)?;
+    let (send, receive) = tokio::sync::oneshot::channel();
+    let app = window.app_handle().clone();
+    app.run_on_main_thread(move || {
+        let result = (|| -> tauri::Result<()> {
+            let app = window.app_handle();
+            let update = MenuItem::with_id(
+                &window,
+                popover_menu::CHECK_UPDATES,
+                "Check for Updates…",
+                true,
+                None::<&str>,
+            )?;
+            let separator = PredefinedMenuItem::separator(&window)?;
+            let quit = MenuItem::with_id(
+                &window,
+                popover_menu::QUIT,
+                "Quit Agents Router",
+                true,
+                Some("Cmd+Q"),
+            )?;
+            let menu = Menu::with_items(&window, &[&update, &separator, &quit])?;
+            let state = app.state::<AppState>();
+            if !state.popover_menu.lock().expect("popover menu").begin() {
+                return Ok(());
+            }
+            // AppKit tracks synchronously in a nested loop. Do not hold the
+            // guard's lock: focus events can be delivered inside that loop.
+            let mtm = MainThreadMarker::new().expect("menu on main thread");
+            let (result, selected) = native::track_popover_menu(mtm, || {
+                window.popup_menu_at(&menu, tauri::LogicalPosition::new(anchor.x, anchor.y))
+            });
+            popover_menu::close(
+                &state.popover_menu,
+                || native::popover_menu_dismissal(app, mtm, selected),
+                || native::hide(app, mtm, "menu-outside"),
+                || native::focus_popover(app, mtm),
+            );
+            result
+        })()
+        .map_err(|error| error.to_string());
+        let _ = send.send(result);
+    })
+    .map_err(|error| error.to_string())?;
+    receive.await.map_err(|error| error.to_string())?
 }
 #[tauri::command]
 async fn copy_text(app: tauri::AppHandle, text: String) -> Result<(), String> {
@@ -515,14 +590,15 @@ async fn accounts_login(
     settings: State<'_, SettingsCore>,
     runtime: String,
     account: String,
-) -> Result<(), String> {
-    terminal_handoff(
-        &state,
-        settings
-            .account_action(&runtime, &account, false)
-            .map_err(|e| e.to_string())?,
-    )
-    .await
+) -> Result<LoginResult, String> {
+    let action = settings
+        .account_action(&runtime, &account, false)
+        .map_err(|e| e.to_string())?;
+    state
+        .terminal
+        .login(&action)
+        .await
+        .map_err(|e| e.to_string())
 }
 #[tauri::command]
 async fn setup_roles(state: State<'_, AppState>) -> Result<(), String> {
@@ -656,22 +732,83 @@ fn known_account(state: &AppState, runtime: &str, account: &str) -> Result<(), S
         .map(|_| ())
         .ok_or_else(|| "Account is no longer in the snapshot".into())
 }
+
+#[cfg(test)]
+mod account_command_tests {
+    use super::*;
+    use crate::terminal::tests::Scratch;
+
+    #[tokio::test]
+    async fn unknown_account_is_rejected_by_both_login_commands_before_handoff() {
+        let scratch = Scratch::new("unknown-login");
+        let launcher = scratch.0.join("never-executed-agt");
+        let client =
+            AgtClient::with_env(launcher.clone(), vec![], Some(scratch.0.clone())).unwrap();
+        let usage: Usage =
+            serde_json::from_slice(include_bytes!("../../../tests/fixtures/app/usage.json"))
+                .unwrap();
+        let state = AppState {
+            checks: AccountChecks::new(client.clone(), scratch.0.clone()),
+            client,
+            terminal: TerminalLauncher::new(launcher, scratch.0.join("handoffs")).unwrap(),
+            snapshot: Mutex::new(PopoverSnapshot {
+                usage: Some(usage),
+                ..Default::default()
+            }),
+            watcher: Mutex::new(None),
+            quitting: AtomicBool::new(false),
+            popover_menu: Mutex::new(MenuSession::default()),
+            settings_target: Mutex::new(serde_json::json!({})),
+        };
+        let app = tauri::test::mock_builder()
+            .manage(state)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        assert!(known_account(&app.state::<AppState>(), "claude", "claude-work").is_ok());
+        for (runtime, account) in [
+            ("claude", "unknown"),
+            ("unknown", "claude-work"),
+            ("claude", "--help"),
+        ] {
+            let expected = known_account(&app.state::<AppState>(), runtime, account).unwrap_err();
+            assert_eq!(
+                get_login_command(app.state(), runtime.into(), account.into()).unwrap_err(),
+                expected
+            );
+            assert_eq!(
+                login_account(app.state(), runtime.into(), account.into())
+                    .await
+                    .unwrap_err(),
+                expected
+            );
+        }
+        assert!(!scratch.0.join("handoffs").exists());
+    }
+}
 #[tauri::command]
 async fn login_account(
     state: State<'_, AppState>,
     runtime: String,
     account: String,
-) -> Result<(), String> {
+) -> Result<LoginResult, String> {
     known_account(&state, &runtime, &account)?;
-    let handoff = state
-        .terminal
-        .prepare(&TerminalAction::Login { account, runtime })
-        .map_err(|e| e.to_string())?;
     state
         .terminal
-        .open(&handoff)
+        .login(&TerminalAction::Login { account, runtime })
         .await
-        .map_err(|e| format!("{e}. Copy: {}", handoff.copy_command))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn get_login_command(
+    state: State<'_, AppState>,
+    runtime: String,
+    account: String,
+) -> Result<String, String> {
+    known_account(&state, &runtime, &account)?;
+    state
+        .terminal
+        .command(&TerminalAction::Login { account, runtime })
+        .map_err(|e| e.to_string())
 }
 #[tauri::command]
 async fn check_account(
@@ -681,26 +818,13 @@ async fn check_account(
     account: String,
 ) -> Result<serde_json::Value, String> {
     known_account(&state, &runtime, &account)?;
-    let mut request = Request::new(CommandKind::AccountsCheck, None);
-    request.arguments = vec![account, "--runtime".into(), runtime];
-    let reply = state
-        .client
-        .read(request)
-        .await
-        .map_err(|e| e.to_string())?
-        .await
-        .map_err(|e| e.to_string())?;
-    let result = match reply {
-        ReadReply::Fresh {
-            result: Ok(CommandOutcome::Data(data)),
-            ..
-        } => serde_json::to_value(data).map_err(|e| e.to_string()),
-        ReadReply::Fresh {
-            result: Err(error), ..
-        } => Err(error.to_string()),
-        ReadReply::Superseded { .. } => Err("A newer account check is running".into()),
-        _ => Err("Account check refused".into()),
-    };
+    let result = settings::outcome_json(
+        state
+            .checks
+            .check(runtime, account, true)
+            .await
+            .map_err(|e| e.to_string())?,
+    );
     request_usage(&app, false, "account-check");
     result
 }
@@ -939,6 +1063,7 @@ pub fn run() {
         terminal
     };
     let state = AppState {
+        checks: settings.account_checks.clone(),
         client,
         terminal,
         snapshot: Mutex::new(PopoverSnapshot {
@@ -947,6 +1072,7 @@ pub fn run() {
         }),
         watcher: Mutex::new(None),
         quitting: AtomicBool::new(false),
+        popover_menu: Mutex::new(MenuSession::default()),
         settings_target: Mutex::new(serde_json::json!({"pane":"general"})),
     };
     // The login item follows the bundle identifier, so a test build never replaces
@@ -980,6 +1106,7 @@ pub fn run() {
         .manage(paths)
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
+            get_account_checks,
             install_app::get_install_status,
             install_app::install_action,
             refresh_usage,
@@ -989,6 +1116,7 @@ pub fn run() {
             get_settings_target,
             show_setting_menu,
             show_pane_menu,
+            show_popover_menu,
             copy_text,
             setup_roles,
             activity_undo_sync,
@@ -1014,58 +1142,76 @@ pub fn run() {
             get_open_at_login,
             set_open_at_login,
             login_account,
+            get_login_command,
             check_account,
             check_for_updates,
             update_app::get_update_status,
             update_app::update_action,
+            update_app::install_update,
+            update_app::open_releases,
             test_build_paths,
             quit_app
         ])
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            id if id.starts_with("pane-action:") => {
-                if let Some((token, action)) = id["pane-action:".len()..].split_once(':') {
-                    if pane_action_label(action).is_some() {
+        .on_menu_event(|app, event| {
+            if popover_menu::dispatch(event.id.as_ref(), || update_requested(app), || quit(app)) {
+                return;
+            }
+            match event.id.as_ref() {
+                id if id.starts_with("pane-action:") => {
+                    if let Some((token, action)) = id["pane-action:".len()..].split_once(':') {
+                        if pane_action_label(action).is_some() {
+                            let _ = app.emit_to(
+                                "settings",
+                                "pane-menu",
+                                serde_json::json!({"token":token,"action":action}),
+                            );
+                        }
+                    }
+                }
+                id if id.starts_with("setting-history:") => {
+                    let key = &id["setting-history:".len()..];
+                    let _ = app.emit_to(
+                        "settings",
+                        "settings-history",
+                        serde_json::json!({"key":key}),
+                    );
+                }
+                "settings-undo" | "settings-redo" => {
+                    if app
+                        .get_webview_window("settings")
+                        .is_some_and(|w| w.is_visible().unwrap_or(false))
+                    {
+                        let action = if event.id.as_ref() == "settings-undo" {
+                            "undo"
+                        } else {
+                            "redo"
+                        };
                         let _ = app.emit_to(
                             "settings",
-                            "pane-menu",
-                            serde_json::json!({"token":token,"action":action}),
+                            "settings-edit",
+                            serde_json::json!({"action":action}),
                         );
                     }
                 }
+                "quit" => quit(app),
+                _ => (),
             }
-            id if id.starts_with("setting-history:") => {
-                let key = &id["setting-history:".len()..];
-                let _ = app.emit_to(
-                    "settings",
-                    "settings-history",
-                    serde_json::json!({"key":key}),
-                );
-            }
-            "settings-undo" | "settings-redo" => {
-                if app
-                    .get_webview_window("settings")
-                    .is_some_and(|w| w.is_visible().unwrap_or(false))
-                {
-                    let action = if event.id.as_ref() == "settings-undo" {
-                        "undo"
-                    } else {
-                        "redo"
-                    };
-                    let _ = app.emit_to(
-                        "settings",
-                        "settings-edit",
-                        serde_json::json!({"action":action}),
-                    );
-                }
-            }
-            "quit" => quit(app),
-            _ => (),
         })
         .on_window_event(|window, event| {
             let app = window.app_handle();
             match event {
                 tauri::WindowEvent::Focused(false) if window.label() == "popover" => {
-                    main_thread(app, |app, mtm| native::hide(&app, mtm, "blur"))
+                    main_thread(app, |app, mtm| {
+                        let hide = app
+                            .state::<AppState>()
+                            .popover_menu
+                            .lock()
+                            .expect("popover menu")
+                            .hide_on_blur(native::popover_is_key(&app, mtm));
+                        if hide {
+                            native::hide(&app, mtm, "blur");
+                        }
+                    })
                 }
                 tauri::WindowEvent::Focused(true) if window.label() == "settings" => {
                     request_usage(app, true, "reactivation")
@@ -1101,6 +1247,14 @@ pub fn run() {
             }
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             native::create_panel(app, mtm)?;
+            let handle = app.handle().clone();
+            app.state::<AppState>()
+                .checks
+                .set_publisher(std::sync::Arc::new(move |snapshots| {
+                    for window in ["popover", "settings"] {
+                        let _ = handle.emit_to(window, "account-checks-status", &snapshots);
+                    }
+                }));
             TrayIconBuilder::with_id(TRAY_ID)
                 .menu(&tray_menu(app.handle(), None)?)
                 .show_menu_on_left_click(false)
@@ -1168,7 +1322,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             {
                 if let Ok(version) = std::env::var("AGT_APP_TEST_UPDATE_VERSION") {
-                    set_pending_update(app.handle(), Some(version));
+                    set_pending_update(app.handle(), Some(version.clone()));
+                    update_app::offer(app.handle(), Some(version));
                 }
                 debug_self_test(app.handle());
             }
@@ -1225,6 +1380,7 @@ fn debug_self_test(app: &tauri::AppHandle) {
                 );
             }
             set_pending_update(&app, None);
+            update_app::offer(&app, None);
         });
         tokio::time::sleep(Duration::from_secs(1)).await;
         main_thread(&app, |app, _mtm| {

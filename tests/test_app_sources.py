@@ -5,6 +5,8 @@ Tauri permission IDs used by each window (including app-command permissions).
 Each capability must name that one window and match its declaration exactly.
 Steps 4–6 update both when adding calls to the single ui/tauri.js adapter. Broad
 default groups, wildcards, scopes, and remote capabilities cannot pass this gate.
+Each tauri.js invoke names a command build.rs and generate_handler! register.
+A window's command grants are exactly the commands its src/<window>/api.ts uses.
 
 The Safari denylist comes from plan.md §8 row 15, research-tauri.md R1/R4, and
 probe-tauri/css-scan.py / css-counts.md. It deliberately also bans all nesting.
@@ -325,6 +327,17 @@ def check_sources(root, *, release=False):
     if "= sanitize(" not in body(diag_code, "pub fn record("):
         fail("diag-log", "diag_log::record must sanitize every message")
     app_rs = uncomment((cargo / "src/app.rs").read_text(encoding="utf-8"))
+    native_rs = uncomment((cargo / "src/native.rs").read_text(encoding="utf-8"))
+    check_call = r"\b(?:app::)?request_account_checks\s*\(\s*app\s*\)\s*;"
+    if (len(re.findall(check_call, native_rs)) != 1
+            or not re.search(check_call, body(native_rs, "fn show_from("))
+            or re.search(check_call, app_rs)
+            or "request_account_checks" in body(app_rs, "pub fn request_usage(")):
+        fail("account-checks", "only native popover opening may request account checks, once per open; usage polling must not")
+    open_checks = body(app_rs, "pub fn request_account_checks(")
+    if not re.search(r"Ok\(0\)\s*=>\s*\(\)", open_checks) or not re.search(
+            r"Ok\(_\)\s*=>\s*request_usage\(", open_checks):
+        fail("account-checks", "automatic checks must refresh usage only when a check ran")
     if "diag_log::write(message);" not in body(app_rs, "pub fn log(message: &str) {"):
         fail("diag-log", "app::log must write the diagnostic log as well as stderr")
     trace = body(app_rs, "pub fn trace(message: &str) {")
@@ -517,6 +530,47 @@ def check_sources(root, *, release=False):
     if set(capabilities) != windows or not isinstance(enabled, list) or set(enabled) != windows:
         fail("capability", "enable exactly one explicit capability per window")
 
+    # Each tauri.js adapter invokes one registered command. Each window's command
+    # grants are exactly the commands its api.ts slice uses: no more, no fewer.
+    adapter_js = uncomment((root / UI / "tauri.js").read_text(encoding="utf-8"))
+    adapters = {}
+    for name, block in re.findall(r"^export (?:const|function) (\w+)(.*?)(?=^export |\Z)", adapter_js, re.S | re.M):
+        invoked = re.findall(r"""\binvoke\(\s*["'](\w+)["']""", block)
+        if len(invoked) > 1:
+            fail("adapter-grants", f"tauri.js {name} invokes more than one command")
+        if invoked:
+            adapters[name] = invoked[0]
+    if len(re.findall(r"\binvoke\s*\(", adapter_js)) != len(adapters):
+        fail("adapter-grants", "every invoke in tauri.js must be one exported adapter's literal command")
+    build_rs = uncomment((cargo / "build.rs").read_text(encoding="utf-8"))
+    built = re.search(r"\.commands\(&\[(.*?)\]\)", build_rs, re.S)
+    built = re.findall(r'"(\w+)"', built[1]) if built else []
+    handlers = re.search(r"generate_handler!\[(.*?)\]", uncomment((cargo / "src/app.rs").read_text(encoding="utf-8")), re.S)
+    handlers = re.findall(r"(?:\w+::)*(\w+)", handlers[1]) if handlers else []
+    if not built or set(built) != set(handlers) or len(built) != len(set(built)) or len(handlers) != len(set(handlers)):
+        fail("adapter-grants", "build.rs commands and app.rs generate_handler! must name the same commands once each")
+    for name, command in sorted(adapters.items()):
+        if command not in built or command not in handlers:
+            fail("adapter-grants", f"tauri.js {name} invokes {command}, which build.rs and generate_handler! do not register")
+    for label in sorted(windows):
+        api_ts = root / UI / "src" / label / "api.ts"
+        slice_ = re.search(rf"export interface {label.capitalize()}Api \{{(.*?)\n\}}",
+                           uncomment(api_ts.read_text(encoding="utf-8")) if api_ts.is_file() else "", re.S)
+        if not slice_:
+            fail("adapter-grants", f"{label} needs src/{label}/api.ts with its {label.capitalize()}Api slice")
+            continue
+        members = set(re.findall(r"^ {2}(\w+)\??\s*[(:<]", slice_[1], re.M))
+        exported = set(re.findall(r"^export (?:const|function) (\w+)", adapter_js, re.M))
+        # Settings casts the adapter (as unknown as SettingsApi), so tsc does not catch this.
+        if members - exported:
+            fail("adapter-grants", f"{label}'s api.ts names adapters tauri.js lacks: {sorted(members - exported)}")
+        want = {"allow-" + adapters[member].replace("_", "-") for member in members if member in adapters}
+        for source, grants in ((f"capabilities/{label}.json", capabilities.get(label, {}).get("permissions", [])),
+                               ("window-permissions.json", declared.get(label, []))):
+            got = {p for p in grants if isinstance(p, str) and not p.startswith("core:")} if isinstance(grants, list) else set()
+            if got != want:
+                fail("adapter-grants", f"{label}: {source} grants unused {sorted(got - want)} and lacks {sorted(want - got)}")
+
     inventory = load_json(root / UI / "settings-inventory.json").get("settings", {})
     if not isinstance(inventory, dict) or set(inventory) != set(KEYS):
         fail("settings-inventory", "every config show --all key needs exactly one UI mapping")
@@ -574,6 +628,75 @@ def check_sources(root, *, release=False):
         if (re.search(r"SF[ -]Symbols|com\.apple\.SF|(?:imageWith|system)SymbolName", text, re.I)
                 or path.suffix == ".svg" and re.search(r'''<g\b[^>]*\bid=["'](?:Symbols|Guides|Notes)["']''', text)):
             fail("symbols", f"{path.relative_to(root)} references SF Symbols")
+
+    # AppKit owns the popover's corners; the page paints a plain rectangle.
+    popover_css = uncomment((root / UI / "src/popover/popover.css").read_text(encoding="utf-8"))
+    for selectors, declarations in re.findall(r"([^{}]+)\{([^{}]*)\}", popover_css):
+        if not re.search(r"(?<![\w-])(?:html|body|#root)(?![\w-])", selectors):
+            continue
+        if re.search(r"\b(?:border(?:-[a-z-]+)?-radius|corner-shape|clip(?:-path)?|mask(?:-[a-z-]+)?)\s*:"
+                     r"|\boverflow(?:-[xy])?\s*:\s*(?:hidden|clip)\b", declarations):
+            fail("popover-shape", "popover body/root must leave corner clipping to the native panel")
+
+    # One updater, one install guard. The popover's Install and Restart and its
+    # Retry share Settings' guard, without Settings' dialog or window; its
+    # releases command opens the releases page and nothing else.
+    update = uncomment((cargo / "src/update_app.rs").read_text(encoding="utf-8")).split("#[cfg(test)]\nmod tests", 1)[0]
+    update = update.replace(body(update, "fn self_test("), "")  # the debug-only rehearsal drives install itself
+    popover_install = body(update, "pub async fn install_update(")
+    if ("run_install(&app, false, install(&app, false))" not in popover_install
+            or re.search(r"\b(?:open_settings|foreground|native::)", popover_install)):
+        fail("update-guard", "install_update must run install(&app, false) through run_install, and never open Settings")
+    if ('"install" => run_install(&app, true, install(&app, true))' not in body(update, "pub async fn update_action(")
+            or "attempt(&c.installing," not in body(update, "async fn run_install<")
+            or len(re.findall(r"(?<!fn )(?<!\.)\binstall\s*\(", update)) != 2
+            or len(re.findall(r"\brun_install\(&app, (true|false), install\(&app, \1\)\)", update)) != 2):
+        fail("update-guard", "every install must go through run_install and its one guard, c.installing")
+    if (not re.fullmatch(r"\s*->\s*Result<\(\), String>\s*\{\s*open_releases_page\(\)\.await\s*",
+                         body(update, "pub async fn open_releases()"))
+            or ".arg(update::RELEASES)" not in body(update, "async fn open_releases_page(")):
+        fail("update-guard", "open_releases must only open update::RELEASES")
+    if not re.search(r'for window in \["settings", "popover"\] \{\s*let _ = app\.emit_to\(window, "update-status",',
+                     body(update, "fn emit<")):
+        fail("update-guard", "update-status must reach both the settings and the popover window")
+    grants = {label: set(load_json(cargo / "capabilities" / f"{label}.json").get("permissions", []))
+              for label in ("popover", "settings")}
+    if (not {"allow-get-update-status", "allow-install-update", "allow-open-releases"} <= grants["popover"]
+            or grants["popover"] & {"allow-update-action", "allow-check-for-updates"}
+            or not {"allow-get-update-status", "allow-update-action"} <= grants["settings"]
+            or grants["settings"] & {"allow-install-update", "allow-open-releases"}):
+        fail("update-guard", "install_update and open_releases are the popover's; update_action is Settings'")
+
+    # The native popover glue: AppKit draws the shadow and keeps it in step with
+    # every frame change, Reduce Motion picks a snap, and a menu pick is recorded.
+    if "window.setHasShadow(SHAPE.has_shadow);" not in body(native_rs, "fn apply_popover_shape("):
+        fail("popover-glue", "apply_popover_shape must set the panel's shadow")
+    observer = body(native_rs, "fn observe_popover_resize(")
+    if ("resized.invalidateShadow();" not in observer or "Some(NSWindowDidResizeNotification)" not in observer
+            or "Some(window)," not in observer):
+        fail("popover-glue", "the popover's resize observer must invalidate its shadow on each resize")
+    frame = body(native_rs, "fn set_frame(")
+    if (not re.search(r"if resize\.invalidate_shadow\(ShadowUpdate::AnimationCompleted\) \{\s*"
+                      r"window\.invalidateShadow\(\);\s*\}\s*\}\);\s*"
+                      r"context\.setCompletionHandler\(Some\(&completed\)\);", frame)
+            or not re.search(r"NSAnimationContext::endGrouping\(\);\s*"
+                             r"if resize\.invalidate_shadow\(ShadowUpdate::SnapCompleted\) \{\s*"
+                             r"window\.invalidateShadow\(\);\s*\}\s*$", frame)):
+        fail("popover-glue", "set_frame must invalidate the shadow when an animation completes and after a snap")
+    if not re.search(r"Resize::choose\(\s*panel\.is_visible\(\),\s*"
+                     r"NSWorkspace::sharedWorkspace\(\)\.accessibilityDisplayShouldReduceMotion\(\),\s*duration_ms,?\s*\)",
+                     body(native_rs, "pub fn resize(")):
+        fail("popover-glue", "resize must pass the Reduce Motion setting to Resize::choose")
+    panel = body(native_rs, "pub fn create_panel(")
+    if "apply_popover_shape(ns_panel)?;" not in panel or "observe_popover_resize(ns_panel);" not in panel:
+        fail("popover-glue", "create_panel must apply the popover's shape and observe its resizes")
+    menu = body(native_rs, "pub fn track_popover_menu<")
+    if (not re.search(r"RcBlock::new\(move \|_note: NonNull<NSNotification>\| record\.set\(true\)\)", menu)
+            or "Some(NSMenuDidSendActionNotification)," not in menu
+            or not re.search(r"\(result, selected\.get\(\)\)\s*$", menu)
+            or not re.search(r"let \(result, selected\) = native::track_popover_menu\(", app_rs)
+            or "native::popover_menu_dismissal(app, mtm, selected)" not in app_rs):
+        fail("popover-glue", "a popover menu pick must be recorded and passed to popover_menu_dismissal")
 
     # tray-icon delivers clicks through its own subview of the status button, sized
     # only by its setters. A native image or title change grows the button past it;
@@ -673,6 +796,135 @@ def check_sources(root, *, release=False):
 class AppSourceTests(unittest.TestCase):
     def test_current_tree(self):
         self.assertEqual(check_sources(ROOT), [])
+
+    def test_account_checks_run_once_on_popover_open_and_never_on_usage_polling(self):
+        app = TAURI / "src/app.rs"
+        native = TAURI / "src/native.rs"
+        changes = [
+            (native, "    app::request_account_checks(app);", ""),
+            (app, "pub fn request_usage(app: &tauri::AppHandle, refresh: bool, reason: &'static str) {",
+             "pub fn request_usage(app: &tauri::AppHandle, refresh: bool, reason: &'static str) {\n    request_account_checks(app);"),
+            (native, "    app::request_account_checks(app);", "    app::request_account_checks(app);\n    app::request_account_checks(app);"),
+            (app, '                tauri::WindowEvent::Focused(true) if window.label() == "settings" => {',
+             '                tauri::WindowEvent::Focused(true) if window.label() == "popover" => { request_account_checks(app); }\n'
+             '                tauri::WindowEvent::Focused(true) if window.label() == "settings" => {'),
+            (app, "            Ok(0) => (),", '            Ok(0) => request_usage(&app, false, "automatic-account-check"),'),
+        ]
+        for path, old, new in changes:
+            with self.subTest(path=path, mutation=new):
+                def mutate(root):
+                    text = (root / path).read_text()
+                    self.assertIn(old, text)
+                    self.write(root, path, text.replace(old, new, 1))
+                self.reject("account-checks", mutate)
+
+    def test_rejects_popover_body_or_root_corner_clipping(self):
+        for selector, declaration in [
+            ("body", "border-radius: var(--sq-xl)"),
+            ("#root", "border-top-left-radius: 16px"),
+            ("html, body", "overflow: hidden"),
+            ("body", "overflow-y: clip"),
+            ("body", "corner-shape: squircle"),
+            ("#root", "clip-path: inset(0 round 16px)"),
+            ("body", "mask-image: url(corners.svg)"),
+        ]:
+            with self.subTest(selector=selector, declaration=declaration):
+                def mutate(root):
+                    path = UI / "src/popover/popover.css"
+                    self.write(root, path, (root / path).read_text() + f"\n{selector} {{ {declaration}; }}\n")
+                self.reject("popover-shape", mutate)
+
+    def reject_changes(self, rule, changes):
+        for path, old, new in changes:
+            with self.subTest(path=path, mutation=new):
+                def mutate(root):
+                    text = (root / path).read_text()
+                    self.assertEqual(text.count(old), 1, old)
+                    self.write(root, path, text.replace(old, new))
+                self.reject(rule, mutate)
+
+    def test_rejects_a_second_install_path_settings_from_the_popover_or_a_one_window_status(self):
+        update = TAURI / "src/update_app.rs"
+        popover, settings = TAURI / "capabilities/popover.json", TAURI / "capabilities/settings.json"
+        self.reject_changes("update-guard", [
+            (update, "    run_install(&app, false, install(&app, false)).await",
+             "    run_install(&app, true, install(&app, true)).await"),
+            (update, "    run_install(&app, false, install(&app, false)).await",
+             "    open_settings(&app);\n    run_install(&app, false, install(&app, false)).await"),
+            (update, "    run_install(&app, false, install(&app, false)).await",
+             "    install(&app, false).await.map_err(|(_, e)| e.to_string())"),
+            (update, '"install" => run_install(&app, true, install(&app, true)).await?,',
+             '"install" => install(&app, true).await.map_err(|(_, e)| e.to_string())?,'),
+            (update, "    attempt(&c.installing, run, |stage, error| {",
+             "    attempt(&Mutex::new(false), run, |stage, error| {"),
+            (update, "    open_releases_page().await\n}",
+             '    let _ = tokio::process::Command::new("/usr/bin/true").status().await;\n    open_releases_page().await\n}'),
+            (update, ".arg(update::RELEASES)", '.arg("https://example.com")'),
+            (update, 'for window in ["settings", "popover"] {', 'for window in ["settings"] {'),
+            (popover, '"allow-install-update", ', ""),
+            (popover, '"allow-open-releases", ', ""),
+            (popover, '"allow-get-update-status", ', ""),
+            (popover, '"allow-quit-app"', '"allow-quit-app", "allow-update-action"'),
+            (settings, '"allow-update-action",', '"allow-update-action", "allow-install-update",'),
+            (settings, '"allow-get-update-status",', ""),
+        ])
+
+    def test_rejects_an_adapter_command_its_window_cannot_reach_or_does_not_use(self):
+        # Grants move in both files at once, so [capability] stays quiet and only
+        # [adapter-grants] sees a grant that no api.ts adapter uses, or a missing one.
+        def regrant(root, label, add, drop):
+            path = TAURI / f"capabilities/{label}.json"
+            cap = json.loads((root / path).read_text())
+            declared = json.loads((root / UI / "window-permissions.json").read_text())
+            for grants in (cap["permissions"], declared[label]):
+                for permission in drop:
+                    grants.remove(permission)
+                grants.extend(add)
+            self.write(root, path, json.dumps(cap))
+            self.write(root, UI / "window-permissions.json", json.dumps(declared))
+        for label, add, drop in [("settings", ["allow-open-releases"], []),
+                                 ("popover", [], ["allow-open-releases"]),
+                                 ("popover", [], ["allow-check-account"]),
+                                 ("settings", ["allow-quit-app"], [])]:
+            with self.subTest(label=label, add=add, drop=drop):
+                root = self.temp_tree()
+                regrant(root, label, add, drop)
+                errors = check_sources(root)
+                self.assertTrue(any(error.startswith("[adapter-grants]") for error in errors), errors)
+                self.assertFalse(any(error.startswith("[capability]") for error in errors), errors)
+        tauri_js, settings_api = UI / "tauri.js", UI / "src/settings/api.ts"
+        self.reject_changes("adapter-grants", [
+            (tauri_js, 'invoke("open_releases")', 'invoke("open_release")'),
+            (tauri_js, 'invoke("open_releases")', 'invoke("open_releases").then(() => invoke("install_update"))'),
+            (tauri_js, 'export const quitApp = () => invoke("quit_app");',
+             'export const quitApp = () => invoke("quit_app");\nexport const run = command => invoke(command);'),
+            (TAURI / "build.rs", '"open_releases",\n', ""),
+            (TAURI / "src/app.rs", "update_app::open_releases,\n", ""),
+            (settings_api, "  updateAction: Call<[action: string]>;\n",
+             "  updateAction: Call<[action: string]>;\n  openReleases: Call;\n"),
+            (settings_api, "  updateAction: Call<[action: string]>;\n",
+             "  updateAction: Call<[action: string]>;\n  installUpdates: Call;\n"),
+        ])
+
+    def test_rejects_popover_glue_that_skips_the_shadow_reduce_motion_or_a_menu_pick(self):
+        native, app = TAURI / "src/native.rs", TAURI / "src/app.rs"
+        self.reject_changes("popover-glue", [
+            # Step 6's surviving mutants M5, M9-M14, M18 and M20.
+            (native, "    window.setHasShadow(SHAPE.has_shadow);\n", ""),
+            (native, "                if resize.invalidate_shadow(ShadowUpdate::AnimationCompleted) {\n"
+                     "                    window.invalidateShadow();\n                }\n", "                let _ = resize;\n"),
+            (native, "            context.setCompletionHandler(Some(&completed));\n", ""),
+            (native, "    if resize.invalidate_shadow(ShadowUpdate::SnapCompleted) {\n"
+                     "        window.invalidateShadow();\n    }\n", ""),
+            (native, "            resized.invalidateShadow();\n", ""),
+            (native, "        NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion(),\n        duration_ms,",
+             "        false,\n        duration_ms,"),
+            (native, "    apply_popover_shape(ns_panel)?;\n", ""),
+            (native, "    observe_popover_resize(ns_panel);\n", ""),
+            (app, "native::popover_menu_dismissal(app, mtm, selected)", "native::popover_menu_dismissal(app, mtm, false)"),
+            (native, "| record.set(true));", "| { let _ = &record; });"),
+            (native, "    (result, selected.get())", "    (result, false)"),
+        ])
 
     def test_release_workflow_runs_selftest_after_dmg_upload_on_every_pr(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()

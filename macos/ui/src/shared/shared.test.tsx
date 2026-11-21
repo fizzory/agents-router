@@ -58,17 +58,32 @@ describe('UsageGauge', () => {
     expect(gauge?.getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('slides only for fresh values; a later non-fresh change snaps', () => {
-    const { rerender } = render(<UsageGauge fresh meters={[meter('five_hour', 10)]} />);
-    expect(document.querySelector('.usage-gauge')?.classList.contains('is-fresh')).toBe(true);
-    rerender(<UsageGauge meters={[meter('five_hour', 10)]} />);
-    expect(document.querySelector('.usage-gauge')?.classList.contains('is-fresh')).toBe(true);
-    rerender(<UsageGauge meters={[meter('five_hour', 20)]} />);
-    expect(document.querySelector('.usage-gauge')?.classList.contains('is-fresh')).toBe(false);
+  it('springs only a changed bar on fresh usage; initial, unchanged and status values stay still', () => {
+    const values = (five: number, seven: number) => [meter('five_hour', five), meter('seven_day', seven)];
+    const changing = () => bars().filter(bar => bar.classList.contains('is-changing')).map(bar => bar.dataset.window);
+    const { rerender } = render(<UsageGauge fresh meters={values(10, 42)} />);
+    expect(changing()).toEqual([]);
+    rerender(<UsageGauge fresh meters={values(10, 44)} />);
+    expect(changing()).toEqual(['seven_day']);
+    rerender(<UsageGauge fresh meters={values(10, 44)} />);
+    expect(changing()).toEqual([]);
+    rerender(<UsageGauge meters={values(20, 50)} />);
+    expect(changing()).toEqual([]);
   });
 });
 
 describe('RollingFigure', () => {
+  it('unchanged digits stay still on refresh and a later roll settles when motion is disabled', () => {
+    const { rerender } = render(<RollingFigure value="42%" animate />);
+    rerender(<RollingFigure value="42%" animate />);
+    expect(document.querySelector('.is-rolling')).toBeNull();
+    rerender(<RollingFigure value="44%" animate />);
+    expect(document.querySelectorAll('.figure-strip')).toHaveLength(1);
+    expect(document.querySelector('.figure-strip')?.textContent).toBe('24');
+    rerender(<RollingFigure value="44%" animate={false} />);
+    expect(document.querySelector('.is-rolling')).toBeNull();
+    expect(document.querySelector('.rolling-figure')?.textContent).toBe('44%');
+  });
   it('rolls only changed digits, cross-fades bigger changes, snaps without animation', () => {
     const { rerender } = render(<RollingFigure value="42%" animate />);
     rerender(<RollingFigure value="43%" animate />);

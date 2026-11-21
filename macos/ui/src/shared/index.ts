@@ -1,5 +1,5 @@
 // Shared React components for the popover and the Settings window.
-export { AccountRow, ROW_ACTION, ROW_LINK } from './AccountRow';
+export { AccountRow, ROW_ACTION, ROW_COPY, ROW_LINK } from './AccountRow';
 export { AnnounceProvider, useAnnounce } from './announce';
 export { Banner, PaneState } from './Banner';
 export { Button } from './Button';
@@ -20,7 +20,7 @@ export { Spinner, TurningIcon, useTurning } from './Spinner';
 export { StatusDot } from './StatusDot';
 export { Switch } from './Switch';
 export { TooltipProvider, useTooltip } from './Tooltip';
-export type { Meter, RowModel } from './types';
+export type { AccountCheck, LoginResult, Meter, RowModel, UpdateDialog, UpdatePhase, UpdateStatus } from './types';
 export { UsageGauge, WARN_PERCENT } from './UsageGauge';
 export { useNativeMenu, type PaneMenuEvent } from './useNativeMenu';
 export { useRovingList, type RovingItem } from './useRovingList';

@@ -1,0 +1,6 @@
+[
+  {"phase": "download-failed", "retryable": true, "version": "0.17.1", "title": "Couldn't download 0.17.1.", "button": "Retry"},
+  {"phase": "install-failed", "retryable": true, "version": "0.17.1", "title": "Couldn't install 0.17.1.", "button": "Retry"},
+  {"phase": "download-failed", "retryable": false, "version": "0.17.1", "title": "Couldn't verify 0.17.1.", "button": "Open Releases Page"},
+  {"phase": "install-failed", "retryable": false, "version": "0.17.1", "title": "Couldn't install 0.17.1.", "button": "Open Releases Page"}
+]

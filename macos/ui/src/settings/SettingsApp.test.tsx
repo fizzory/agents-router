@@ -58,7 +58,7 @@ describe('sidebar and panes', () => {
   it('unsubscribes every event on unmount', async () => {
     const { unmount, unlistened } = await renderSettings();
     unmount();
-    expect(unlistened.sort()).toEqual(['onInstallStatus', 'onPaneMenu', 'onSettingsEdit', 'onSettingsHistory', 'onSettingsStatus',
+    expect(unlistened.sort()).toEqual(['onAccountChecksStatus', 'onInstallStatus', 'onPaneMenu', 'onSettingsEdit', 'onSettingsHistory', 'onSettingsStatus',
       'onSettingsTarget', 'onUpdateStatus', 'onUsageUpdated']);
   });
 });

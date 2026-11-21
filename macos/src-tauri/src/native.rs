@@ -3,27 +3,33 @@ use crate::{
     app,
     glyph::{self, Glyph, Input, Variant},
     placement::{self, Open, Point, Rect, Screen},
+    popover_menu::{self, ClosingEvent, Dismissal},
+    popover_shape::{Resize, ShadowUpdate, SHAPE},
     watcher::WakeTrigger,
 };
 use objc2::{
     rc::Retained,
     runtime::{AnyObject, ProtocolObject},
-    AnyThread, MainThreadMarker,
+    AnyThread, MainThreadMarker, Message,
 };
 use objc2_app_kit::{
     NSAccessibility, NSAnimatablePropertyContainer, NSAnimationContext, NSApplication, NSEvent,
-    NSFloatingWindowLevel, NSFont, NSImage, NSScreen, NSStatusBar, NSWindow,
-    NSWindowCollectionBehavior, NSWindowNumberListOptions, NSWindowOcclusionState,
-    NSWindowStyleMask, NSWorkspace, NSWorkspaceDidWakeNotification,
+    NSEventType, NSFloatingWindowLevel, NSFont, NSImage, NSMenuDidSendActionNotification, NSScreen,
+    NSStatusBar, NSWindow, NSWindowCollectionBehavior, NSWindowDidResizeNotification,
+    NSWindowNumberListOptions, NSWindowOcclusionState, NSWindowStyleMask, NSWorkspace,
+    NSWorkspaceDidWakeNotification,
 };
 use objc2_foundation::{
     NSArray, NSAttributedString, NSData, NSDate, NSDateFormatter, NSDictionary, NSNotification,
     NSNotificationCenter, NSNumber, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
 };
-use objc2_quartz_core::CAMediaTimingFunction;
+use objc2_quartz_core::{
+    kCACornerCurveCircular, kCACornerCurveContinuous, CALayer, CAMediaTimingFunction,
+};
 use std::{
     cell::{Cell, RefCell},
     ptr::NonNull,
+    rc::Rc,
 };
 use tauri::Manager;
 use tauri_nspanel::{ManagerExt, WebviewWindowExt};
@@ -32,20 +38,21 @@ mod panel_class {
     tauri_nspanel::tauri_panel! { panel!(AgtPopoverPanel { config: { can_become_key_window: true, can_become_main_window: false, is_floating_panel: true } }) }
 }
 
-struct WakeObserver {
+struct Observer {
     center: Retained<NSNotificationCenter>,
     token: Retained<ProtocolObject<dyn NSObjectProtocol>>,
 }
-impl Drop for WakeObserver {
+impl Drop for Observer {
     fn drop(&mut self) {
-        let _mtm = MainThreadMarker::new().expect("wake observer dropped on main thread");
+        let _mtm = MainThreadMarker::new().expect("native observer dropped on main thread");
         unsafe {
             self.center
                 .removeObserver(AsRef::<AnyObject>::as_ref(&*self.token));
         }
     }
 }
-thread_local! { static WAKE_OBSERVER: RefCell<Option<WakeObserver>> = const { RefCell::new(None) }; }
+thread_local! { static WAKE_OBSERVER: RefCell<Option<Observer>> = const { RefCell::new(None) }; }
+thread_local! { static RESIZE_OBSERVER: RefCell<Option<Observer>> = const { RefCell::new(None) }; }
 thread_local! { static CONTENT_HEIGHT: Cell<f64> = const { Cell::new(placement::MIN_POPOVER_HEIGHT) }; }
 // The glyph last applied to the status button; an unchanged glyph is not redrawn.
 thread_local! { static SHOWN_GLYPH: RefCell<Option<Glyph>> = const { RefCell::new(None) }; }
@@ -63,11 +70,79 @@ pub fn observe_wake(_mtm: MainThreadMarker, wake: WakeTrigger) {
             None,
             &block,
         );
-        WAKE_OBSERVER.with(|slot| *slot.borrow_mut() = Some(WakeObserver { center, token }));
+        WAKE_OBSERVER.with(|slot| *slot.borrow_mut() = Some(Observer { center, token }));
     }
 }
 pub fn stop_observing(_mtm: MainThreadMarker) {
     WAKE_OBSERVER.with(|slot| slot.borrow_mut().take());
+    RESIZE_OBSERVER.with(|slot| slot.borrow_mut().take());
+}
+
+fn apply_layer_shape(layer: &CALayer) {
+    layer.setCornerRadius(SHAPE.corner_radius);
+    // SAFETY: these are QuartzCore's process-lifetime corner-curve constants.
+    layer.setCornerCurve(unsafe {
+        if SHAPE.continuous {
+            kCACornerCurveContinuous
+        } else {
+            kCACornerCurveCircular
+        }
+    });
+    layer.setMasksToBounds(SHAPE.masks_to_bounds);
+}
+
+fn apply_popover_shape(window: &NSWindow) -> Result<(), &'static str> {
+    window.setHasShadow(SHAPE.has_shadow);
+    let content = window.contentView().ok_or("popover content view missing")?;
+    content.setWantsLayer(true);
+    let layer = content.layer().ok_or("popover backing layer missing")?;
+    apply_layer_shape(&layer);
+    Ok(())
+}
+
+fn observe_popover_resize(window: &NSWindow) {
+    let resized = window.retain();
+    let block = block2::RcBlock::new(move |_note: NonNull<NSNotification>| {
+        // Includes intermediate frames of AppKit's animator, not just its target.
+        if Resize::SHADOW_ON_RESIZE {
+            resized.invalidateShadow();
+        }
+    });
+    let center = NSNotificationCenter::defaultCenter();
+    // SAFETY: the observer is scoped to this live window and removed on the main thread.
+    let token = unsafe {
+        center.addObserverForName_object_queue_usingBlock(
+            Some(NSWindowDidResizeNotification),
+            Some(window),
+            None,
+            &block,
+        )
+    };
+    RESIZE_OBSERVER.with(|slot| *slot.borrow_mut() = Some(Observer { center, token }));
+}
+
+/// AppKit reports the action before synchronous tracking returns; Tauri's menu
+/// event can be queued until later. Record selection separately from hit testing
+/// because this menu extends outside the popover's frame.
+pub fn track_popover_menu<T>(_mtm: MainThreadMarker, popup: impl FnOnce() -> T) -> (T, bool) {
+    let selected = Rc::new(Cell::new(false));
+    let record = selected.clone();
+    let block = block2::RcBlock::new(move |_note: NonNull<NSNotification>| record.set(true));
+    let center = NSNotificationCenter::defaultCenter();
+    // SAFETY: registered only around this synchronous menu's nested loop, on the
+    // main thread. No other menu can be tracked by this app during that loop.
+    let token = unsafe {
+        center.addObserverForName_object_queue_usingBlock(
+            Some(NSMenuDidSendActionNotification),
+            None,
+            None,
+            &block,
+        )
+    };
+    let observer = Observer { center, token };
+    let result = popup();
+    drop(observer);
+    (result, selected.get())
 }
 
 #[cfg(debug_assertions)]
@@ -107,6 +182,8 @@ pub fn create_panel(
     );
     panel.hide();
     let ns_panel = panel.as_panel();
+    apply_popover_shape(ns_panel)?;
+    observe_popover_resize(ns_panel);
     app::trace(&format!(
         "popover class={} NSPanel borderless=true transparent=true nonactivating=true hidden=true hides-on-deactivate={} level={} collection={:?}",
         ns_panel.class(),
@@ -241,6 +318,11 @@ impl Now {
 /// hide and reopen); a plain `setFrame` could let that animation carry on to
 /// its old target, on the display the popover was on before.
 fn set_frame(window: &NSWindow, frame: NSRect, animation: Option<(f64, [f32; 4])>) {
+    let resize = if animation.is_some() {
+        Resize::Animated
+    } else {
+        Resize::Snap
+    };
     if animation.is_none() {
         window.setFrame_display(frame, false);
     }
@@ -252,6 +334,13 @@ fn set_frame(window: &NSWindow, frame: NSRect, animation: Option<(f64, [f32; 4])
             context.setTimingFunction(Some(&CAMediaTimingFunction::functionWithControlPoints(
                 curve[0], curve[1], curve[2], curve[3],
             )));
+            let window = window.retain();
+            let completed = block2::RcBlock::new(move || {
+                if resize.invalidate_shadow(ShadowUpdate::AnimationCompleted) {
+                    window.invalidateShadow();
+                }
+            });
+            context.setCompletionHandler(Some(&completed));
         }
         None => context.setDuration(0.0),
     }
@@ -259,6 +348,9 @@ fn set_frame(window: &NSWindow, frame: NSRect, animation: Option<(f64, [f32; 4])
         .animator()
         .setFrame_display(frame, animation.is_some());
     NSAnimationContext::endGrouping();
+    if resize.invalidate_shadow(ShadowUpdate::SnapCompleted) {
+        window.invalidateShadow();
+    }
 }
 
 #[link(name = "CoreGraphics", kind = "framework")]
@@ -395,6 +487,7 @@ fn show_from(app: &tauri::AppHandle, mtm: MainThreadMarker, now: Now, open: Open
     }
     app::trace("popover NSPanel shown; webview retained; application not activated");
     log_visibility_now_and_later(app, mtm);
+    app::request_account_checks(app);
     app::request_usage(app, true, "open");
 }
 
@@ -427,7 +520,12 @@ pub fn resize(
     };
     ANCHOR.set(Some(anchor));
     let placed = placement::fit(&anchor, panel.as_panel().frame().size.width, height);
-    let animate = duration_ms > 0.0 && panel.is_visible();
+    let resize = Resize::choose(
+        panel.is_visible(),
+        NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion(),
+        duration_ms,
+    );
+    let animate = resize == Resize::Animated;
     set_frame(
         panel.as_panel(),
         ns_rect(placed),
@@ -465,6 +563,55 @@ pub fn hide(app: &tauri::AppHandle, _mtm: MainThreadMarker, reason: &str) {
         app::trace(&format!(
             "popover NSPanel hidden reason={reason}; never closed; webview retained"
         ));
+    }
+}
+
+pub fn popover_is_key(app: &tauri::AppHandle, _mtm: MainThreadMarker) -> bool {
+    app.get_webview_panel("popover")
+        .is_ok_and(|panel| panel.as_panel().isKeyWindow())
+}
+
+/// Read the event which ended AppKit's synchronous menu tracking. Escape can
+/// dismiss with the pointer outside the panel; only a mouse dismissal uses it.
+pub fn popover_menu_dismissal(
+    app: &tauri::AppHandle,
+    mtm: MainThreadMarker,
+    selected: bool,
+) -> Dismissal {
+    let Ok(panel) = app.get_webview_panel("popover") else {
+        return Dismissal::Outside;
+    };
+    let panel = panel.as_panel();
+    let event = NSApplication::sharedApplication(mtm).currentEvent();
+    let closing = match event.as_ref().map(|event| event.r#type()) {
+        Some(NSEventType::KeyDown | NSEventType::KeyUp) => ClosingEvent::Key,
+        Some(
+            NSEventType::LeftMouseDown
+            | NSEventType::LeftMouseUp
+            | NSEventType::RightMouseDown
+            | NSEventType::RightMouseUp
+            | NSEventType::OtherMouseDown
+            | NSEventType::OtherMouseUp,
+        ) => ClosingEvent::Click {
+            point: pointer(mtm),
+            frame: rect(panel.frame()),
+        },
+        _ => ClosingEvent::Other,
+    };
+    popover_menu::dismissal(
+        panel.isVisible(),
+        selected,
+        closing,
+        || event.as_ref().expect("key event").keyCode(),
+        || panel.isKeyWindow(),
+    )
+}
+
+pub fn focus_popover(app: &tauri::AppHandle, _mtm: MainThreadMarker) {
+    if let Ok(panel) = app.get_webview_panel("popover") {
+        if panel.as_panel().isVisible() {
+            panel.show_and_make_key();
+        }
     }
 }
 
@@ -705,5 +852,21 @@ pub fn copy_text(_mtm: MainThreadMarker, text: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err("Could not copy. Try Copy again.".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn popover_shape_applies_continuous_clipping_to_a_real_layer() {
+        // CALayer is AnyThread. NSView/NSWindow require the process main thread,
+        // which Rust's unit-test worker threads cannot supply.
+        let layer = CALayer::new();
+        apply_layer_shape(&layer);
+        assert_eq!(layer.cornerRadius(), 16.0);
+        assert_eq!(&*layer.cornerCurve(), unsafe { kCACornerCurveContinuous });
+        assert!(layer.masksToBounds());
     }
 }

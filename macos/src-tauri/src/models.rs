@@ -232,6 +232,7 @@ pub struct Account {
     pub found: bool,
     pub takes_unpinned_jobs: Option<bool>,
     pub auth: Option<Auth>,
+    pub login_check: Option<LoginCheck>,
     pub busy_slots: u64,
     pub running_jobs: u64,
     pub limits: AccountLimits,
@@ -650,6 +651,7 @@ pub const FIXTURES: &[(&str, CommandKind)] = &[
     ("config-unset-absent.json", CommandKind::ConfigUnset),
     ("config-revert.json", CommandKind::ConfigRevert),
     ("accounts-list.json", CommandKind::AccountsList),
+    ("accounts-list-cached.json", CommandKind::AccountsList),
     ("accounts-check.json", CommandKind::AccountsCheck),
     ("accounts-add-check.json", CommandKind::AccountsAddCheck),
     ("accounts-enable.json", CommandKind::AccountsEnable),
@@ -728,6 +730,49 @@ mod tests {
         assert_eq!(check_fixtures(&folder).unwrap(), FIXTURES.len());
     }
     #[test]
+    fn cached_account_list_retains_null_failed_and_stale_checks() {
+        let bytes = include_bytes!("../../../tests/fixtures/app/accounts-list-cached.json");
+        let Snapshot::Accounts(list) = decode(CommandKind::AccountsList, bytes).unwrap() else {
+            panic!("expected account list");
+        };
+        let claude = list
+            .runtimes
+            .iter()
+            .find(|r| r.runtime == "claude")
+            .unwrap();
+        let primary = claude
+            .accounts
+            .iter()
+            .find(|a| a.name == "primary")
+            .unwrap();
+        let stale = primary.login_check.as_ref().unwrap();
+        assert_eq!(stale.account, "primary");
+        assert_eq!(stale.logged_in, Some(true));
+        assert_eq!(stale.checked_at, 4102444800.0);
+        assert!(stale.error.is_none());
+        assert!(primary.auth.is_none());
+        let work = claude.accounts.iter().find(|a| a.name == "work").unwrap();
+        let failed = work.login_check.as_ref().unwrap();
+        assert!(failed.logged_in.is_none());
+        assert_eq!(failed.error.as_deref(), Some("login check failed"));
+        assert!(failed.checked_at > stale.checked_at);
+        assert!(work.auth.is_none());
+        let codex = list.runtimes.iter().find(|r| r.runtime == "codex").unwrap();
+        assert!(codex.accounts.iter().all(|a| a.login_check.is_none()));
+        // Older list producers omit the additive field entirely.
+        let mut legacy: Value = serde_json::from_slice(bytes).unwrap();
+        for runtime in legacy["runtimes"].as_array_mut().unwrap() {
+            for account in runtime["accounts"].as_array_mut().unwrap() {
+                account.as_object_mut().unwrap().remove("login_check");
+            }
+        }
+        assert!(decode(
+            CommandKind::AccountsList,
+            &serde_json::to_vec(&legacy).unwrap()
+        )
+        .is_ok());
+    }
+    #[test]
     fn install_ownership_survives_the_usage_snapshot() {
         let bytes = include_bytes!("../../../tests/fixtures/app/usage.json");
         let Snapshot::Usage(usage) = decode(CommandKind::Usage, bytes).unwrap() else {
@@ -746,8 +791,7 @@ mod tests {
     #[test]
     fn usage_decodes_an_occupied_lease_without_a_job_id() {
         let mut value: Value =
-            serde_json::from_str(include_str!("../../../tests/fixtures/app/usage.json"))
-                .unwrap();
+            serde_json::from_str(include_str!("../../../tests/fixtures/app/usage.json")).unwrap();
         value["uninstall_blockers"] = serde_json::json!([{
             "kind": "occupied_lease", "job_id": null,
             "runtime": "claude", "account": "claude-work"

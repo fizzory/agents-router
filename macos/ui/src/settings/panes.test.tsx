@@ -61,6 +61,52 @@ describe('Roles', () => {
 });
 
 describe('Accounts', () => {
+  it('keeps Settings copy failures on its existing report path', async () => {
+    const { api, emit } = await open('accounts');
+    const target = document.querySelector<HTMLElement>('.settings-account[data-key="claude:work"]')!;
+    api.accountsLogin.mockResolvedValueOnce({ status: 'terminal_failed', copy_command: 'Rust login fallback' });
+    fireEvent.click(within(target).getByRole('button', { name: 'More for Claude work' }));
+    const [token] = api.showPaneMenu.mock.calls.at(-1) as [string];
+    await emit('onPaneMenu', { token, action: 'login' });
+    api.copyText.mockRejectedValueOnce(new Error('Settings copy failed'));
+    const copy = within(target).getByRole('button', { name: 'Copy command' });
+    fireEvent.click(copy);
+    await settle();
+    expect(copy.textContent).toBe('Copy command');
+    expect(document.getElementById('status')?.textContent).toBe('Settings copy failed');
+    expect(announced()).not.toBe("Couldn't copy.");
+  });
+  it('shares structured login recovery for both the row action and native menu', async () => {
+    const { api, emit } = await open('accounts');
+    const target = document.querySelector<HTMLElement>('.settings-account[data-key="claude:work"]')!;
+    api.accountsLogin.mockResolvedValueOnce({ status: 'terminal_failed', copy_command: 'Rust login fallback' });
+    fireEvent.click(within(target).getByRole('button', { name: 'More for Claude work' }));
+    const [token] = api.showPaneMenu.mock.calls.at(-1) as [string];
+    await emit('onPaneMenu', { token, action: 'login' });
+    expect(api.accountsLogin).toHaveBeenCalledWith('claude', 'work');
+    expect(within(target).getByText("Couldn't open Terminal.")).toBeTruthy();
+    fireEvent.click(within(target).getByRole('button', { name: 'Copy command' }));
+    await settle();
+    expect(api.copyText).toHaveBeenCalledWith('Rust login fallback');
+    expect(within(target).getByRole('button', { name: 'Copied' })).toBeTruthy();
+    expect(within(target).getByRole('button', { name: 'Copied' }).textContent).toBe('Copied');
+    expect(announced()).toBe('Copied');
+    // A logged-out row uses the same result path without changing its layout.
+    const updated = structuredClone(fixtures.accountsList);
+    Object.assign(updated.runtimes[0]!.accounts[1]!, { auth: { loggedIn: false } });
+    api.accountsList.mockResolvedValue(updated);
+    await emit('onSettingsStatus', envelope(2));
+    const out = [...document.querySelectorAll<HTMLElement>('.settings-account')].find(item =>
+      item.querySelector('.row-action')?.textContent === 'Log in…')!;
+    api.accountsLogin.mockResolvedValueOnce({ status: 'terminal_failed', copy_command: 'Row fallback' });
+    fireEvent.click(out.querySelector('.row-action')!);
+    await settle();
+    fireEvent.click(within(out).getByRole('button', { name: 'Copy command' }));
+    await settle();
+    expect(api.copyText).toHaveBeenLastCalledWith('Row fallback');
+    expect(within(out).getByRole('button', { name: 'Copied' }).textContent).toBe('Copied');
+  });
+
   it('shows the gauge row, badges for untogglable accounts and a ⋯ menu', async () => {
     const { api, emit } = await open('accounts');
     const rows = document.querySelectorAll('.settings-account');
@@ -94,6 +140,25 @@ describe('Accounts', () => {
   const work = () => document.querySelector('.settings-account[data-key="claude:work"]')!;
   const sliding = () => !!work().querySelector('.usage-gauge')?.classList.contains('is-fresh');
   const rolling = () => !!work().querySelector('.figure-strip, .figure-before');
+
+  it('shared ageText renders 2h ago in Settings while its Check button and slot layout stay unchanged', async () => {
+    const { api, emit } = await open('accounts');
+    const next = usageFor(2, 86), data = next.usage as typeof fixtures.usage;
+    data.providers[0]!.accounts[0]!.windows = data.providers[0]!.accounts[0]!.windows.map(window => ({
+      ...window, stale: true, observed_at: NOW / 1000 - 7200,
+    }));
+    data.providers[0]!.accounts.find(account => account.name === 'claude-unknown')!.name = 'claude-lab';
+    await emit('onSettingsStatus', next);
+    expect(work().querySelector('.reset-time')?.textContent).toBe('2h ago');
+    expect(work().getAttribute('data-tooltip')).toContain('2h ago');
+    expect(work().querySelector('.window-tag, .row-link')).toBeNull();
+    const unknown = document.querySelector('.settings-account[data-key="claude:claude-lab"]')!;
+    const check = unknown.querySelector<HTMLButtonElement>('.row-action')!;
+    expect(check.textContent).toBe('Check');
+    fireEvent.click(check);
+    await settle();
+    expect(api.accountsCheck).toHaveBeenCalledWith('claude', 'claude-lab');
+  });
 
   it('fresh usage slides the bars and rolls the digits as in the popover; status and older generations snap', async () => {
     const { emit } = await open('accounts');
@@ -260,5 +325,34 @@ describe('Activity', () => {
     for (const node of document.querySelectorAll('.activity-row')) {
       expect(node.querySelector(':scope > .activity-more, :scope > .activity-more-space')).toBeTruthy();
     }
+  });
+});
+
+describe('S10 shared account-check results', () => {
+  it('keeps Settings Check and its busy behaviour while sharing completed popover results', async () => {
+    const { api, emit } = await open('accounts');
+    const next = envelope(2), data = next.usage as typeof fixtures.usage;
+    data.providers[0]!.accounts.find(account => account.name === 'claude-unknown')!.name = 'claude-lab';
+    await emit('onSettingsStatus', next);
+    const accountRow = () => document.querySelector('.settings-account[data-key="claude:claude-lab"]')!;
+    const action = () => accountRow().querySelector<HTMLButtonElement>('.row-action')!;
+    const check = { runtime: 'claude', account: 'claude-lab', phase: 'checking', result: null };
+    await emit('onAccountChecksStatus', [check]);
+    expect(action().textContent).toBe('Check');
+    expect(accountRow().textContent).not.toContain('Checking…');
+    await emit('onAccountChecksStatus', [{ ...check, phase: 'failed', result: { account: check.account, logged_in: null, checked_at: NOW / 1000, error: 'fake check failed' } }]);
+    expect(action().textContent).toBe('Check');
+    let finish = () => {};
+    api.accountsCheck.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    fireEvent.click(action());
+    await settle();
+    expect(api.accountsCheck).toHaveBeenCalledWith('claude', 'claude-lab');
+    expect(action().getAttribute('aria-busy')).toBe('true');
+    await act(async () => finish());
+    await settle();
+    expect(action().getAttribute('aria-busy')).toBeNull();
+    await emit('onAccountChecksStatus', [{ ...check, phase: 'complete', result: { account: check.account, logged_in: false, checked_at: NOW / 1000, error: null } }]);
+    expect(action().textContent).toBe('Log in…');
+    expect(api.accountsCheck).toHaveBeenCalledTimes(1);
   });
 });

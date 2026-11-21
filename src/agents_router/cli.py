@@ -79,12 +79,13 @@ def cmd_accounts(args: argparse.Namespace) -> int:
         from agents_router import account_commands
 
         return account_commands.command(args)
-    config = load_config(cached_only=args.action == "login")
+    cached_only = getattr(args, "cached_only", False)
+    config = load_config(cached_only=args.action == "login" or cached_only)
     action = args.action or "list"
 
     if action == "list":
         names = [args.runtime] if args.runtime else _runtimes_set_up(config)
-        reports = [tools.account_report(name) for name in names]
+        reports = [tools.account_report(name, cached_only=cached_only) for name in names]
         if args.json:
             _print(reports[0] if args.runtime else {"runtimes": reports})
             return 0
@@ -870,6 +871,7 @@ def build_parser() -> argparse.ArgumentParser:
     accounts_parser.add_argument("name", nargs="?")
     accounts_parser.add_argument("--runtime", choices=RUNTIMES, help="Claude unless you name one; list shows every runtime.")
     accounts_parser.add_argument("--json", action="store_true", help="With list, check, add --check, enable and disable: the report as JSON.")
+    accounts_parser.add_argument("--cached-only", action="store_true", help="With list: read cached login and usage; never probe auth or refresh Codex usage.")
     accounts_parser.add_argument("--home", help="Folder for this account (default ~/.agents-router/homes/<runtime>/<name>).")
     accounts_parser.add_argument("--no-login", action="store_true")
     accounts_parser.add_argument("--check", action="store_true", help="With add: validate only; create no folders and run no login checks.")
