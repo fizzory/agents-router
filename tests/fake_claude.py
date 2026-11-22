@@ -4,7 +4,8 @@ Behaviour is chosen by environment variables:
   FAKE_CLAUDE_LIMITED   comma-separated account folder names that are "out of quota"
   FAKE_CLAUDE_SCENARIO  success (default) | auth | slow | crash | nostdin | max_turns |
                        success_exit_1 | success_pause | success_quota | success_auth |
-                       no_result | transport | unknown_model | capacity
+                       no_result | empty_result (a success result with no text) |
+                       transport | unknown_model | capacity
   FAKE_CLAUDE_RECORD    file to append {"argv", "env", "stdin"} records to
 """
 
@@ -76,6 +77,10 @@ def main():
         "plugins": [{"name": "demo-plugin", "path": "x"}], "skills": ["alpha"], "agents": ["general-purpose"],
     })
     if scenario == "no_result":
+        return 0
+    if scenario == "empty_result":
+        emit({"type": "result", "subtype": "success", "is_error": False, "result": "",
+              "session_id": session, "total_cost_usd": 0.01, "num_turns": 1})
         return 0
     if scenario in ("transport", "unknown_model", "capacity"):
         error = {"transport": "APIConnectionError: connection error", "unknown_model": "unknown model: fake-model",

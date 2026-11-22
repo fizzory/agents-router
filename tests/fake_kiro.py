@@ -11,7 +11,8 @@
 
   FAKE_KIRO_SCENARIO   success (default) | limit | auth | mcp | silent | json-answer | help-fails | help-hangs; with
                        stream-json also truncated (finalTextTruncated) | run-error (runFinished status
-                       "error", exit 0) | no-finish (no runFinished, exit 1) |
+                       "error", exit 0) | no-finish (no runFinished, exit 1) | replay (FAKE_KIRO_REPLAY=<base>: prints
+                       <base>.stderr and <base>.jsonl, a recorded run, and exits 1) |
                        no_result (no runFinished, exit 0) | unknown_model
   FAKE_KIRO_DELAY      seconds a run waits before its answer (stream-json: before its runFinished): a slow job
   FAKE_KIRO_VERSION    the version `--version` prints (default 2.30.0)
@@ -101,6 +102,13 @@ def main():
     if record:
         with open(record, "a", encoding="utf-8") as handle:
             handle.write(json.dumps({"argv": argv, "env": dict(os.environ), "stdin": prompt}) + "\n")
+    if scenario == "replay":
+        base = os.environ["FAKE_KIRO_REPLAY"]
+        with open(base + ".stderr", encoding="utf-8") as handle:
+            sys.stderr.write(handle.read())
+        with open(base + ".jsonl", encoding="utf-8") as handle:
+            sys.stdout.write(handle.read())
+        return 1
     if scenario == "limit":
         print("You have reached the usage limit for this month.", file=sys.stderr)
         return 1

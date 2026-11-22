@@ -356,13 +356,14 @@ class ParentApprovalTests(RobustnessBase):
                     launch = CodexRuntime().launch(config, account, spec, "task", {})
                     overrides = [launch.argv[i + 1] for i, arg in enumerate(launch.argv[:-1]) if arg == "-c"]
                     approval = [value for value in overrides if "approval_mode=" in value]
-                    self.assertEqual(len(approval), 4)
+                    self.assertEqual(len(approval), 7)
                     parsed = tomllib.loads("\n".join(approval))["mcp_servers"]
                     self.assertEqual(list(parsed), ["agt_parent"])
                     parent = parsed["agt_parent"]
                     self.assertEqual(parent["default_tools_approval_mode"], "approve")
                     self.assertEqual(parent["tools"], {name: {"approval_mode": "approve"} for name in
-                                                     ("message_parent", "ask_parent", "check_parent_messages")})
+                                                     ("message_parent", "ask_parent", "check_parent_messages",
+                                                      "read_file", "list_files", "search_files")})
                     self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", launch.argv)
 
 

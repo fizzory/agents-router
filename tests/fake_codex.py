@@ -3,7 +3,9 @@
   FAKE_CODEX_LIMITED   comma-separated CODEX_HOME folder names that are "out of quota"
   FAKE_CODEX_SCENARIO  success (default) | recovered_errors | success_exit_1 | success_pause |
                       success_quota | success_auth | success_failed | capacity | capacity_no_session |
-                      no_result | empty_exit_1 | transport | unknown_model
+                      no_result | empty_exit_1 | transport | unknown_model | replay
+  FAKE_CODEX_REPLAY    for `replay`: a recorded `codex exec --json` stream to print line by line. Its agt_parent
+                      calls go to the real worker tools (AGT_JOB_ID), with ask_parent's wait already timed out.
   FAKE_CODEX_SCENARIOS JSON object overriding the scenario by account folder name
   FAKE_CODEX_CAPACITY_FAILURES  number of capacity failures before success (default 100)
   FAKE_CODEX_APP_SERVER  JSON rateLimits/read result | hang | garbage | error | eof (default)
@@ -55,6 +57,27 @@ def app_server(argv):
     return 0
 
 
+def replay(path):
+    """Print a recorded stream; each agt_parent call it started runs against the job's real worker tools."""
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    import types
+
+    from agents_router import tools
+
+    clock = iter(range(0, 10**9, 10**6))  # ask_parent's wait: every check is past its deadline
+    tools.time = types.SimpleNamespace(monotonic=lambda: next(clock), time=time.time, sleep=lambda _: None)
+    for line in path.read_text(encoding="utf-8").splitlines():
+        event = json.loads(line)
+        item = event.get("item") or {}
+        if (event.get("type") == "item.started" and item.get("type") == "mcp_tool_call"
+                and item.get("server") == "agt_parent"):
+            tools.call(item["tool"], item.get("arguments") or {}, worker_job=os.environ["AGT_JOB_ID"])
+        sys.stdout.write(line + "\n")
+        sys.stdout.flush()
+    return 0
+
+
 def main():
     argv = sys.argv[1:]
     if argv and argv[0] == "app-server":
@@ -70,6 +93,8 @@ def main():
         account, os.environ.get("FAKE_CODEX_SCENARIO", "success"))
     if scenario == "empty_exit_1":
         return 1
+    if scenario == "replay":
+        return replay(Path(os.environ["FAKE_CODEX_REPLAY"]))
     capacity = False
     if scenario in ("capacity", "capacity_no_session"):
         counter = Path(os.environ["CODEX_HOME"]) / "fake-capacity-attempts"

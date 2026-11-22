@@ -5,11 +5,11 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from agents_router import account_check, accounts, health_view, jobs, limits, messages, plans, profiles, quota, usage_view
+from agents_router import account_check, accounts, health_view, jobs, limits, messages, plans, profiles, quota, usage_view, worker_files
 from agents_router.config import load_config, session_folder, set_session
 from agents_router.hosts import detect_host
 from agents_router.runtimes import AVAILABLE as RUNTIMES, get_runtime
-from agents_router.runtimes.base import ACCESS_LEVELS
+from agents_router.runtimes.base import ACCESS_LEVELS, PARENT_TOOL_NAMES
 
 MAX_WAIT_SECONDS = 600
 MAX_LONG_WAIT_SECONDS = 3600
@@ -167,7 +167,55 @@ WORKER_DEFINITIONS = [
         "description": "Read follow-up instructions the main session sent while you were working. Check between major steps.",
         "inputSchema": _schema({}, []),
     },
+    {
+        "name": "read_file",
+        "description": (
+            "Read a text file, with line numbers. Read-only, no shell needed. A relative path starts at the "
+            "job's folder; only the job's folder and the folders added to it can be read. For a long file, "
+            "read on with offset."
+        ),
+        "inputSchema": _schema(
+            {"path": {"type": "string"},
+             "offset": {"type": "integer", "minimum": 1, "default": 1, "description": "First line to return."},
+             "limit": {"type": "integer", "minimum": 1, "maximum": worker_files.MAX_READ_LINES,
+                       "default": worker_files.DEFAULT_READ_LINES, "description": "How many lines to return."}},
+            ["path"],
+        ),
+    },
+    {
+        "name": "list_files",
+        "description": (
+            "List a folder in the job's folders (folders end with /). With pattern, list the files that match it "
+            "in every subfolder: *.md matches names at any depth, docs/**/*.md matches paths. Read-only."
+        ),
+        "inputSchema": _schema(
+            {"path": {"type": "string", "default": "."},
+             "pattern": {"type": "string", "description": "A glob such as *.py or src/**/*.ts."}},
+            [],
+        ),
+    },
+    {
+        "name": "search_files",
+        "description": (
+            "Search file contents in the job's folders for a regular expression; returns each matching line with "
+            "its path and line number. Skips binary files, files over 2 MB, and .git, node_modules, .venv and "
+            "__pycache__ unless path is inside one. Read-only."
+        ),
+        "inputSchema": _schema(
+            {"pattern": {"type": "string", "description": "A Python regular expression."},
+             "path": {"type": "string", "default": ".", "description": "A folder or a file to search."},
+             "glob": {"type": "string", "description": "Only files matching this glob, such as *.md."},
+             "ignore_case": {"type": "boolean", "default": False},
+             "max_results": {"type": "integer", "minimum": 1, "maximum": worker_files.MAX_SEARCH_RESULTS,
+                             "default": worker_files.DEFAULT_SEARCH_RESULTS}},
+            ["pattern"],
+        ),
+    },
 ]
+
+
+# Calls on the parent channel: not task work (see Runner._tool_uses). The read tools are work.
+PARENT_TOOLS = frozenset(PARENT_TOOL_NAMES)
 
 
 def definitions(worker_job: str | None = None) -> list[dict[str, Any]]:
@@ -383,6 +431,11 @@ def _call(name: str, arguments: dict[str, Any], progress=None, client: str | Non
 
 
 def _call_worker(job_id: str, name: str, arguments: dict[str, Any], progress=None) -> Any:
+    if name in PARENT_TOOLS:
+        try:
+            messages.count_parent_call(job_id)  # not task work: see Runner._tool_uses
+        except OSError:
+            pass
     if name == "message_parent":
         record = messages.post_from_worker(job_id, str(arguments.get("text") or ""))
         return {"sent": True, "id": record["id"]}
@@ -401,6 +454,13 @@ def _call_worker(job_id: str, name: str, arguments: dict[str, Any], progress=Non
     if name == "check_parent_messages":
         new = messages.take_for_worker(job_id)
         return {"messages": [{"kind": item.get("kind"), "text": item.get("text")} for item in new]}
+    if name == "read_file":
+        return worker_files.read_file(job_id, arguments.get("path"), arguments.get("offset"), arguments.get("limit"))
+    if name == "list_files":
+        return worker_files.list_files(job_id, arguments.get("path"), arguments.get("pattern"))
+    if name == "search_files":
+        return worker_files.search_files(job_id, arguments.get("pattern"), arguments.get("path"), arguments.get("glob"),
+                                         arguments.get("ignore_case"), arguments.get("max_results"))
     raise ToolError(f"unknown tool: {name}")
 
 

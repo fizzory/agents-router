@@ -38,6 +38,8 @@ from agents_router.config import Account, RuntimeConfig, state_dir
 from agents_router import mcp_translate
 from agents_router.fsutil import copy_exclusive, file_lock, is_link, no_window_kwargs, same_path, worker_process, write_text
 from agents_router.runtimes.base import (
+    WORKER_READ_TOOLS_NOTE,
+    WORKER_TOOL_NAMES,
     WORKER_TOOLS_NOTE,
     parent_server,
     AUTH,
@@ -430,11 +432,11 @@ def _parent_overrides(job_id: str) -> list[str]:
     for key, value in server["env"].items():
         overrides.append(f"{prefix}.env.{key}={_toml_literal(value)}")
     # Codex 0.162: Auto still prompts for unannotated MCP tools; Approve bypasses
-    # that prompt. Scope this to the three parent tools, including inherited overrides.
+    # that prompt. Scope this to the agt-parent tools, including inherited overrides.
     # https://learn.chatgpt.com/docs/config-file/config-reference
     # https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/core/src/mcp_tool_call.rs
     overrides.append(f'{prefix}.default_tools_approval_mode="approve"')
-    for name in ("message_parent", "ask_parent", "check_parent_messages"):
+    for name in WORKER_TOOL_NAMES:
         overrides.append(f'{prefix}.tools.{name}.approval_mode="approve"')
     return [part for override in overrides for part in ("-c", override)]
 
@@ -829,7 +831,7 @@ class CodexRuntime:
 
         env["AGT_DEPTH"] = str(spec.depth)
         env["AGT_JOB_ID"] = spec.job_id
-        note = WORKER_NOTE.rstrip("]\n") + WORKER_TOOLS_NOTE + "]\n\n"
+        note = WORKER_NOTE.rstrip("]\n") + WORKER_TOOLS_NOTE + WORKER_READ_TOOLS_NOTE + "]\n\n"
         return Launch(argv=argv, env=env, stdin=note + ("" if spec.resume_session else parent_note(spec.parent, "codex")) + prompt, session_id=spec.resume_session, warnings=warnings)
 
     def interactive(self, config: RuntimeConfig, account: Account, setup: dict[str, Any]) -> tuple[list[str], dict[str, str]]:
