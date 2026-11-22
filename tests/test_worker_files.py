@@ -7,11 +7,15 @@ the parent for file access, nobody answered, and it wrote nothing.
 import io
 import json
 import os
+import sys
 import threading
+import unittest
+from unittest.mock import patch
 
 from helpers import TempHome
 
-from agents_router import jobs, mcp_server, messages, tools
+from agents_router import jobs, mcp_server, messages, tools, worker_files
+from agents_router.agy_review import rules
 from agents_router.runtimes.base import JobSpec
 from agents_router.tools import ToolError
 
@@ -185,6 +189,103 @@ class WorkerFileToolTests(TempHome):
 
     def test_a_bad_regular_expression_is_refused(self):
         self.refused("search_files", "not a valid regular expression", pattern="(")
+
+    # what the independent review of #36 found: secrets, swapped paths, runaway patterns ---------
+
+    def test_secret_files_are_refused_as_the_antigravity_gate_refuses_them(self):
+        """The gate approves agt-parent calls, so these tools must not read what it denies (.env, keys)."""
+
+        (self.project / ".env").write_text("API_KEY=hunter2\n", encoding="utf-8")
+        (self.project / ".env.example").write_text("API_KEY=\n", encoding="utf-8")
+        (self.project / "deploy.pem").write_text("-----BEGIN KEY-----\n", encoding="utf-8")
+        (self.project / ".ssh").mkdir()
+        (self.project / ".ssh" / "config").write_text("Host hunter2\n", encoding="utf-8")
+        os.symlink(self.project / ".env", self.project / "settings.txt")
+        self.refused("read_file", "off limits", path=".env")
+        self.refused("read_file", "off limits", path=str(self.project / ".env"))
+        self.refused("read_file", "off limits", path="deploy.pem")
+        self.refused("read_file", "off limits", path="settings.txt")
+        self.refused("read_file", "off limits", path=".ssh/config")
+        self.refused("list_files", "off limits", path=".ssh")
+        self.assertEqual(self.call("read_file", path=".env.example")["content"], "1\tAPI_KEY=")
+        found = self.call("search_files", pattern="hunter2|API_KEY")
+        self.assertEqual([item["path"] for item in found["matches"]], [".env.example"])
+        self.assertIn(".env", found["off_limits"])
+        self.assertIn("settings.txt", found["off_limits"])
+        self.assertEqual(self.call("search_files", pattern="hunter2", path=".")["matches"], [])
+
+    def test_the_gate_approves_the_call_and_the_tool_still_refuses_the_secret(self):
+        """The bypass as it was: agy's gate lets agt-parent.read_file(".env") through."""
+
+        (self.project / ".env").write_text("API_KEY=hunter2\n", encoding="utf-8")
+        context = {"workspaces": [str(self.project)], "access": "read", "trusted_mcp_servers": ["agt-parent"],
+                   "user_home": str(self.root), "agent_home": str(self.root / "agy-home")}
+        call = {"name": "call_mcp_tool",
+                "args": {"ServerName": "agt-parent", "ToolName": "read_file", "Arguments": {"path": ".env"}}}
+        self.assertEqual(rules.decide(call, {}, context).action, "approve")
+        self.refused("read_file", "off limits", path=".env")
+
+    def test_agents_router_state_is_refused(self):
+        from agents_router.config import home as agt_home
+
+        state = agt_home()
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "settings.toml").write_text("[codex]\n", encoding="utf-8")
+        spec = jobs.read_spec(self.job)
+        spec.add_dirs = [*spec.add_dirs, str(state)]
+        jobs.write_json(jobs.job_dir(self.job) / "spec.json", spec.to_dict())
+        self.refused("read_file", "Agents Router's own state", path=str(state / "settings.toml"))
+
+    def test_a_file_swapped_for_an_outside_symlink_after_its_check_is_not_read(self):
+        """The path is checked, then replaced by a link out of the job's folders before it is opened."""
+
+        target = self.project / "notes.txt"
+        real_check = worker_files._is_regular
+
+        def swap(path):
+            ok = real_check(path)
+            if path == target.resolve() and not target.is_symlink():
+                target.unlink()
+                os.symlink(self.root / "secret.txt", target)
+            return ok
+
+        with patch.object(worker_files, "_is_regular", side_effect=swap):
+            message = self.refused("read_file", "outside the folders this job may read", path="notes.txt")
+        self.assertNotIn("outside the job", message)
+
+    def test_a_file_swapped_for_a_fifo_after_its_check_is_refused_without_blocking(self):
+        fifo = self.project / "later"
+        os.mkfifo(fifo)
+        self.addCleanup(self.unblock, fifo)
+        result = {}
+
+        def open_it():
+            try:
+                worker_files._open_checked(fifo, worker_files.roots(self.job))
+            except worker_files.FileToolError as exc:
+                result["refused"] = str(exc)
+
+        thread = threading.Thread(target=open_it, daemon=True)
+        thread.start()
+        thread.join(10)
+        self.assertFalse(thread.is_alive(), "opening the FIFO blocked")
+        self.assertEqual(result["refused"], "not a regular file")
+
+    def test_a_pattern_that_backtracks_forever_is_stopped(self):
+        """(a+)+$ against a run of a's never ends; Python can't interrupt it, so the search runs in a child."""
+
+        (self.project / "aaa.txt").write_text("a" * 64 + "!\n", encoding="utf-8")
+        with patch.object(worker_files, "SEARCH_HARD_SECONDS", 2):
+            self.refused("search_files", "the search was stopped after 2 seconds", pattern="(a+)+$", path="aaa.txt")
+        self.assertEqual(self.call("search_files", pattern="frames")["matches"][0]["path"], "docs/brief.md")
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS volumes are case-insensitive by default")
+    def test_a_path_in_another_letter_case_is_read_on_macos(self):
+        if not (self.project / "DOCS").exists():
+            self.skipTest("this volume is case-sensitive")
+        other_case = self.project.parent / self.project.name.swapcase() / "DOCS" / "Brief.md"
+        self.assertEqual(self.call("read_file", path=str(other_case), limit=1)["content"], "1\t# Brief")
+
 
     # how the job counts them -------------------------------------------------------------
 

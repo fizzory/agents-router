@@ -72,7 +72,7 @@ Put the user's own words in `override`, for example the relay line `override=use
 |---|---|
 | `success` | Check the work |
 | `usage_limit` | The selected account hit a limit. Unpinned jobs try other accounts when failover is enabled, and an edit or full role job then moves to the role's next provider. Check the message for reset times. |
-| `blocked` | The worker exited cleanly but did not do the task: it gave no answer, or it stopped on a question nobody answered. Read `message`, answer or narrow the task, and start it again. |
+| `blocked` | The worker exited cleanly but did not do the task: it gave no answer, or (an edit or full job) it stopped on a question nobody answered without doing anything else. Read `message`, answer or narrow the task, and start it again. |
 | `no_account` | All accounts are busy or cooling down; wait or tell the user |
 | refused: "this session runs in" / "No other Claude profile" | The profile this session runs in never takes its own jobs. Name another profile (`account=claude-work`; `subagent_accounts` lists them), use a built-in subagent, or start it with `runtime` codex. |
 | `auth` | For an extra account, ask the user to run `agt accounts login <name>`; add `--runtime codex` or `--runtime antigravity` for non-Claude accounts. For a primary login, use the vendor CLI (`claude auth login`, `codex login` or `agy`). |

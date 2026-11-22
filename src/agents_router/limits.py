@@ -65,8 +65,11 @@ def _read_text(path) -> str:
         return ""
 
 
-def count_active(now: float | None = None) -> Counts:
-    """Count active jobs by runtime and account. A job whose runner died does not count."""
+def count_active(now: float | None = None, exclude_job: str | None = None) -> Counts:
+    """Count active jobs by runtime and account. A job whose runner died does not count.
+
+    `exclude_job` leaves one job out: a role job moving to another provider holds its slot either way.
+    """
 
     now = now or time.time()
     counts = Counts()
@@ -74,6 +77,8 @@ def count_active(now: float | None = None) -> Counts:
     if not folder.is_dir():
         return counts
     for path in folder.iterdir():
+        if exclude_job and path.name == exclude_job:
+            continue
         status = read_json(path / "status.json") if path.is_dir() else None
         if not isinstance(status, dict) or status.get("state") not in ACTIVE_STATES:
             continue
@@ -314,6 +319,7 @@ def admit(
     effort: str | None = None,
     override: str | None = None,
     now: float | None = None,
+    exclude_job: str | None = None,
     _doctor_live: bool = False,
 ) -> Admission:
     """Raise LimitError if the job can't start now; else say which account is expected to take it."""
@@ -325,7 +331,7 @@ def admit(
     runtime = config.runtime(runtime_name)
     if runtime_name == "codex":
         usage_view.refresh_codex(config, live=False)  # admission may hold the global lock: local files only
-    counts = count_active(now)
+    counts = count_active(now, exclude_job)
     queue = runtime.when_full == "queue" and not override
     name = NAMES.get(runtime_name, runtime_name)
     current = None

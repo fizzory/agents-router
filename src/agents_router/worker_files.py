@@ -2,22 +2,38 @@
 
 A worker whose rules forbid shell commands (a researcher on Codex, whose only file tools are
 shell and apply_patch) still has to read the files its task names. These tools run in the
-agt-parent MCP server, outside the CLI's sandbox, so every path is confined by its real path to
-the job's `cwd` and `add_dirs`: `..`, an absolute path elsewhere and a symlink that leaves those
-folders are all refused. Output is capped so one call can't flood the worker's context.
+agt-parent MCP server, outside the CLI's sandbox and its permission rules, so they keep their
+own:
+
+- Every path is confined by its real path to the job's `cwd` and `add_dirs`: `..`, an absolute
+  path elsewhere and a symlink that leaves those folders are all refused.
+- A file is checked again through the descriptor that reads it, so swapping a checked path for a
+  symlink (or a FIFO) before it is opened reaches nothing outside those folders.
+- Keys, logins and environment files are refused by the rules the Antigravity review gate uses
+  (`agy_review.paths`), and so is Agents Router's own state: the gate approves agt-parent calls,
+  so these tools must not read what the gate would deny.
+- A search runs in a child process with a hard time limit, so a pattern that backtracks without
+  end stops there instead of hanging the server.
+
+Output is capped so one call can't flood the worker's context.
 """
 
 from __future__ import annotations
 
 import fnmatch
+import io
+import json
 import os
 import re
 import stat
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
 
 from agents_router import jobs
+from agents_router.agy_review import paths as secret_paths
 
 DEFAULT_READ_LINES = 2000
 MAX_READ_LINES = 5000
@@ -30,14 +46,21 @@ MAX_MATCH_CHARS = 300
 MAX_SEARCH_FILE_BYTES = 2_000_000
 MAX_SKIPPED_SHOWN = 20
 WALK_SECONDS = 20.0
+SEARCH_HARD_SECONDS = WALK_SECONDS + 10  # the child is killed here, whatever it is doing
 SNIFF_BYTES = 8192
 CHUNK_CHARS = 65_536
 # Walked into only when the call starts inside one: they are large and rarely what a task means.
 SKIP_DIRS = frozenset({".git", "node_modules", ".venv", "__pycache__"})
+# macOS and Windows volumes are case-insensitive by default: compare paths without case there.
+FOLD_CASE = sys.platform in ("darwin", "win32")
 
 
 class FileToolError(ValueError):
     """A refusal the worker can act on: the message says what was wrong."""
+
+
+class _Unreadable(FileToolError):
+    """The opened file isn't a regular file inside the job's folders (checked on its descriptor)."""
 
 
 def roots(job_id: str) -> list[Path]:
@@ -57,8 +80,52 @@ def roots(job_id: str) -> list[Path]:
     return found
 
 
-def _inside(path: Path, folders: list[Path]) -> bool:
-    return any(path == root or path.is_relative_to(root) for root in folders)
+def _key(path: Any) -> str:
+    text = os.path.normpath(str(path))
+    return text.casefold() if FOLD_CASE else text
+
+
+def _inside(path: Any, folders: list[Path]) -> bool:
+    key = _key(path)
+    for root in folders:
+        base = _key(root)
+        if key == base or key.startswith(base.rstrip(os.sep) + os.sep):
+            return True
+    return False
+
+
+def _homes() -> list[str]:
+    """Home folders whose logins the secret rules know: this process's HOME and the account's own."""
+
+    found = [os.path.expanduser("~")]
+    try:
+        import pwd
+
+        found.append(pwd.getpwuid(os.getuid()).pw_dir)
+    except (ImportError, KeyError, OSError):
+        pass
+    return list(dict.fromkeys(home for home in found if home and home != "~"))
+
+
+def _protected() -> list[Path]:
+    """Agents Router's own state: jobs, other accounts' homes, settings."""
+
+    from agents_router.config import home as agt_home
+
+    try:
+        return [Path(agt_home()).resolve()]
+    except OSError:
+        return []
+
+
+def _secret(path: Any, folders: list[Path]) -> str | None:
+    text = str(path)
+    # The gate's DOS short-name rule (RUNNER~1) only means something on Windows: elsewhere `notes~1.md`
+    # is just a name. Trusting the whole path leaves that rule no component to look at.
+    reason = secret_paths.secret_reason(text, _homes(), trusted=str(folders[0]) if os.name == "nt" else text)
+    if reason is None and _inside(text, _protected()):
+        reason = "it is Agents Router's own state (jobs, other accounts, config)"
+    return reason
 
 
 def _resolve(folders: list[Path], raw: Any) -> tuple[Path, str]:
@@ -75,6 +142,10 @@ def _resolve(folders: list[Path], raw: Any) -> tuple[Path, str]:
     if not _inside(real, folders):
         allowed = ", ".join(str(root) for root in folders)
         raise FileToolError(f"{text} is outside the folders this job may read ({allowed})")
+    # Both forms, as the gate checks them: a link named .env, or a harmless name for a key file.
+    reason = _secret(os.path.normpath(candidate), folders) or _secret(real, folders)
+    if reason:
+        raise FileToolError(f"{text} is off limits: {reason}")
     return real, text
 
 
@@ -97,9 +168,70 @@ def _is_regular(path: Path) -> bool:
         return False
 
 
-def _is_binary(path: Path) -> bool:
-    with open(path, "rb") as handle:
-        return b"\0" in handle.read(SNIFF_BYTES)
+def _fd_path(fd: int) -> str | None:
+    """Where the kernel says an open descriptor is, or None where it can't tell."""
+
+    if sys.platform == "darwin":
+        import fcntl
+
+        if hasattr(fcntl, "F_GETPATH"):
+            try:
+                return os.fsdecode(fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024)).split(b"\0", 1)[0])
+            except OSError:
+                return None
+        return None
+    try:
+        target = os.readlink(f"/proc/self/fd/{fd}")
+    except OSError:
+        return None
+    return None if target.endswith(" (deleted)") else target
+
+
+def _check_fd(fd: int, path: Path, folders: list[Path], *, folder: bool = False) -> None:
+    info = os.fstat(fd)
+    if not (stat.S_ISDIR(info.st_mode) if folder else stat.S_ISREG(info.st_mode)):
+        raise _Unreadable("not a regular file" if not folder else "not a folder")
+    actual = _fd_path(fd)
+    if actual is None:  # no descriptor path here: the real path must still name this same file
+        real = os.path.realpath(path)
+        try:
+            same = os.path.samestat(info, os.stat(real))
+        except OSError:
+            same = False
+        if not same:
+            raise _Unreadable("it changed while it was opened")
+        actual = real
+    if not _inside(actual, folders):
+        raise _Unreadable("outside the folders this job may read")
+    if not folder and _secret(actual, folders):
+        raise _Unreadable("off limits")
+
+
+def _open_checked(path: Path, folders: list[Path]) -> io.BufferedReader:
+    """Open a regular file for reading, then confirm on the descriptor that it is the one that was checked.
+
+    O_NONBLOCK keeps a FIFO swapped in after the first check from blocking the open itself.
+    """
+
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags)
+    try:
+        _check_fd(fd, path, folders)
+        if hasattr(os, "set_blocking"):
+            os.set_blocking(fd, True)
+        return os.fdopen(fd, "rb")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _text(handle: io.BufferedReader) -> io.TextIOWrapper | None:
+    """The file as text, or None for a binary file (a NUL byte near its start)."""
+
+    if b"\0" in handle.read(SNIFF_BYTES):
+        return None
+    handle.seek(0)
+    return io.TextIOWrapper(handle, encoding="utf-8", errors="replace")
 
 
 def _lines(handle, keep: int):
@@ -134,17 +266,28 @@ def _matches(relative: str, pattern: str | None) -> bool:
 
 
 def _walk(top: Path, folders: list[Path], deadline: float):
-    """Files under `top` in a stable order, skipping heavy folders and anything that leaves the job's folders.
+    """Files under `top` in a stable order, skipping heavy folders, credential folders and anything that leaves the job's folders.
 
     Yields (path, relative-to-top) pairs, then a final (None, reason) when the time ran out.
+    `os.fwalk` (where it exists) descends by descriptor and never into a folder swapped for a
+    symlink; each file is checked again when it is opened.
     """
 
-    for current, dirs, files in os.walk(top, followlinks=False):
-        dirs[:] = sorted(name for name in dirs if name not in SKIP_DIRS)
+    if hasattr(os, "fwalk"):
+        walker = ((current, dirs, files) for current, dirs, files, _fd in os.fwalk(top, follow_symlinks=False))
+    else:
+        walker = os.walk(top, followlinks=False)
+    stopped = f"stopped after {int(WALK_SECONDS)} seconds"
+    for current, dirs, files in walker:
+        if time.monotonic() > deadline:
+            yield None, stopped
+            return
+        dirs[:] = sorted(name for name in dirs
+                         if name not in SKIP_DIRS and name.casefold() not in secret_paths.SECRET_DIRS)
         base = Path(current)
         for name in sorted(files):
             if time.monotonic() > deadline:
-                yield None, f"stopped after {int(WALK_SECONDS)} seconds"
+                yield None, stopped
                 return
             path = base / name
             if not _is_regular(path):
@@ -165,16 +308,27 @@ def read_file(job_id: str, path: Any, offset: Any = 1, limit: Any = DEFAULT_READ
         raise FileToolError(f"{text} is a folder; use list_files")
     if not _is_regular(real):
         raise FileToolError(f"{text} is not a regular file")
-    if _is_binary(real):
-        raise FileToolError(f"{text} is a binary file")
     first = max(1, int(offset or 1))
     count = max(1, min(MAX_READ_LINES, int(limit or DEFAULT_READ_LINES)))
     lines: list[str] = []
     size = 0
     last = first - 1
-    more = False
-    with open(real, encoding="utf-8", errors="replace") as handle:
+    more = stopped = False
+    deadline = time.monotonic() + WALK_SECONDS
+    try:
+        raw = _open_checked(real, folders)
+    except _Unreadable as exc:
+        raise FileToolError(f"{text} is {exc}" if str(exc).startswith("not ") else f"{text}: {exc}") from None
+    except OSError as exc:
+        raise FileToolError(f"can't open {text}: {exc.strerror or exc}") from None
+    with raw:
+        handle = _text(raw)
+        if handle is None:
+            raise FileToolError(f"{text} is a binary file")
         for number, (line, cut) in enumerate(_lines(handle, MAX_LINE_CHARS), 1):
+            if number % 1000 == 0 and time.monotonic() > deadline:
+                more = stopped = True
+                break
             if number < first:
                 continue
             if number >= first + count or size >= MAX_READ_CHARS:
@@ -185,19 +339,45 @@ def read_file(job_id: str, path: Any, offset: Any = 1, limit: Any = DEFAULT_READ
             lines.append(f"{number}\t{line}")
             size += len(lines[-1]) + 1
             last = number
+        handle.detach()
     result: dict[str, Any] = {"path": _shown(real, folders), "start_line": first, "end_line": last,
                               "content": "\n".join(lines)}
     if more:
         result["more"] = True
-        result["note"] = f"The file goes on; call read_file again with offset={last + 1}."
+        result["note"] = (f"Stopped after {int(WALK_SECONDS)} seconds; " if stopped else "The file goes on; ") + \
+            f"call read_file again with offset={last + 1}."
     elif not lines and first > 1:
         result["note"] = f"The file has fewer than {first} lines."
     return result
 
 
+def _scan(real: Path, folders: list[Path]) -> list[tuple[str, bool]]:
+    """(name, is a folder) for each entry the job may see, read through a checked descriptor where possible."""
+
+    shown: list[tuple[str, bool]] = []
+    if os.name == "posix":
+        fd = os.open(real, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
+        try:
+            _check_fd(fd, real, folders, folder=True)
+            entries = sorted(os.scandir(fd), key=lambda item: item.name)
+        finally:
+            os.close(fd)
+    else:
+        entries = sorted(os.scandir(real), key=lambda item: item.name)
+    for entry in entries:
+        if entry.is_symlink():
+            try:
+                if not _inside((real / entry.name).resolve(strict=True), folders):
+                    continue
+            except OSError:
+                continue
+        shown.append((entry.name, entry.is_dir()))
+    return shown
+
+
 def list_files(job_id: str, path: Any = ".", pattern: Any = None) -> dict[str, Any]:
     folders = roots(job_id)
-    real, _text = _resolve(folders, path)
+    real, text = _resolve(folders, path)
     if not real.is_dir():
         return {"path": _shown(real, folders), "entries": [_shown(real, folders)]}
     entries: list[str] = []
@@ -213,17 +393,15 @@ def list_files(job_id: str, path: Any = ".", pattern: Any = None) -> dict[str, A
                     break
                 entries.append(relative)
     else:
-        for entry in sorted(os.scandir(real), key=lambda item: item.name):
-            if entry.is_symlink():
-                try:
-                    if not _inside(Path(entry.path).resolve(strict=True), folders):
-                        continue
-                except OSError:
-                    continue
+        try:
+            scanned = _scan(real, folders)
+        except _Unreadable as exc:
+            raise FileToolError(f"{text}: {exc}") from None
+        for name, folder in scanned:
             if len(entries) >= MAX_LIST_ENTRIES:
                 truncated = f"more than {MAX_LIST_ENTRIES} entries"
                 break
-            entries.append(entry.name + ("/" if entry.is_dir() else ""))
+            entries.append(name + ("/" if folder else ""))
     result: dict[str, Any] = {"path": _shown(real, folders), "entries": entries}
     if truncated:
         result["truncated"] = truncated
@@ -232,6 +410,47 @@ def list_files(job_id: str, path: Any = ".", pattern: Any = None) -> dict[str, A
 
 def search_files(job_id: str, pattern: Any, path: Any = ".", glob: Any = None, ignore_case: Any = False,
                  max_results: Any = DEFAULT_SEARCH_RESULTS) -> dict[str, Any]:
+    """Run the search in a child process: Python can't interrupt a regular expression that backtracks without end."""
+
+    from agents_router.fsutil import no_window_kwargs
+
+    request = {"job_id": job_id, "pattern": None if pattern is None else str(pattern),
+               "path": None if path is None else str(path), "glob": None if glob is None else str(glob),
+               "ignore_case": bool(ignore_case), "max_results": max_results}
+    package_parent = str(Path(__file__).resolve().parent.parent)
+    code = "import sys; sys.path.insert(0, sys.argv[1]); from agents_router import worker_files; worker_files._child()"
+    try:
+        done = subprocess.run([sys.executable, "-I", "-c", code, package_parent], input=json.dumps(request),
+                              capture_output=True, text=True, encoding="utf-8", timeout=SEARCH_HARD_SECONDS,
+                              **no_window_kwargs())
+    except subprocess.TimeoutExpired:
+        raise FileToolError(f"the search was stopped after {int(SEARCH_HARD_SECONDS)} seconds; a pattern with nested "
+                            "repeats such as (a+)+ can take forever: simplify it or narrow path and glob") from None
+    except OSError as exc:
+        raise FileToolError(f"the search could not start: {exc}") from None
+    try:
+        answer = json.loads(done.stdout)
+    except ValueError:
+        tail = (done.stderr or "").strip().splitlines()[-1:] or ["no output"]
+        raise FileToolError(f"the search failed: {tail[0][:300]}") from None
+    if "error" in answer:
+        raise FileToolError(str(answer["error"]))
+    return answer["result"]
+
+
+def _child() -> None:
+    request = json.loads(sys.stdin.read())
+    try:
+        answer: dict[str, Any] = {"result": _search(**request)}
+    except FileToolError as exc:
+        answer = {"error": str(exc)}
+    except (OSError, ValueError, TypeError) as exc:
+        answer = {"error": f"the search failed: {exc}"}
+    sys.stdout.write(json.dumps(answer))
+
+
+def _search(job_id: str, pattern: Any, path: Any = ".", glob: Any = None, ignore_case: Any = False,
+            max_results: Any = DEFAULT_SEARCH_RESULTS) -> dict[str, Any]:
     folders = roots(job_id)
     real, text = _resolve(folders, path)
     try:
@@ -253,6 +472,7 @@ def search_files(job_id: str, pattern: Any, path: Any = ".", glob: Any = None, i
         candidates = iter([(real, real.name)])
     matches: list[dict[str, Any]] = []
     skipped: list[str] = []
+    secret: list[str] = []
     truncated = None
     for item, relative in candidates:
         if item is None:
@@ -260,13 +480,17 @@ def search_files(job_id: str, pattern: Any, path: Any = ".", glob: Any = None, i
             break
         if not _matches(relative, str(glob) if glob else None):
             continue
+        if _secret(item, folders) or (item.is_symlink() and _secret(item.resolve(), folders)):
+            secret.append(_shown(item, folders))
+            continue
         try:
             if item.stat().st_size > MAX_SEARCH_FILE_BYTES:
                 skipped.append(_shown(item, folders))
                 continue
-            if _is_binary(item):
-                continue
-            with open(item, encoding="utf-8", errors="replace") as handle:
+            with _open_checked(item, folders) as raw:
+                handle = _text(raw)
+                if handle is None:
+                    continue
                 for number, (line, _cut) in enumerate(_lines(handle, MAX_SEARCH_FILE_BYTES), 1):
                     if number % 1000 == 0 and time.monotonic() > deadline:
                         truncated = f"stopped after {int(WALK_SECONDS)} seconds"
@@ -277,7 +501,8 @@ def search_files(job_id: str, pattern: Any, path: Any = ".", glob: Any = None, i
                             break
                         matches.append({"path": _shown(item, folders), "line": number,
                                         "text": line[:MAX_MATCH_CHARS]})
-        except OSError:
+                handle.detach()
+        except (_Unreadable, OSError):
             continue
         if truncated:
             break
@@ -285,8 +510,13 @@ def search_files(job_id: str, pattern: Any, path: Any = ".", glob: Any = None, i
     if truncated:
         result["truncated"] = truncated
     if skipped:
-        shown = ", ".join(skipped[:MAX_SKIPPED_SHOWN]) + (f" and {len(skipped) - MAX_SKIPPED_SHOWN} more"
-                                                          if len(skipped) > MAX_SKIPPED_SHOWN else "")
         result["skipped"] = (f"not searched, larger than {MAX_SEARCH_FILE_BYTES // 1_000_000} MB "
-                             f"(read them in parts with read_file): {shown}")
+                             f"(read them in parts with read_file): {_listed(skipped)}")
+    if secret:
+        result["off_limits"] = f"not searched, they may hold keys or logins: {_listed(secret)}"
     return result
+
+
+def _listed(items: list[str]) -> str:
+    return ", ".join(items[:MAX_SKIPPED_SHOWN]) + (
+        f" and {len(items) - MAX_SKIPPED_SHOWN} more" if len(items) > MAX_SKIPPED_SHOWN else "")

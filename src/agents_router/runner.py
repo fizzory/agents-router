@@ -132,12 +132,17 @@ class Runner:
     def blocked(self, result: AttemptResult | None) -> str | None:
         """Why a clean exit is not a success: no answer, or it stopped on an unanswered question without working.
 
-        The worker's account is fine (health already counted the attempt as a success); the parent decides
-        what to do next, so nothing retries it.
+        The question rule applies to edit and full jobs only: their task is to change files, so an
+        answer with no tool call behind it didn't do it. A read job's task can be the answer itself,
+        and a worker told to use its judgment after a question timed out may well give a full one.
+        The worker's account is fine (health already counted the attempt as a success); the parent
+        decides what to do next, so nothing retries it.
         """
 
         if not (result and (result.text or "").strip()):
             return "the worker finished without an answer"
+        if self.spec.access == "read":
+            return None
         try:
             waiting = messages.ignored_questions(self.job_id)
         except OSError:
@@ -217,10 +222,13 @@ class Runner:
         def moved(result: AttemptResult) -> bool:
             """Move a role job to its next provider; the conversation starts fresh there."""
 
-            nonlocal excluded, session, owner, prompt, failover, move_warning, untried
+            nonlocal excluded, session, owner, prompt, failover, move_warning, untried, last
             previous = self._provider_label()
             if not self._move_provider(result):
                 return False
+            # The earlier provider's session can't continue on this runtime: a cancel or a refusal
+            # before the next attempt must not publish it as this job's session.
+            last = dataclasses.replace(result, session_id=None)
             excluded, session, owner, move_warning = set(), None, None, None
             self.owner_home = None
             failover = self.runtime_config.failover == "on-limit" and not self.spec.account
@@ -240,8 +248,7 @@ class Runner:
                 if untried:
                     # The provider the job moved to never ran: its own lack of an account ends the job,
                     # not the earlier provider's limit again (that would walk down the whole list unrun).
-                    return self.finish(NO_ACCOUNT, self._no_account_message(excluded),
-                                       dataclasses.replace(last, session_id=None) if last else None)
+                    return self.finish(NO_ACCOUNT, self._no_account_message(excluded), last)
                 if last is not None and last.outcome == USAGE_LIMIT and moved(last):
                     continue
                 if last is not None:
@@ -533,6 +540,7 @@ class Runner:
         except (OSError, ValueError):
             return False
         listed = record.get("role_providers") if record else None
+        effort_default = record.get("effort") if record else None
         if not record or record.get("access") not in ONE_AT_A_TIME or not isinstance(listed, list):
             return False
         entry = next((item for item in record.get("jobs") or [] if item.get("job_id") == self.job_id), None)
@@ -557,8 +565,16 @@ class Runner:
             if check.reason and not check.soft:
                 skipped.append(f"{text}: {check.reason}")
                 continue
-            if check.soft:
-                fallback = fallback or (number, provider)
+            try:
+                # The same admission launch asks (slots, rooms, pool budgets); this job doesn't count against it.
+                admission = limits.admit(self.config, provider.runtime, account=check.account, model=provider.model,
+                                         effort=provider.effort or effort_default, override=self.spec.override,
+                                         now=now, exclude_job=self.job_id)
+            except limits.LimitError as exc:
+                skipped.append(f"{text}: {exc}")
+                continue
+            if check.soft or admission.queue_reason or admission.account is None:
+                fallback = fallback or (number, provider)  # admitted only to wait, or above the ceiling
                 continue
             chosen = (number, provider)
             break
@@ -573,7 +589,7 @@ class Runner:
         model = provider.model or runtime_config.default_model
         spec = dataclasses.replace(
             self.spec, runtime=provider.runtime, account=provider.account, model=model or None,
-            effort=provider.effort or record.get("effort") or None,
+            effort=provider.effort or effort_default or None,
             resume_session=None, resume_account=None, resume_home=None,
         )
         pool = quota.pool_for(runtime_config, model)
@@ -584,8 +600,12 @@ class Runner:
             # Admission counts running jobs by status.runtime: switch it while no admission is counting.
             with file_lock(state_dir() / "admission.lock", timeout=30):
                 write_json(self.folder / "spec.json", spec.to_dict())  # follow-ups resume on the new runtime
-                self._write_status(runtime=provider.runtime, assigned_account=provider.account,
-                                   pool=pool.name if pool else None)
+                try:
+                    self._write_status(runtime=provider.runtime, assigned_account=provider.account,
+                                       pool=pool.name if pool else None)
+                except OSError:
+                    write_json(self.folder / "spec.json", self.spec.to_dict())  # the job stays where it was
+                    raise
         except (OSError, TimeoutError) as exc:
             self.warnings.append(f"could not move the job to {provider}: {exc}")
             return False

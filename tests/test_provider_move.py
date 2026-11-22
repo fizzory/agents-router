@@ -263,6 +263,107 @@ class ReplayTests(TempHome):
         self.assertIn("stopped on a question nobody answered", blocked() or "")
         self.assertIn("stopped on a question nobody answered", blocked(before=["start with the brief"]) or "")
 
+    # what the independent review of #36 found around a move: admission, cancel, a failed status write
+
+    LIMIT_IN_SESSION = base.AttemptResult(base.USAGE_LIMIT, message="You've reached your monthly usage limit.",
+                                          session_id="kiro-session")
+
+    def test_a_move_skips_a_provider_admission_refuses_and_takes_the_next(self):
+        """precheck alone missed slots, rooms and weekly pool budgets: codex was chosen and left the job waiting."""
+
+        from agents_router import limits
+
+        job_id = self.role_job(["kiro", "codex", "claude"])
+        original = limits.admit
+        asked = []
+
+        def admit(config, runtime_name, **kwargs):
+            asked.append((runtime_name, kwargs.get("exclude_job")))
+            if runtime_name == "codex":
+                raise limits.LimitError("Codex budget used up: 5 of 5 jobs this week")
+            return original(config, runtime_name, **kwargs)
+
+        done = base.AttemptResult(base.SUCCESS, text="claude answer", session_id="c1")
+        with patch.object(limits, "admit", side_effect=admit):
+            code, prompts = self.scripted(job_id, self.LIMIT_IN_SESSION, done)
+        status = jobs.read_status(job_id)
+        self.assertEqual(code, 0, status.get("message"))
+        self.assertEqual((status["runtime"], status["outcome"]), ("claude", "success"))
+        self.assertEqual([move["to"] for move in status["provider_moves"]], ["claude"])
+        self.assertEqual([name for name, _ in asked], ["codex", "claude"])
+        self.assertTrue(all(excluded == job_id for _, excluded in asked), "the moving job never counts against itself")
+
+    def test_a_cancel_right_after_a_move_publishes_no_session_from_the_earlier_runtime(self):
+        """A Kiro session id stored on a job that now runs on Codex would be resumed through the wrong CLI."""
+
+        job_id = self.role_job(["kiro", "codex"])
+        worker = Runner(job_id)
+        home = self.root / "kiro-primary"
+        lease = SimpleNamespace(account=SimpleNamespace(name="primary", home=home), trial=None, release=lambda: None)
+
+        def attempt(lease, prompt, session, owner, fallback):
+            worker.attempts.append({"account": "primary", "home": str(home), "runtime": worker.spec.runtime,
+                                    "started_at": time.time(), "tool_uses": 0})
+            return self.LIMIT_IN_SESSION
+
+        def wait(excluded, prefer=None, pinned=None):
+            return None if "primary" in excluded else lease
+
+        with patch.object(worker, "_wait_for_account", side_effect=wait), \
+                patch.object(worker, "_attempt_with_capacity_retries", side_effect=attempt), \
+                patch.object(worker, "cancelled", side_effect=lambda: bool(worker.moves)):
+            code = worker.run()
+        status = jobs.read_status(job_id)
+        self.assertEqual(code, 1)
+        self.assertEqual((status["outcome"], status["runtime"]), ("cancelled", "codex"))
+        self.assertIsNone(status.get("session_id"))
+        closed = jobs.read_json(jobs.job_dir(job_id) / "inbox-closed.json", {})
+        self.assertIsNone(closed.get("session_id"))
+
+    def test_a_failed_status_write_leaves_the_job_whole_on_its_provider(self):
+        """spec.json naming codex while status says kiro would break follow-ups: the move is undone."""
+
+        job_id = self.role_job(["kiro", "codex"])
+        worker = Runner(job_id)
+        real_write = worker._write_status
+
+        def write_status(**fields):
+            if fields.get("runtime") == "codex":
+                raise OSError("status.json is locked")
+            return real_write(**fields)
+
+        lease = SimpleNamespace(account=SimpleNamespace(name="primary", home=self.root / "kiro-primary"), trial=None,
+                                release=lambda: None)
+
+        def attempt(lease, prompt, session, owner, fallback):
+            worker.attempts.append({"account": "primary", "runtime": worker.spec.runtime, "started_at": time.time(),
+                                    "tool_uses": 0})
+            return self.LIMIT_IN_SESSION
+
+        with patch.object(worker, "_write_status", side_effect=write_status), \
+                patch.object(worker, "_wait_for_account", side_effect=lambda excluded, prefer=None, pinned=None:
+                             None if "primary" in excluded else lease), \
+                patch.object(worker, "_attempt_with_capacity_retries", side_effect=attempt):
+            code = worker.run()
+        status = jobs.read_status(job_id)
+        self.assertEqual(code, 1)
+        self.assertEqual((status["outcome"], status["runtime"]), ("usage_limit", "kiro"))
+        self.assertEqual(jobs.read_spec(job_id).runtime, "kiro")
+        self.assertFalse(status.get("provider_moves"))
+        self.assertTrue([item for item in self.warnings(job_id) if "could not move the job to codex" in item])
+
+    def test_a_read_job_that_answers_after_an_unanswered_question_succeeds(self):
+        """A read job's answer is its work: told to use its judgment after a timed-out question, it may give it."""
+
+        self.settings()
+        job_id = jobs.create_job(runtime="codex", prompt="which rounding?", cwd=str(self.project), access="read",
+                                 start=False)["job_id"]
+        messages.post_from_worker(job_id, "half-up or banker's rounding?", kind="question")
+        worker = Runner(job_id)
+        worker.attempts = [{"tool_uses": 0}]
+        self.assertIsNone(worker.blocked(base.AttemptResult(base.SUCCESS, text="Assuming half-up: 2.35 -> 2.4")))
+        self.assertIn("without an answer", worker.blocked(base.AttemptResult(base.SUCCESS, text="")) or "")
+
 
 class KiroRunErrorTests(TempHome):
     def test_w1_message_is_kiros_run_error_not_the_node_warning(self):
