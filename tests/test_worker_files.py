@@ -331,6 +331,30 @@ class WorkerFileToolTests(TempHome):
         found = list(worker_files._walk(outside, worker_files.roots(self.job), float("inf")))
         self.assertEqual(found, [])
 
+    def test_a_root_swapped_for_a_link_lends_its_target_nothing(self):
+        """An added folder replaced by a link out of the job's folders after roots() pinned it."""
+
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "private.md").write_text("x\n", encoding="utf-8")
+        folders = worker_files.roots(self.job)
+        moved = self.root / "extra-moved"
+        self.extra.rename(moved)
+        os.symlink(outside, self.extra)
+        self.assertFalse(worker_files._inside_by_identity(outside / "private.md", folders))
+        with open(outside / "private.md", "rb") as handle, \
+                patch.object(worker_files, "_fd_path", return_value=str(outside / "private.md")):
+            with self.assertRaises(worker_files.FileToolError):
+                worker_files._check_fd(handle.fileno(), self.extra / "private.md", folders)
+
+    def test_an_added_folder_inside_the_job_folder_is_not_a_root_of_its_own(self):
+        inner = self.project / "docs"
+        spec = jobs.read_spec(self.job)
+        spec.add_dirs = [*spec.add_dirs, str(inner)]
+        jobs.write_json(jobs.job_dir(self.job) / "spec.json", spec.to_dict())
+        self.assertNotIn(inner.resolve(), worker_files.roots(self.job))
+        self.assertEqual(self.call("read_file", path=str(inner / "brief.md"), limit=1)["content"], "1\t# Brief")
+
     # how the job counts them -------------------------------------------------------------
 
     def test_reading_counts_as_work_and_messaging_does_not(self):

@@ -62,18 +62,32 @@ class _Unreadable(FileToolError):
     """The opened file isn't a regular file inside the job's folders (checked on its descriptor)."""
 
 
+# Each root's identity, taken (without following links) when roots() resolved it: a root swapped for a
+# link during a call must not lend the link's target its place.
+_PINNED: dict[str, os.stat_result] = {}
+
+
 def roots(job_id: str) -> list[Path]:
-    """The job's folder first, then its added folders, each by real path."""
+    """The job's folder first, then its added folders, each by real path.
+
+    An added folder spelled inside another one is left out: that one already covers it, and the
+    worker may be able to replace it there with a link to anywhere.
+    """
 
     spec = jobs.read_spec(job_id)
+    spelled = [os.path.normpath(str(item)) for item in [spec.cwd, *(spec.add_dirs or [])]]
     found: list[Path] = []
-    for item in [spec.cwd, *(spec.add_dirs or [])]:
+    for index, item in enumerate(spelled):
+        if index and any(other != item and item.startswith(other.rstrip(os.sep) + os.sep) for other in spelled):
+            continue
         try:
             path = Path(item).resolve(strict=True)
+            info = os.lstat(path)
         except OSError:
             continue
-        if path.is_dir() and path not in found:
+        if stat.S_ISDIR(info.st_mode) and path not in found:
             found.append(path)
+            _PINNED[str(path)] = info
     if not found:
         raise FileToolError("this job has no folder to read")
     return found
@@ -96,10 +110,16 @@ def _inside(path: Any, folders: list[Path]) -> bool:
 
 
 def _inside_by_identity(path: Path, folders: list[Path]) -> bool:
-    try:
-        wanted = [os.stat(root) for root in folders]
-    except OSError:
-        return False
+    wanted = []
+    for root in folders:
+        info = _PINNED.get(str(root))
+        if info is None:
+            try:
+                info = os.lstat(root)  # never followed: a root that is now a link matches nothing
+            except OSError:
+                continue
+        if stat.S_ISDIR(info.st_mode):
+            wanted.append(info)
     for candidate in (path, *path.parents):
         try:
             info = os.lstat(candidate)
