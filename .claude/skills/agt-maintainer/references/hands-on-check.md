@@ -95,7 +95,10 @@ A look at a change on fixture data, before any release, can use the Test build a
   - Motion that reacts to changed data (a spring, a digit roll, a delta) shows only when the data changes between the person's actions. Prepare data that changes, or record that part as "not checked" instead of asking about it.
 - Quote the expected result from the scenario's Expected column or the design doc. Name every state, glyph, hold time, menu item and shortcut it lists, for example "the arrow cross-fades to a check mark, held 1.5 s" or "Quit Agents Router ⌘Q". Never name a category such as "a busy state".
 - When no scenario fixes the action's outcome, trace its handler in code to the visible end state before asking. Pick an observable that tells the risk under test apart from normal behaviour. An expected result rewritten after the answer is a finding, not a pass.
-- A "yes" covers only the action and the states you named.
+- A check a scenario or an earlier plan supplies must reach the code under test too. A setup that can't (a sandbox job, which the installed app never manages, standing in for a job the app runs) is rewritten with the person or stays owed. It is never recorded as passed with a caveat.
+- Never start a timed setup (a job with a deadline, a `sleep`) that forces several checks into one request. Ask the untimed checks first, use a setup that waits for a signal, or ask each check before an action that can't be paused, such as an update install.
+- Ask for a confirmation in a message that asks nothing else: no `/reload-plugins`, no next step.
+- A "yes" covers only the action and the states you named. A reply that names no state ("updated", "all done") confirms none of them: those checks stay owed.
 
 Then read the outcome lines and convert the `agt-app <epoch>` stamps (they carry milliseconds, which `date -r` doesn't take):
 

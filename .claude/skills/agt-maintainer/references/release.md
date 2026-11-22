@@ -1,6 +1,14 @@
 # Release
 
-1. **Check the branch** with `git status` and `git log --oneline main..HEAD`. The tree should be clean, and you should not be on `main`.
+1. **Check the branch** with `git status` and `git log --oneline main..HEAD`. The tree should be clean, and you should not be on `main`. When the branch changes shipped files, its version must be above the newest release tag (SKILL.md §4, "Above the newest tag"):
+
+   ```bash
+   git fetch -q --tags origin
+   new=$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName'); new=${new#v}
+   cur=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); from build_app import versions; print(versions())' | tail -1)
+   [ "$cur" != "$new" ] && [ "$(printf '%s\n%s\n' "$new" "$cur" | sort -V | tail -1)" = "$cur" ] && echo "above v$new" || echo "NOT above v$new"
+   git merge-base --is-ancestor "v$cur" HEAD; echo $?   # 0: already released here; 1: released elsewhere; 128: no such tag yet
+   ```
 2. **Run the full suite:**
 
    ```bash
@@ -61,6 +69,13 @@
      5. A failed write under a workspace folder named `.claude` comes from the eval sandbox (EPERM in the trace), not the skill.
      6. Fix every review finding that names the likely failure mode before the next graded run, even one judged minor: each graded run spends the person's quota.
      7. Before the next graded run, replay a changed `regex` grader over the kept traces and final messages offline; it costs nothing.
+   - **After the gate.** Delete this run's kept folders only, taken from its log; never a `/private/tmp/e-*` glob, which also takes other sessions' folders. Each folder is sealed (mode 000 inside), so open it first:
+
+     ```bash
+     grep -oE 'kept temp: [^ ]+' "$LOG" | awk '{print $3}' | while read -r d; do chmod -R u+rwx "$d" && rm -rf "$d"; done
+     ```
+
+     Record the run's cases, runs per case and total cost in the PR body: the next gate's estimate reads it from there.
    - While you edit a skill, a quicker loop is `--runs 1 -j 4` with that skill's `--tag`. It's advice only: the gate keeps three runs per case. `--case` keeps only the last flag; one case per invocation.
    - Advice only, never a gate: the with/without benchmark (drop `--ablation none`) and trigger tuning with skill-creator against `tests/skill-evals/<skill>/triggers.json`. Both use quota and vary from run to run, so they also stay out of the unit tests.
 4. **Raise the version** in `.claude-plugin/plugin.json`, `pyproject.toml` and `src/agents_router/__init__.py` together:
@@ -85,7 +100,7 @@
    gh pr create --title "Agents Router X.Y.Z: ..." --body "<release notes, test results, live check>"
    ```
 
-   Hand checks left for a later release go under a "Deferred hand checks" heading (step 8, "Click the updated app"). End the body with the attribution footer the session gives you. Then watch CI: start `/mentor:merge`, or run `gh pr checks <n> --watch` in the background. When a job goes red, read it (`gh run view <run-id> --log-failed`) and triage it before the person has to report it.
+   Hand checks left for a later release go under a "Deferred hand checks" heading (step 8, "Click the updated app"). The click step runs after the merge, so that list is updated in the merged PR's body after the click. End the body with the attribution footer the session gives you. Then watch CI: start `/mentor:merge`, or run `gh pr checks <n> --watch` in the background. When a job goes red, read it (`gh run view <run-id> --log-failed`) and triage it before the person has to report it.
 7. **After any merge, whoever merged** (you, `/mentor:merge`, or the person), first run `agt update --dry-run`, which prints where agt reinstalls from. It should name the remote (`git+https://…`). If it names a local checkout that holds uncommitted work, stop and ask the person. Then run `agt update` (it reinstalls from the recorded source and updates the plugin in every profile). Then tell the person to type `/reload-plugins`, or start new sessions, in each profile.
 8. **macOS app release**, when the merged change ships the app:
    - **Merge vs. release.** A merge to `main` only uploads a workflow-run artifact. A GitHub release needs a strict `vX.Y.Z` tag on `main` after the three version files in step 4 agree and the app versions match. Tagging and publishing happen only when the person asks (`macos/README.md`, "Release build").
@@ -100,5 +115,12 @@
 
      `--output -` prints the file instead of leaving a `latest.json` in the checkout.
    - **Publish.** `gh release edit vX.Y.Z --draft=false --latest` runs only on the person's explicit word: every installed app follows `latest.json`. Then verify that `gh api repos/<owner>/<repo>/releases/latest -q .tag_name` prints `vX.Y.Z`, and that `https://github.com/fizzory/agents-router/releases/latest/download/latest.json` redirects (302). `gh release view` has no `isLatest` field: asking for it exits 1, even after a good publish.
-   - **Click the updated app.** For a GUI fix, once the person has updated through Check for Updates…, ask for one hands-on click on the app the updater installed, launched normally (not from a shell), and name the expected result ([hands-on-check.md](hands-on-check.md)). The CI build is not the binary you checked locally. A release PR that leaves hand checks for a later release lists them under a "Deferred hand checks" heading. At this step, read the previous release PR's list (`gh pr view <n> --json body`) and run those checks too, each as its own request. A release PR from before this rule has no such heading: read its runbook and Leftovers for hand checks left for a later release instead.
-   - **Close-out.** Until publication, the message after a merge names tag, secrets and publish as the remaining work. Once a published release carries the diagnostic log (PR #31; `macos/README.md`, "Diagnostic log"), read that file for the updater-installed app instead of launching it from a shell. The popover's on-screen lines still go to stderr only, so the click's result is the person's answer.
+   - **Click the updated app.** For a GUI fix, once the person has updated through Check for Updates…, ask for one hands-on click on the app the updater installed, launched normally (not from a shell), and name the expected result ([hands-on-check.md](hands-on-check.md)). The CI build is not the binary you checked locally. A release PR that leaves hand checks for a later release lists them under a "Deferred hand checks" heading. At this step, read the previous release PR's list (`gh pr view <n> --json body`) and run those checks too, each as its own request. A release PR from before this rule has no such heading: read its runbook and Leftovers for hand checks left for a later release instead. After the click, write every check still owed into this release PR's body under "Deferred hand checks"; a merged PR accepts body edits, and a comment would go unread by the `--json body` lookup:
+
+     ```bash
+     gh pr view <n> --json body --jq .body > "$TMPDIR/pr-body.md"   # append the owed checks, then:
+     gh pr edit <n> --body-file "$TMPDIR/pr-body.md"
+     ```
+
+     Repeat the list in the release's follow-up issue, if there is one. Private memory is never the only record.
+   - **Close-out.** Until publication, the message after a merge names tag, secrets and publish as the remaining work. After the click, it names the hand checks still owed and where they were written. Once a published release carries the diagnostic log (PR #31; `macos/README.md`, "Diagnostic log"), read that file for the updater-installed app instead of launching it from a shell. The popover's on-screen lines still go to stderr only, so the click's result is the person's answer.
