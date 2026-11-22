@@ -1037,6 +1037,53 @@ class AppSourceTests(unittest.TestCase):
         self.assertIn('python: ["3.11", "3.13"]', workflow)
         self.assertNotIn("macos-latest", workflow)
 
+    def test_workflows_skip_only_paths_no_test_or_build_reads(self):
+        # GitHub skips a workflow only when every changed path matches paths-ignore,
+        # and never evaluates path filters for tag pushes. test_guide reads
+        # .claude/skills/agt-maintainer and the .codex link to it, so the core
+        # tests keep running for them; the app build reads neither folder.
+        expected = {
+            "tests.yml": {"push": ["branches: [main]"], "pull_request": [],
+                          "ignore": [".mentor/**", ".kiro/**", ".claude/skills/agt-await-role-job/**",
+                                     ".claude/skills/agt-maintainer/references/hands-on-check.md",
+                                     ".codex/skills/agt-await-role-job"]},
+            "release.yml": {"push": ["branches: [main]", "tags: ['v*']"], "pull_request": [],
+                            "ignore": [".claude/**", ".codex/**", ".mentor/**", ".kiro/**"]},
+        }
+        for name, want in expected.items():
+            with self.subTest(workflow=name):
+                text = (ROOT / ".github/workflows" / name).read_text()
+                trigger = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", text).group(1)
+                events = dict(re.findall(r"(?ms)^  ([\w-]+):[ \t]*\n(.*?)(?=^  \S|\Z)", trigger))
+                self.assertEqual(set(events), {"push", "pull_request"})
+                self.assertNotRegex(trigger, r"(?m)^    (?:paths|branches-ignore|tags-ignore):")
+                for event in ("push", "pull_request"):
+                    body = events[event]
+                    filters = re.findall(r"(?m)^    (\w[\w-]*:.*?)[ \t]*$", body)
+                    self.assertEqual(filters, want[event] + ["paths-ignore:"], event)
+                    ignored = re.findall(r"(?m)^      - '([^']+)'$", body)
+                    self.assertEqual(ignored, want["ignore"], event)
+                    self.assertEqual(len(re.findall(r"(?m)^      ", body)), len(ignored), event)
+                    for pattern in ignored:
+                        # A dot folder by its full name: '.claude*' would also catch .claude-plugin.
+                        # Only a whole folder ('/**' at the end) or one exact path, so the
+                        # check below can match them the way GitHub does.
+                        self.assertRegex(pattern, r"^\.(?:claude|codex|mentor|kiro)/[\w./*-]+$", pattern)
+                        self.assertNotRegex(pattern.removesuffix("/**"), r"[*?\[\]!]", pattern)
+        # Files the core tests read must never be skipped by tests.yml.
+        guide = (ROOT / "tests/test_guide.py").read_text()
+        self.assertIn('MAINTAINER = ROOT / ".claude" / "skills" / "agt-maintainer"', guide)
+        self.assertIn('ROOT / ".codex" / "skills" / "agt-maintainer"', guide)
+        self.assertIn('for reference in ("live-check.md", "release.md"):', guide)
+        read = [".claude/skills/agt-maintainer/SKILL.md",
+                ".claude/skills/agt-maintainer/references/live-check.md",
+                ".claude/skills/agt-maintainer/references/release.md",
+                ".codex/skills/agt-maintainer"]
+        for pattern in expected["tests.yml"]["ignore"]:
+            for path in read:
+                skipped = (path.startswith(pattern[:-2]) if pattern.endswith("/**") else path == pattern)
+                self.assertFalse(skipped, f"tests.yml ignores {path}, which test_guide reads")
+
     def test_github_actions_are_pinned_to_full_commit_shas(self):
         for path in sorted((ROOT / ".github").rglob("*.yml")):
             for action in re.findall(r"(?m)^\s*(?:-\s+)?uses:\s*(\S+)", path.read_text()):

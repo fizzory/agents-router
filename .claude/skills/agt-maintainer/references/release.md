@@ -105,7 +105,7 @@
 8. **macOS app release**, when the merged change ships the app:
    - **Merge vs. release.** A merge to `main` only uploads a workflow-run artifact. A GitHub release needs a strict `vX.Y.Z` tag on `main` after the three version files in step 4 agree and the app versions match. Tagging and publishing happen only when the person asks (`macos/README.md`, "Release build").
    - **Precondition.** The `release` environment exists and holds `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Check at that scope with `gh api repos/<owner>/<repo>/environments/release/secrets --jq '.secrets[].name'`; `gh secret list` without `--env release` shows none of those environment secrets. Creating them is the person's step. Re-run the check after they say it's done, and again if a later change moves the scope.
-   - **Watch the run.** The tag starts `release.yml`, which also runs on every push to `main` and every PR. Find the tag's run with `gh run list --workflow release.yml --branch vX.Y.Z`, then run `gh run watch <id> --exit-status` in the background; it exits non-zero when the run fails.
+   - **Watch the run.** The tag starts `release.yml`, which also runs on every push to `main` and every PR, except one that changes only `.claude/`, `.codex/`, `.mentor/` or `.kiro/`. Path filters never apply to a tag. Find the tag's run with `gh run list --workflow release.yml --branch vX.Y.Z`, then run `gh run watch <id> --exit-status` in the background; it exits non-zero when the run fails.
    - **Check the draft.** After `draft-release`, the draft has four assets (`.dmg`, `.app.tar.gz`, `.sig`, `latest.json`), and `latest.json` names the version and the matching tag URL:
 
      ```bash
