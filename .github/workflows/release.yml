@@ -1,10 +1,23 @@
 name: macOS app
 
+# Skip only when every changed path is in a folder the app build and its
+# guards never read. GitHub doesn't evaluate path filters for tag pushes,
+# so every v* tag still builds and drafts the release.
 on:
   pull_request:
+    paths-ignore:
+      - '.claude/**'
+      - '.codex/**'
+      - '.mentor/**'
+      - '.kiro/**'
   push:
     branches: [main]
     tags: ['v*']
+    paths-ignore:
+      - '.claude/**'
+      - '.codex/**'
+      - '.mentor/**'
+      - '.kiro/**'
 
 permissions:
   contents: read
