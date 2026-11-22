@@ -10,6 +10,7 @@ import os
 import sys
 import threading
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from helpers import TempHome
@@ -286,6 +287,49 @@ class WorkerFileToolTests(TempHome):
         other_case = self.project.parent / self.project.name.swapcase() / "DOCS" / "Brief.md"
         self.assertEqual(self.call("read_file", path=str(other_case), limit=1)["content"], "1\t# Brief")
 
+
+    def test_a_folder_that_differs_only_in_case_is_another_folder_where_the_volume_says_so(self):
+        """A case-sensitive volume (Linux; some macOS volumes) can hold project/ and PROJECT/ side by side."""
+
+        twin = self.project.parent / self.project.name.swapcase()
+        try:
+            twin.mkdir()
+        except FileExistsError:
+            self.skipTest("this volume is case-insensitive")
+        (twin / "other.txt").write_text("not this job's\n", encoding="utf-8")
+        self.refused("read_file", "outside the folders this job may read", path=str(twin / "other.txt"))
+
+    def test_a_file_whose_descriptor_cant_be_located_is_refused(self):
+        """Without a descriptor path, re-reading the path can be fooled by a double swap: fail closed."""
+
+        with patch.object(worker_files, "_fd_path", return_value=None):
+            self.refused("read_file", "can't be confirmed", path="notes.txt")
+
+    @unittest.skipUnless(os.path.isdir("/System/Volumes/Data/private"), "macOS firmlinks")
+    def test_a_job_folder_under_the_data_volume_alias_reads_its_files(self):
+        alias = Path("/System/Volumes/Data" + str(self.project.resolve()))
+        if not alias.is_dir():
+            self.skipTest("the project isn't on the data volume")
+        spec = jobs.read_spec(self.job)
+        spec.cwd = str(alias)
+        jobs.write_json(jobs.job_dir(self.job) / "spec.json", spec.to_dict())
+        self.assertEqual(self.call("read_file", path="notes.txt", limit=1)["content"], "1\tline 1")
+
+    def test_a_folder_listing_shows_links_that_stay_inside(self):
+        os.symlink(self.project / "docs", self.project / "docs-link")
+        os.symlink(self.project / "notes.txt", self.project / "notes-link.txt")
+        entries = self.call("list_files")["entries"]
+        self.assertIn("docs-link/", entries)
+        self.assertIn("notes-link.txt", entries)
+
+    def test_a_walk_whose_top_folder_is_outside_lists_nothing(self):
+        """The top folder is checked on its descriptor, as an ancestor swapped after the path check leaves it."""
+
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "private.md").write_text("x\n", encoding="utf-8")
+        found = list(worker_files._walk(outside, worker_files.roots(self.job), float("inf")))
+        self.assertEqual(found, [])
 
     # how the job counts them -------------------------------------------------------------
 

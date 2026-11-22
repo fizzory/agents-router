@@ -8,7 +8,8 @@ own:
 - Every path is confined by its real path to the job's `cwd` and `add_dirs`: `..`, an absolute
   path elsewhere and a symlink that leaves those folders are all refused.
 - A file is checked again through the descriptor that reads it, so swapping a checked path for a
-  symlink (or a FIFO) before it is opened reaches nothing outside those folders.
+  symlink (or a FIFO) before it is opened reaches nothing outside those folders. Where the system
+  can't say where a descriptor points, the file is refused.
 - Keys, logins and environment files are refused by the rules the Antigravity review gate uses
   (`agy_review.paths`), and so is Agents Router's own state: the gate approves agt-parent calls,
   so these tools must not read what the gate would deny.
@@ -51,8 +52,6 @@ SNIFF_BYTES = 8192
 CHUNK_CHARS = 65_536
 # Walked into only when the call starts inside one: they are large and rarely what a task means.
 SKIP_DIRS = frozenset({".git", "node_modules", ".venv", "__pycache__"})
-# macOS and Windows volumes are case-insensitive by default: compare paths without case there.
-FOLD_CASE = sys.platform in ("darwin", "win32")
 
 
 class FileToolError(ValueError):
@@ -80,16 +79,35 @@ def roots(job_id: str) -> list[Path]:
     return found
 
 
-def _key(path: Any) -> str:
-    text = os.path.normpath(str(path))
-    return text.casefold() if FOLD_CASE else text
-
-
 def _inside(path: Any, folders: list[Path]) -> bool:
-    key = _key(path)
+    """Whether `path` lies in one of `folders`: by spelling, else by the folders' identity on disk.
+
+    The identity check covers a case-insensitive volume (`Docs` for `docs`) and a macOS firmlink
+    (`/System/Volumes/Data/private/tmp` for `/private/tmp`) without treating two folders that
+    differ only in case as one on a case-sensitive volume.
+    """
+
+    key = os.path.normpath(str(path))
     for root in folders:
-        base = _key(root)
+        base = os.path.normpath(str(root))
         if key == base or key.startswith(base.rstrip(os.sep) + os.sep):
+            return True
+    return _inside_by_identity(Path(key), folders)
+
+
+def _inside_by_identity(path: Path, folders: list[Path]) -> bool:
+    try:
+        wanted = [os.stat(root) for root in folders]
+    except OSError:
+        return False
+    for candidate in (path, *path.parents):
+        try:
+            info = os.lstat(candidate)
+        except OSError:
+            return False
+        if stat.S_ISLNK(info.st_mode):
+            return False  # a resolved path holds no links: one here was swapped in
+        if any(os.path.samestat(info, root) for root in wanted):
             return True
     return False
 
@@ -180,6 +198,8 @@ def _fd_path(fd: int) -> str | None:
             except OSError:
                 return None
         return None
+    if os.name == "nt":
+        return _windows_fd_path(fd)
     try:
         target = os.readlink(f"/proc/self/fd/{fd}")
     except OSError:
@@ -187,20 +207,38 @@ def _fd_path(fd: int) -> str | None:
     return None if target.endswith(" (deleted)") else target
 
 
+def _windows_fd_path(fd: int) -> str | None:
+    """GetFinalPathNameByHandleW on the descriptor's handle: the path Windows opened, links followed."""
+
+    try:
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        get = ctypes.windll.kernel32.GetFinalPathNameByHandleW
+        get.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD]
+        get.restype = wintypes.DWORD
+        size = 32768
+        buffer = ctypes.create_unicode_buffer(size)
+        length = get(msvcrt.get_osfhandle(fd), buffer, size, 0)
+        if not length or length >= size:
+            return None
+        text = buffer.value
+    except (ImportError, AttributeError, OSError, ValueError):
+        return None
+    if text.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + text[8:]
+    return text[4:] if text.startswith("\\\\?\\") else text
+
+
 def _check_fd(fd: int, path: Path, folders: list[Path], *, folder: bool = False) -> None:
     info = os.fstat(fd)
     if not (stat.S_ISDIR(info.st_mode) if folder else stat.S_ISREG(info.st_mode)):
         raise _Unreadable("not a regular file" if not folder else "not a folder")
     actual = _fd_path(fd)
-    if actual is None:  # no descriptor path here: the real path must still name this same file
-        real = os.path.realpath(path)
-        try:
-            same = os.path.samestat(info, os.stat(real))
-        except OSError:
-            same = False
-        if not same:
-            raise _Unreadable("it changed while it was opened")
-        actual = real
+    if actual is None:
+        # Re-reading the path can't prove what the descriptor holds (it can be swapped twice): refuse.
+        raise _Unreadable("its real location can't be confirmed on this system")
     if not _inside(actual, folders):
         raise _Unreadable("outside the folders this job may read")
     if not folder and _secret(actual, folders):
@@ -217,7 +255,7 @@ def _open_checked(path: Path, folders: list[Path]) -> io.BufferedReader:
     fd = os.open(path, flags)
     try:
         _check_fd(fd, path, folders)
-        if hasattr(os, "set_blocking"):
+        if os.name == "posix":  # Windows has no O_NONBLOCK for files, and set_blocking there is for pipes
             os.set_blocking(fd, True)
         return os.fdopen(fd, "rb")
     except BaseException:
@@ -273,10 +311,7 @@ def _walk(top: Path, folders: list[Path], deadline: float):
     symlink; each file is checked again when it is opened.
     """
 
-    if hasattr(os, "fwalk"):
-        walker = ((current, dirs, files) for current, dirs, files, _fd in os.fwalk(top, follow_symlinks=False))
-    else:
-        walker = os.walk(top, followlinks=False)
+    walker = _folders(top, folders) if hasattr(os, "fwalk") else os.walk(top, followlinks=False)
     stopped = f"stopped after {int(WALK_SECONDS)} seconds"
     for current, dirs, files in walker:
         if time.monotonic() > deadline:
@@ -299,6 +334,21 @@ def _walk(top: Path, folders: list[Path], deadline: float):
                 except OSError:
                     continue
             yield path, path.relative_to(top).as_posix()
+
+
+def _folders(top: Path, folders: list[Path]):
+    """os.fwalk, with the top folder confirmed on its descriptor: an ancestor swapped for a link after
+    the path was checked would otherwise walk, and list, a folder outside the job's folders."""
+
+    first = True
+    for current, dirs, files, dirfd in os.fwalk(top, follow_symlinks=False):
+        if first:
+            first = False
+            try:
+                _check_fd(dirfd, top, folders, folder=True)
+            except (_Unreadable, OSError):
+                return
+        yield current, dirs, files
 
 
 def read_file(job_id: str, path: Any, offset: Any = 1, limit: Any = DEFAULT_READ_LINES) -> dict[str, Any]:
@@ -355,23 +405,25 @@ def _scan(real: Path, folders: list[Path]) -> list[tuple[str, bool]]:
     """(name, is a folder) for each entry the job may see, read through a checked descriptor where possible."""
 
     shown: list[tuple[str, bool]] = []
+    fd = None
     if os.name == "posix":
         fd = os.open(real, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
-        try:
+    try:
+        if fd is not None:
             _check_fd(fd, real, folders, folder=True)
-            entries = sorted(os.scandir(fd), key=lambda item: item.name)
-        finally:
-            os.close(fd)
-    else:
-        entries = sorted(os.scandir(real), key=lambda item: item.name)
-    for entry in entries:
-        if entry.is_symlink():
+        with os.scandir(real if fd is None else fd) as listing:
+            entries = sorted(listing, key=lambda item: item.name)
+        # The descriptor stays open while entries are classified: is_dir() on a link follows it from there.
+        for entry in entries:
             try:
-                if not _inside((real / entry.name).resolve(strict=True), folders):
+                if entry.is_symlink() and not _inside((real / entry.name).resolve(strict=True), folders):
                     continue
+                shown.append((entry.name, entry.is_dir()))
             except OSError:
                 continue
-        shown.append((entry.name, entry.is_dir()))
+    finally:
+        if fd is not None:
+            os.close(fd)
     return shown
 
 
