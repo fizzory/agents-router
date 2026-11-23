@@ -2,6 +2,7 @@ import { act, fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { cssTime } from '../shared/motion';
+import { SKELETON_ROWS_KEY } from '../../logic/skeleton.js';
 import { media, resizeObservers } from '../test/dom';
 import { envelope, fakeApi, hide, NOW, renderPopover, row, show, updateStatus, usage } from '../test/popover';
 import failures from '../../../../tests/fixtures/popover/update-failures.json';
@@ -15,12 +16,19 @@ const statusText = () => document.getElementById('status')?.textContent;
 const visible = (id: string) => !document.getElementById(id)?.hidden;
 
 describe('§9.1 popover envelope cases', () => {
-  it('first: Loading accounts…, Refresh busy', async () => {
+  it('first: three static skeleton rows, Loading accounts… announced, Refresh busy', async () => {
     await renderPopover(envelope('first'));
+    show();
     expect(visible('reading')).toBe(true);
-    expect(document.getElementById('reading')?.textContent).toBe('Loading accounts…');
+    const skeleton = document.getElementById('reading')!;
+    expect(skeleton.getAttribute('aria-hidden')).toBe('true');
+    expect(skeleton.querySelectorAll('.skeleton-row')).toHaveLength(3);
+    expect(skeleton.textContent).toBe('');
+    expect(skeleton.querySelectorAll('.skeleton-dot, .skeleton-name, .skeleton-gauge, .skeleton-slot')).toHaveLength(12);
     expect(document.getElementById('refresh')?.getAttribute('aria-label')).toBe('Refreshing usage');
     expect(document.getElementById('refresh')?.getAttribute('aria-busy')).toBe('true');
+    expect(document.querySelectorAll('.is-turning')).toHaveLength(1);
+    expect(document.querySelector('#refresh .is-turning')).not.toBeNull();
     expect(statusText()).toBe('Loading accounts…');
   });
 
@@ -87,6 +95,65 @@ describe('§9.1 popover envelope cases', () => {
     api.openSettings.mockImplementationOnce(() => Promise.reject(new Error('IPC down')));
     await act(async () => { fireEvent.click(button('Settings…')); });
     expect(screen.getByRole('alert').textContent).toContain('Error: IPC down');
+  });
+});
+
+describe('first-read skeleton row count', () => {
+  const skeleton = () => document.querySelectorAll('#reading .skeleton-row');
+  const withRows = (count: number, generation = 2) => ({ ...envelope(null, generation), usage: {
+    ...usage, providers: [{ ...usage.providers[0]!, accounts: Array.from({ length: count }, (_, index) => ({
+      ...usage.providers[0]!.accounts[0]!, name: `account-${index}`,
+    })) }],
+  } });
+
+  it.each([['5', 5], ['0', 1], ['9', 6], ['garbage', 3], ['', 3]])('stored %j gives %i skeleton rows', async (stored, count) => {
+    window.localStorage.setItem(SKELETON_ROWS_KEY, stored);
+    await renderPopover(envelope('first'));
+    expect(skeleton()).toHaveLength(count);
+    expect(window.localStorage.getItem(SKELETON_ROWS_KEY)).toBe(stored);
+  });
+
+  it('defaults to three rows when localStorage access throws', async () => {
+    vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => { throw new Error('storage denied'); });
+    await renderPopover(envelope('first'));
+    expect(skeleton()).toHaveLength(3);
+    expect(statusText()).toBe('Loading accounts…');
+  });
+
+  it.each([[0, '1'], [2, '2'], [9, '6']])('a successful snapshot with %i account rows stores %s', async (count, stored) => {
+    window.localStorage.setItem(SKELETON_ROWS_KEY, '5');
+    const { status, unmount } = await renderPopover(envelope('first'));
+    expect(window.localStorage.getItem(SKELETON_ROWS_KEY)).toBe('5');
+    await status(withRows(count));
+    expect(window.localStorage.getItem(SKELETON_ROWS_KEY)).toBe(stored);
+    unmount();
+    await renderPopover(envelope('first'));
+    expect(skeleton()).toHaveLength(Number(stored));
+  });
+
+  it('keeps rendering a successful snapshot when storing its count throws', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage full'); });
+    const { status } = await renderPopover(envelope('first'));
+    await status(withRows(2));
+    expect(document.querySelectorAll('#accounts .account-row')).toHaveLength(2);
+    expect(visible('reading')).toBe(false);
+    expect(visible('trouble-row')).toBe(false);
+  });
+
+  it.each([
+    ['first loading', envelope('first')],
+    ['reading with usage', { ...withRows(2), reading: true }],
+    ['error without usage', envelope('unreadable')],
+    ['error with usage', { ...withRows(2), error: 'usage failed' }],
+    ['missing agt', envelope('missing')],
+    ['old agt', envelope('old')],
+    ['invalid usage', { ...envelope(null), usage: { invalid: true } }],
+  ])('%s does not overwrite the remembered count', async (_name, first) => {
+    window.localStorage.setItem(SKELETON_ROWS_KEY, '5');
+    const write = vi.spyOn(Storage.prototype, 'setItem');
+    await renderPopover(first);
+    expect(window.localStorage.getItem(SKELETON_ROWS_KEY)).toBe('5');
+    expect(write).not.toHaveBeenCalled();
   });
 });
 
@@ -234,7 +301,10 @@ describe('trouble and stale data', () => {
     expect(api.refreshUsage).toHaveBeenCalledTimes(1);
     await status({ ...next, reading: true, generation: 3 });
     expect(button('Retrying…')).toBe(retry);
-    expect(retry.querySelector('.is-turning')).not.toBeNull();
+    expect(retry.querySelector('.is-turning, .turning-icon')).toBeNull();
+    expect(retry.getAttribute('aria-busy')).toBe('true');
+    expect(document.querySelectorAll('.is-turning')).toHaveLength(1);
+    expect(document.querySelector('#refresh .is-turning')).not.toBeNull();
     fireEvent.click(retry);
     expect(api.refreshUsage).toHaveBeenCalledTimes(1);
     await status({ ...next, reading: false, generation: 4 });
@@ -258,6 +328,128 @@ describe('trouble and stale data', () => {
     expect(slot('claude:claude-stale')).toBe('wk86%2h ago');
     expect(row('claude:claude-stale')!.querySelector('.row-slot')?.classList.contains('is-stale')).toBe(true);
     expect(row('claude:claude-off')!.querySelector('.account-main')?.classList.contains('is-dimmed')).toBe(true);
+  });
+});
+
+describe('opening focus', () => {
+  it('drops Refresh focus after show without a press and hides its tooltip', async () => {
+    await renderPopover();
+    show();
+    const refresh = button('Refresh usage');
+    act(() => refresh.focus());
+    expect(document.activeElement).toBe(document.body);
+    expect(refresh.matches(':focus')).toBe(false);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
+  it('drops Refresh focus already set before the window focus event', async () => {
+    await renderPopover();
+    const refresh = button('Refresh usage');
+    act(() => refresh.focus());
+    show();
+    expect(document.activeElement).toBe(document.body);
+    expect(refresh.matches(':focus')).toBe(false);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
+  it.each(['keyboard', 'pointer', 'mouse'] as const)('keeps Refresh focus and its tooltip after a %s press', async (input) => {
+    await renderPopover();
+    show();
+    if (input === 'keyboard') fireEvent.keyDown(document, { key: 'Tab' });
+    else if (input === 'pointer') fireEvent.pointerDown(document.body);
+    else fireEvent.mouseDown(document.body);
+    const refresh = button('Refresh usage');
+    act(() => refresh.focus());
+    await act(async () => { await Promise.resolve(); });
+    expect(document.activeElement).toBe(refresh);
+    expect(refresh.matches(':focus')).toBe(true);
+    expect(screen.getByRole('tooltip').hidden).toBe(false);
+  });
+
+  it('keeps VoiceOver focus without a page press once opening has ended', async () => {
+    vi.useFakeTimers();
+    try {
+      await renderPopover();
+      show();
+      act(() => vi.advanceTimersByTime(cssTime('--panel-time') + 1));
+      const refresh = button('Refresh usage');
+      act(() => refresh.focus());
+      await act(async () => { await Promise.resolve(); });
+      expect(document.activeElement).toBe(refresh);
+      expect(refresh.matches(':focus')).toBe(true);
+      expect(screen.getByRole('tooltip').hidden).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('drops automatic Refresh focus again after opening ended, hide and reopen', async () => {
+    vi.useFakeTimers();
+    try {
+      await renderPopover();
+      show();
+      act(() => vi.advanceTimersByTime(cssTime('--panel-time') + 1));
+      hide();
+      show();
+      const refresh = button('Refresh usage');
+      act(() => refresh.focus());
+      expect(document.activeElement).toBe(document.body);
+      expect(refresh.matches(':focus')).toBe(false);
+      expect(screen.queryByRole('tooltip')).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('drops opening focus even when no focusin reaches the document listeners', async () => {
+    const stopFocusIn = (event: FocusEvent) => event.stopImmediatePropagation();
+    document.addEventListener('focusin', stopFocusIn, true);
+    try {
+      await renderPopover();
+      show();
+      const refresh = button('Refresh usage');
+      act(() => refresh.focus());
+      expect(document.activeElement).toBe(document.body);
+      expect(screen.queryByRole('tooltip')).toBeNull();
+    } finally { document.removeEventListener('focusin', stopFocusIn, true); }
+  });
+
+  it('restarts the full opening interval after hide and show', async () => {
+    vi.useFakeTimers();
+    try {
+      await renderPopover();
+      show();
+      const half = cssTime('--panel-time') / 2;
+      act(() => vi.advanceTimersByTime(half));
+      hide();
+      show();
+      act(() => vi.advanceTimersByTime(half + 1));
+      const refresh = button('Refresh usage');
+      act(() => refresh.focus());
+      expect(document.activeElement).toBe(document.body);
+      act(() => vi.advanceTimersByTime(half));
+      act(() => refresh.focus());
+      await act(async () => { await Promise.resolve(); });
+      expect(document.activeElement).toBe(refresh);
+      expect(screen.getByRole('tooltip').hidden).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['focus', 'visibilitychange'] as const)('does not extend opening after a repeated %s notification', async (notification) => {
+    vi.useFakeTimers();
+    try {
+      await renderPopover();
+      show();
+      const duration = cssTime('--panel-time');
+      act(() => vi.advanceTimersByTime(duration * 2 / 3));
+      if (notification === 'focus') show();
+      else {
+        vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+        vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+        act(() => document.dispatchEvent(new Event('visibilitychange')));
+      }
+      act(() => vi.advanceTimersByTime(duration / 3 + 1));
+      const refresh = button('Refresh usage');
+      act(() => refresh.focus());
+      expect(document.activeElement).toBe(refresh);
+      expect(screen.getByRole('tooltip').hidden).toBe(false);
+    } finally { vi.useRealTimers(); }
   });
 });
 
@@ -329,6 +521,7 @@ describe('keyboard', () => {
 
   it('Escape hides the tooltip and the popover when no native menu is tracking', async () => {
     const { api } = await renderPopover();
+    fireEvent.keyDown(document, { key: 'Tab' });
     act(() => button('Refresh usage').focus());
     expect(screen.getByRole('tooltip').hidden).toBe(false);
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -338,6 +531,51 @@ describe('keyboard', () => {
 });
 
 describe('native More menu', () => {
+  it('keeps Refresh focus after native menu blur and refocus without a new page press', async () => {
+    vi.useFakeTimers();
+    try {
+      const { api } = await renderPopover();
+      show();
+      let dismiss!: () => void;
+      api.showPopoverMenu.mockReturnValueOnce(new Promise<void>((resolve) => { dismiss = resolve; }));
+      const more = button('More');
+      fireEvent.pointerDown(more);
+      fireEvent.click(more);
+      expect(api.showPopoverMenu).toHaveBeenCalledTimes(1);
+      hide();
+      show();
+      await act(async () => dismiss());
+      const refresh = button('Refresh usage');
+      act(() => refresh.focus());
+      expect(document.activeElement).toBe(refresh);
+      expect(screen.getByRole('tooltip').hidden).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('rearms opening when the native menu finishes while the panel is hidden', async () => {
+    vi.useFakeTimers();
+    try {
+      const { api } = await renderPopover();
+      show();
+      let dismiss!: () => void;
+      api.showPopoverMenu.mockReturnValueOnce(new Promise<void>((resolve) => { dismiss = resolve; }));
+      const more = button('More');
+      fireEvent.pointerDown(more);
+      fireEvent.click(more);
+      hide();
+      expect(document.body.dataset.active).toBe('false');
+      const refresh = button('Refresh usage');
+      act(() => refresh.focus());
+      expect(document.activeElement).toBe(refresh);
+      await act(async () => dismiss());
+      expect(document.body.dataset.active).toBe('false');
+      show();
+      act(() => refresh.focus());
+      expect(document.activeElement).toBe(document.body);
+      expect(screen.queryByRole('tooltip')).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
   it('anchors under the button rect in logical coordinates without an in-page menu', async () => {
     const { api } = await renderPopover();
     const more = button('More');
@@ -361,6 +599,7 @@ describe('native More menu', () => {
     fireEvent.click(more);
     expect(api.showPopoverMenu).toHaveBeenCalledTimes(1);
     expect(more.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.keyDown(document, { key: 'Tab' });
     act(() => button('Refresh usage').focus());
     // The real native menu consumes Escape before WebKit. A duplicate key
     // delivered to WebKit while the promise is pending must not hide the panel.
@@ -858,6 +1097,19 @@ describe('S9/S10 one-click update', () => {
     expect(api.openSettings).not.toHaveBeenCalled();
   });
 
+  it.each(['downloading', 'installing'] as const)('keeps the footer as the only moving loader while reading during %s', async (phase) => {
+    const { update } = await renderPopover(envelope('reading'), false, updateStatus('0.17.1', { phase }));
+    show();
+    expect(footerText()).toBe('Installing…');
+    expect(document.querySelectorAll('.is-turning')).toHaveLength(1);
+    expect(footer().querySelector('.is-turning')).not.toBeNull();
+    expect(document.querySelector('#refresh .is-turning')).toBeNull();
+    expect(button('Refreshing usage').getAttribute('aria-busy')).toBe('true');
+    await update(updateStatus(null));
+    expect(document.querySelectorAll('.is-turning')).toHaveLength(1);
+    expect(document.querySelector('#refresh .is-turning')).not.toBeNull();
+  });
+
   it('progress events show received of total without announcing each chunk', async () => {
     const { api, update } = await renderPopover(envelope('update'));
     fireEvent.click(button('Install and Restart'));
@@ -942,26 +1194,35 @@ describe('S9/S10 one-click update', () => {
 
   it('Reduce Motion keeps Installing… and removes the spinner; the button keeps the shared focus outline', async () => {
     media.setReduced(true);
-    const { update } = await renderPopover(envelope('update'));
+    const { update } = await renderPopover({ ...envelope('update'), reading: true });
+    show();
     const install = button('Install and Restart');
     expect(install.classList.contains('button')).toBe(true);
     expect(sharedStyles).toMatch(/\.button:focus-visible \{ outline: var\(--focus-ring\)/);
     await update(updateStatus('0.17.1', { phase: 'downloading' }));
     expect(footerText()).toBe('Installing…');
     expect(footer().querySelector('.turning-icon')).toBeNull();
+    expect(document.querySelectorAll('.is-turning')).toHaveLength(0);
+    expect(button('Refreshing usage').getAttribute('aria-busy')).toBe('true');
   });
 });
 
 describe('S6 shared account-check controller', () => {
-  it('renders Checking… then Retry after failure, and Log in… after a logged-out success', async () => {
+  it('shows a static checking bar, then Retry after failure, and Log in… after a logged-out success', async () => {
     const { api, checks } = await renderPopover();
     show();
     const key = 'claude:claude-unknown';
     const snapshot = { runtime: 'claude', account: 'claude-unknown', phase: 'checking' as const, result: null };
     checks([snapshot]);
     expect(slot(key)).toBe('Checking…');
-    expect(within(row(key)!).getByRole('status', { name: 'Checking claude-unknown' })).toBeTruthy();
-    expect(row(key)!.querySelector('.turning-icon')).not.toBeNull();
+    const checking = within(row(key)!).getByRole('status', { name: 'Checking claude-unknown' });
+    expect(checking.querySelector('.skeleton-bar')?.getAttribute('aria-hidden')).toBe('true');
+    expect(checking.querySelector('.visually-hidden')?.textContent).toBe('Checking…');
+    const visibleSlot = row(key)!.querySelector('.row-slot')!.cloneNode(true) as HTMLElement;
+    visibleSlot.querySelectorAll('.visually-hidden').forEach((node) => node.remove());
+    expect(visibleSlot.textContent).toBe('');
+    expect(row(key)!.querySelector('.turning-icon')).toBeNull();
+    expect(row(key)!.querySelector('.status-dot')?.getAttribute('data-shape')).toBe('hollow');
     expect(row(key)!.querySelector('.row-action')).toBeNull();
     checks([{ ...snapshot, phase: 'failed', result: { account: snapshot.account, logged_in: null, checked_at: NOW, error: 'fake error' } }]);
     expect(slot(key)).toBe('Retry');
@@ -989,10 +1250,29 @@ describe('S6 shared account-check controller', () => {
     expect(api.getAccountChecks).toHaveBeenCalledTimes(1);
   });
 
-  it('Reduce Motion keeps Checking… and removes the spinner', async () => {
+  it('first open with several checking accounts has no moving loaders when usage is not reading', async () => {
+    const first = envelope(null);
+    first.usage = { ...usage, providers: [{ ...usage.providers[0]!, accounts: Array.from({ length: 5 }, (_, index) => ({
+      ...usage.providers[0]!.accounts.find((account) => account.name === 'claude-unknown')!, name: `unknown-${index}`,
+    })) }] };
+    await renderPopover({ ...first, reading: false });
+    show();
+    expect(document.querySelectorAll('.checking-slot')).toHaveLength(5);
+    expect(document.querySelectorAll('.is-turning')).toHaveLength(0);
+    expect(document.querySelector('.row-slot .turning-icon')).toBeNull();
+    for (let index = 0; index < 5; index += 1) {
+      expect(slot(`claude:unknown-${index}`)).toBe('Checking…');
+      expect(screen.getByRole('status', { name: `Checking unknown-${index}` })).toBeTruthy();
+    }
+  });
+
+  it('Reduce Motion keeps the static bar and accessible Checking… status without a spinner', async () => {
     media.reduced = true;
     await renderPopover();
     expect(slot('claude:claude-unknown')).toBe('Checking…');
+    const checking = within(row('claude:claude-unknown')!).getByRole('status', { name: 'Checking claude-unknown' });
+    expect(checking.querySelector('.skeleton-bar')?.getAttribute('aria-hidden')).toBe('true');
+    expect(checking.querySelector('.visually-hidden')?.textContent).toBe('Checking…');
     expect(row('claude:claude-unknown')!.querySelector('.turning-icon')).toBeNull();
   });
 });

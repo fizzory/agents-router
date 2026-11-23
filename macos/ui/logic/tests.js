@@ -1,5 +1,6 @@
 import './usage.test.js';
 import './rows.test.js';
+import './skeleton.test.js';
 import './height.test.js';
 import './settings.test.js';
 import './panes.test.js';

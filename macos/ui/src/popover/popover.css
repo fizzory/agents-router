@@ -13,6 +13,19 @@ button { font: inherit; color: inherit; cursor: default; }
 .account-scroll { flex: 0 1 auto; min-height: 0; overflow: auto; }
 .account-list { position: relative; margin: 0; padding: 0; list-style: none; }
 .empty-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 28px; padding: 0 var(--space-4); font: var(--type-row); }
+/* Reserve the full row geometry immediately; only its opacity waits. */
+.loading-skeleton { flex: 0 0 auto; animation: number-in var(--cross-fade-time) var(--ease-out) var(--loader-delay) both; }
+.skeleton-row { display: flex; align-items: center; height: 28px; padding: 0 var(--space-4); }
+.skeleton-dot { flex: 0 0 8px; width: 8px; height: 8px; margin-right: var(--space-4); border: 1px solid var(--gauge-track); border-radius: 50%; }
+.skeleton-name { flex: 1 1 auto; min-width: 0; margin-right: var(--space-4); }
+.skeleton-name::before { content: ""; display: block; width: 46%; height: 8px; border-radius: var(--sq-pill); background: var(--gauge-track); }
+.skeleton-row:nth-child(3n + 2) .skeleton-name::before { width: 34%; }
+.skeleton-row:nth-child(3n) .skeleton-name::before { width: 40%; }
+.skeleton-gauge { display: flex; flex: 0 0 var(--gauge-width); flex-direction: column; gap: 2px; width: var(--gauge-width); margin-right: var(--space-4); }
+.skeleton-gauge > span { height: var(--gauge-bar); border-radius: var(--sq-pill); background: var(--gauge-track); }
+.skeleton-slot { display: flex; flex: 0 0 96px; justify-content: flex-end; width: 96px; }
+.skeleton-bar { display: block; flex: 0 0 64px; width: 64px; height: 8px; border-radius: var(--sq-pill); background: var(--gauge-track); }
+.checking-slot { display: flex; align-items: center; justify-content: flex-end; }
 .last-row { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-3); min-height: 28px; margin-top: var(--space-2); padding: var(--space-1) var(--space-4) 0; border-top: 1px solid var(--hairline); font: var(--type-small); }
 /* The update row: one 28px line in every state. The button or the progress takes the right end. */
 .update-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
