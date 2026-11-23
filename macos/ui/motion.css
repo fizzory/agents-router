@@ -10,6 +10,7 @@
   --panel-time: 120ms;
   --panel-resize-time: 160ms;
   --terminal-delay: 300ms;
+  --loader-delay: 300ms;
   --tooltip-delay: 400ms;
   --tooltip-time: 100ms;
   --turn-time: 720ms;

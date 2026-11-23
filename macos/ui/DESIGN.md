@@ -249,6 +249,11 @@ There is no footer unless an update or trouble row is showing. There is no
 popover-wide freshness line. Keep the empty state's `No accounts yet.` and
 one `Add account…` action opening Settings.
 
+The first read reserves static skeleton rows. Keep `Loading accounts…` in
+the live region and Refresh turning as the only moving loader.
+Remember the last successful account row count per viewer, clamped to 1–6;
+default to 3.
+
 ### Account rows
 
 Group rows by provider: Claude, Codex, Antigravity and Kiro. Each row is 28px
@@ -301,7 +306,7 @@ format also applies to Settings rows in Phase 1.
 | Cooling or a timed return | `Back 13:05` |
 | Recovering without a return time | `Recovering` |
 | Disabled | `Off` |
-| Account check running | Spinner plus `Checking…` |
+| Account check running | Static skeleton bar; `Checking…` for screen readers |
 | Account check failed | `Retry` |
 | Logged out, including a successful check with `logged_in:false` | Copy icon plus `Log in…` |
 | Ready Kiro or Antigravity | `Ready` |
@@ -351,11 +356,11 @@ polling never triggers an account check. Rust owns the 600-second throttle,
 retained results and in-flight dedupe across both windows. Seed the throttle
 from cached check timestamps so reopening or restarting does not repeat work.
 
-Show spinner plus `Checking…`, then the result. A successful check with
-`logged_in:false` shows the 2px ring and `Log in…`. Show `Retry` only when
-the check itself fails. Explicit Retry bypasses the throttle after failure
-and joins an active check. Never-checked rows start automatically and show
-`Checking…`; they have no Check button.
+Show a static slot bar with `Checking…` for screen readers, then the result.
+A successful check with `logged_in:false` shows the 2px ring and `Log in…`.
+Show `Retry` only when the check itself fails. Explicit Retry bypasses the
+throttle after failure and joins an active check. Never-checked rows start
+automatically and show the same static bar; they have no Check button.
 
 ### Trouble row
 
@@ -364,9 +369,9 @@ sentence and the data's age in muted 11px / 14px text. For example:
 `agt usage --json timed out after 10 seconds. The numbers below are from 4 minutes ago.`
 Wrap to at most four lines, then scroll. Do not cut off the error.
 
-Put `Retry` at the right. While reading, replace it with spinner plus
-`Retrying…` at the same width. For missing or old agt, use `Install…` or
-`Repair…`; both open Settings.
+Put `Retry` at the right. While reading, replace it with `Retrying…` at the
+same width. Refresh already turns for that read. For missing or old agt,
+use `Install…` or `Repair…`; both open Settings.
 
 Keep the last values and dim the rows as stale. Usage slots show age instead
 of countdown, such as `4m ago`. Timed return states keep `Back 13:05`.
@@ -411,6 +416,10 @@ Keep focus by account key across refreshes. Detail controls are reachable
 only while open. Keep ⌘R for Refresh, ⌘, for Settings and ⌘Q for Quit.
 Escape dismisses the native menu first, then the popover.
 
+Drop WebKit's focus on Refresh while the panel opens, until `--panel-time`
+after it shows, unless the person presses a key or pointer in the page.
+Keep later focus, including VoiceOver's.
+
 Every button has a visible accent `:focus-visible` outline and its accessible
 name. Keep icon-button tooltips and all accessible labels. Announce copy
 success in a polite live region. Row state, quota window, figure, reset and
@@ -421,20 +430,23 @@ reason remain available to screen readers after row tooltips are removed.
 | Trigger | Response |
 | --- | --- |
 | Open | `--panel-time` fade with a 4px rise |
+| First read | Static skeleton rows fade in after `--loader-delay`; Refresh turns |
 | Hover or focus | Row fill and copy icon fade in over 100ms |
 | Detail open or close | Native height over 160ms ease-out; content cross-fades over 200ms |
 | Fresh usage | Only changed bars spring over 240ms with `--spring-settle`; only changed digits roll |
 | New rows | Fade with a 4px rise, 24ms stagger, at most 8 rows |
 | Slot state change | 200ms cross-fade |
-| Refresh | Icon turns while reading; cross-fades to a check for 1500ms (`--copied-delay`), then back |
+| Account check running | Static slot bar; result uses the slot cross-fade |
+| Refresh | Icon turns while reading, except while `Installing…` shows its spinner; cross-fades to a check for 1500ms (`--copied-delay`), then back |
 | Copy | Icon morphs to a check over 200ms, held for 1500ms |
 | Running with spare capacity | Solid mark breathes over 2400ms |
 | Trouble or update row change | 160ms native resize and 200ms cross-fade |
 
 Interrupt a detail resize from its current height. Never stagger gauges or
 existing rows on refresh. Reduce Motion uses cross-fades only: settle bars
-and digits immediately, remove rise and breathing, and replace spinners with
-plain text such as `Checking…`. Keep the hidden-page animation kill-switch.
+and digits immediately, remove rise, breathing and spinners, and keep account
+checks as static bars with `Checking…` for screen readers. Keep the
+hidden-page animation kill-switch.
 
 ### Removed
 

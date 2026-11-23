@@ -103,7 +103,10 @@ export function AccountRow({ model, index, animate, entering = false, active, re
           value={loginCommand.get} copy={loginCommand.copy} failureFeedback tooltip="Copy login command"
           accessibleName={`Copy login command for ${model.name}`} tabIndex={tabIndex(ROW_COPY)} ref={register(ROW_COPY)}
           onFocus={onFocusPart(ROW_COPY)} />}
-        {model.checking ? <span className="state-word" role="status" aria-label={`Checking ${model.name}`} >{!reduced && <Spinner enabled={active} />}Checking…</span> : model.action ? (
+        {model.checking ? <span className="checking-slot" role="status" aria-label={`Checking ${model.name}`}>
+          <span className="skeleton-bar" aria-hidden="true" />
+          <VisuallyHidden>Checking…</VisuallyHidden>
+        </span> : model.action ? (
           <Button variant="inline" className="row-action" busy={busy} tabIndex={tabIndex(ROW_ACTION)} ref={register(ROW_ACTION)}
             aria-describedby={model.action === 'login' && loginCommand?.rejected ? rejectionId : undefined}
             onFocus={onFocusPart(ROW_ACTION)} onClick={run} aria-label={busy ? model.busyLabel : model.accessibleLabel}>

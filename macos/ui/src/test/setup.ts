@@ -27,6 +27,7 @@ window.getComputedStyle = withTokens;
 globalThis.getComputedStyle = withTokens;
 
 beforeEach(() => {
+  window.localStorage.clear();
   media.reset();
   resizeObservers.length = 0;
   document.body.dataset.active = 'false';

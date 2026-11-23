@@ -640,10 +640,11 @@ controller, joins active work and otherwise always starts a new check. Settings 
 its existing Check button and busy behaviour; completed results are shared
 without adding the popover's automatic checking or Retry UI to Settings.
 
-The popover shows spinner plus `Checking…` during a check and while awaiting
-the first check of an unknown account. Failed checks show a ring and Retry;
-a successful `logged_in:false` result shows Log in… and never Retry. A missing
-provider binary is a failed check, with Retry. There is no popover Check button.
+The popover shows a static slot bar with `Checking…` for screen readers during
+a check and while awaiting the first check of an unknown account. Failed
+checks show a ring and Retry; a successful `logged_in:false` result shows
+Log in… and never Retry. A missing provider binary is a failed check, with
+Retry. There is no popover Check button.
 
 Popover command lookup and clipboard failures cross-fade the copy icon to an
 alert for `--copied-delay`, with `Couldn't copy.` as its tooltip and live
@@ -687,8 +688,10 @@ The detail's Settings button opens that account. Closed detail is inert and
 hidden from screen readers. ⌘R refreshes,
 ⌘, opens Settings, ⌘Q quits. AppKit consumes Escape while More is open;
 otherwise Escape hides the tooltip and the popover. The webview shortcuts
-listen on `document`, because focus starts on body. Contracts the native
-checks read: `#accounts .account-row` (one per
+listen on `document`, because focus starts on body. Drop WebKit's focus on
+Refresh while the panel opens, until `--panel-time` after it shows, unless
+the person presses a key or pointer in the page. Keep later focus, including
+VoiceOver's. Contracts the native checks read: `#accounts .account-row` (one per
 account; provider headings are not rows), `#accounts .row-link` labels,
 `#status` and `body[data-active]`. Account strings are React text, never
 markup. `motion.css` owns every duration, curve and visual delay; only

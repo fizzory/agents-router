@@ -60,6 +60,8 @@ export function TooltipProvider({ id = 'tooltip', children }: { id?: string; chi
       else if (!target) { hide(); warm.current = false; }
     };
     const focusIn = (event: FocusEvent) => {
+      // A focus handler may have blurred the target before focusin arrives.
+      if (event.target !== document.activeElement) return;
       const target = closest(event);
       if (target) show(target, true);
       else hide();

@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { contentHeight, createHeightReporter, cssPanelMotion } from '../../logic/height.js';
 import { lastRow, popoverModel, TITLE } from '../../logic/rows.js';
+import { skeletonRowCount, SKELETON_ROWS_KEY } from '../../logic/skeleton.js';
 import {
   AccountRow, AnnounceProvider, Button, cssTime, GroupHeading, Icon, ROW_ACTION, ROW_COPY, ROW_LINK, Spinner, TooltipProvider, TurningIcon,
   useAnnounce, useReducedMotion, useRovingList, useTooltip, type AccountCheck, type RowModel, type UpdateStatus,
@@ -42,6 +43,10 @@ function Popover({ api, now = currentTime, timeZone }: PopoverAppProps) {
   const [problem, setProblem] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [active, setActive] = useState(false);
+  const [skeletonRows, setSkeletonRows] = useState(() => {
+    try { return skeletonRowCount(window.localStorage.getItem(SKELETON_ROWS_KEY)); }
+    catch { return skeletonRowCount(null); }
+  });
   const [expanded, setExpanded] = useState<string | null>(null);
   const [loginFailures, setLoginFailures] = useState<Record<string, string>>({});
   const [loginRejections, setLoginRejections] = useState<Record<string, string>>({});
@@ -61,7 +66,11 @@ function Popover({ api, now = currentTime, timeZone }: PopoverAppProps) {
     head: useRef<HTMLElement>(null), list: useRef<HTMLUListElement>(null), empty: useRef<HTMLDivElement>(null),
     loading: useRef<HTMLDivElement>(null), trouble: useRef<HTMLDivElement>(null), footer: useRef<HTMLElement>(null),
   };
+  const refreshButton = useRef<HTMLButtonElement>(null);
   const more = useRef<HTMLButtonElement>(null);
+  const pressed = useRef(false);
+  const opening = useRef(true);
+  const rearmOpening = useRef<(() => void) | null>(null);
   const menuPending = useRef(false);
   const report = useCallback((error: unknown) => setProblem(String(error)), []);
 
@@ -87,6 +96,14 @@ function Popover({ api, now = currentTime, timeZone }: PopoverAppProps) {
   const update = shown.update;
   const reading = shown.reading;
   const animate = view.animate && active;
+
+  useEffect(() => {
+    if (!view.snapshot?.usage || view.snapshot.error || trouble || shown.first || reading) return;
+    const count = skeletonRowCount(shown.rows.length);
+    setSkeletonRows(count);
+    try { window.localStorage.setItem(SKELETON_ROWS_KEY, String(count)); }
+    catch { /* Storage is optional; keep the count for this viewer. */ }
+  }, [view.snapshot, shown.first, shown.rows.length, reading, !!trouble]);
 
   useEffect(() => {
     clearTimeout(refreshTimer.current);
@@ -172,13 +189,28 @@ function Popover({ api, now = currentTime, timeZone }: PopoverAppProps) {
 
   // Panel shown or hidden: the retained page never unloads.
   useEffect(() => {
+    let openingTimer: ReturnType<typeof setTimeout> | undefined;
+    let shown = false;
+    const resetOpening = () => {
+      clearTimeout(openingTimer);
+      pressed.current = false;
+      opening.current = true;
+      shown = false;
+    };
+    rearmOpening.current = resetOpening;
     const update = (value: boolean) => {
       document.body.dataset.active = String(value);
       setActive(value);
       if (value) {
+        if (opening.current && !pressed.current && document.activeElement === refreshButton.current) refreshButton.current?.blur();
+        if (!shown) {
+          shown = true;
+          openingTimer = setTimeout(() => { opening.current = false; }, cssTime('--panel-time'));
+        }
         reporter.show();
         restart(document.body, 'panel-show');
       } else {
+        if (!menuPending.current) resetOpening();
         entryCycle.current += 1;
         latest.current.tooltip.hide();
         setExpanded(null);
@@ -191,14 +223,31 @@ function Popover({ api, now = currentTime, timeZone }: PopoverAppProps) {
     const focus = () => update(true);
     const blur = () => update(false);
     const visibility = () => update(!document.hidden && document.hasFocus());
+    const press = () => { pressed.current = true; opening.current = false; clearTimeout(openingTimer); };
+    // WebKit focuses the first focusable element (Refresh) as the panel
+    // becomes key. Drop only that opening focus.
+    const initialFocus = (event: FocusEvent) => {
+      const target = refreshButton.current;
+      if (target && event.target === target && opening.current && !pressed.current) target.blur();
+    };
     window.addEventListener('focus', focus);
     window.addEventListener('blur', blur);
     document.addEventListener('visibilitychange', visibility);
+    document.addEventListener('keydown', press, true);
+    document.addEventListener('pointerdown', press, true);
+    document.addEventListener('mousedown', press, true);
+    document.addEventListener('focus', initialFocus, true);
     update(document.hasFocus());
     return () => {
+      clearTimeout(openingTimer);
+      rearmOpening.current = null;
       window.removeEventListener('focus', focus);
       window.removeEventListener('blur', blur);
       document.removeEventListener('visibilitychange', visibility);
+      document.removeEventListener('keydown', press, true);
+      document.removeEventListener('pointerdown', press, true);
+      document.removeEventListener('mousedown', press, true);
+      document.removeEventListener('focus', initialFocus, true);
     };
   }, [reporter]);
 
@@ -324,6 +373,7 @@ function Popover({ api, now = currentTime, timeZone }: PopoverAppProps) {
       // A native menu failure is local to More; usage is still readable.
     } finally {
       menuPending.current = false;
+      if (document.body.dataset.active !== 'true') rearmOpening.current?.();
       setMenuOpen(false);
       more.current?.focus();
     }
@@ -336,10 +386,10 @@ function Popover({ api, now = currentTime, timeZone }: PopoverAppProps) {
     <>
       <header className="popover-head" ref={parts.head}>
         <h1 id="heading" className="popover-title">{shown.header}</h1>
-        <Button variant="icon" id="refresh" aria-label={reading ? 'Refreshing usage' : 'Refresh usage'} aria-keyshortcuts="Meta+R"
+        <Button variant="icon" id="refresh" ref={refreshButton} aria-label={reading ? 'Refreshing usage' : 'Refresh usage'} aria-keyshortcuts="Meta+R"
           tooltip={['Refresh ⌘R', shown.freshness].filter(Boolean).join(' · ')} aria-busy={reading} onClick={refresh}>
           <span className="refresh-feedback" data-checked={refreshed}>
-            <span className="refresh-glyph"><TurningIcon busy={reading} enabled={active && !reduced && !refreshed} /></span>
+            <span className="refresh-glyph"><TurningIcon busy={reading} enabled={active && !reduced && !refreshed && update?.kind !== 'installing'} /></span>
             <span className="refresh-check"><Icon name="check" /></span>
           </span>
         </Button>
@@ -356,7 +406,7 @@ function Popover({ api, now = currentTime, timeZone }: PopoverAppProps) {
           <span key={trouble.detail} className="trouble-detail" id="trouble-detail" role="alert">{trouble.detail}</span>
           <Button variant="text" className="trouble-action" busy={reading && trouble.action === 'refresh'}
             aria-label={reading && trouble.action === 'refresh' ? 'Retrying…' : trouble.button} aria-describedby="trouble-detail" onClick={troubleAction}>
-            {reading && trouble.action === 'refresh' ? <>{!reduced && <Spinner enabled={active} />}Retrying…</> : trouble.button}
+            {reading && trouble.action === 'refresh' ? 'Retrying…' : trouble.button}
           </Button>
         </>}
       </div>
@@ -383,7 +433,14 @@ function Popover({ api, now = currentTime, timeZone }: PopoverAppProps) {
         <span>No accounts yet.</span>
         <Button variant="inline" id="add" onClick={() => { api.openSettings({ account: '' }).catch(report); }}>Add account…</Button>
       </div>
-      <div className="empty-row" id="reading" ref={parts.loading} hidden={!shown.first}>{LOADING}</div>
+      <div className="loading-skeleton" id="reading" ref={parts.loading} hidden={!shown.first} aria-hidden="true">
+        {Array.from({ length: skeletonRows }, (_, index) => <div className="skeleton-row" key={index}>
+          <span className="skeleton-dot" />
+          <span className="skeleton-name" />
+          <span className="skeleton-gauge"><span /><span /></span>
+          <span className="skeleton-slot"><span className="skeleton-bar" /></span>
+        </div>)}
+      </div>
       <footer className="last-row" id="last-row" ref={parts.footer} hidden={!update} data-kind={update?.kind}
         data-tooltip={update?.kind === 'failed' && update.detail ? update.detail : undefined}>
         {update?.kind === 'available' && <span className="update-dot" aria-hidden="true" />}

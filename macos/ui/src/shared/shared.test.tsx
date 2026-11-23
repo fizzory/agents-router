@@ -13,6 +13,15 @@ const bars = () => [...document.querySelectorAll<HTMLElement>('.gauge-bar')];
 describe('Tooltip', () => {
   afterEach(() => vi.useRealTimers());
 
+  it('ignores focusin when its target is no longer the active element', () => {
+    render(<TooltipProvider><button type="button" data-tooltip="Refresh hint">Refresh</button></TooltipProvider>);
+    const target = screen.getByRole('button', { name: 'Refresh' });
+    expect(document.activeElement).not.toBe(target);
+    fireEvent.focusIn(target);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    expect(target.hasAttribute('aria-describedby')).toBe(false);
+  });
+
   it('adds only its own id to aria-describedby and removes only that id', () => {
     render(<TooltipProvider><span id="hint">Own description</span>
       <button type="button" aria-describedby="hint" data-tooltip={'First line\nSecond line'}>Target</button></TooltipProvider>);
