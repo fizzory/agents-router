@@ -47,7 +47,7 @@ test('S2: each generated availability state has its decided row text and accessi
   assert.match(row('cooling').tooltip, /usage limit/);
 });
 
-test('S1/S2 stale dimming belongs to each window only until its reset, with its own age', () => {
+test('S1/S2 stale and unknown dimming belongs to each window, with its own age', () => {
   const data = fixture();
   const stale = row('stale', data);
   assert.equal(stale.slot, '86% 2h ago');
@@ -55,22 +55,21 @@ test('S1/S2 stale dimming belongs to each window only until its reset, with its 
   assert.match(stale.accessibleLabel, /5h 70%, resets 20:00, 1h ago\. week 86%, resets Wed, 2h ago/);
   const expired = row('stale', data, data.generated_at + 3600);
   assert.equal(expired.meters[0].percent, 0);
-  assert.equal(expired.meters[0].dimmed, false);
+  assert.equal(expired.meters[0].dimmed, true);
   assert.equal(expired.meters[1].dimmed, true);
   const allExpired = row('stale', data, data.generated_at + 86400);
-  assert.equal(allExpired.dimmed, false);
-  assert.ok(allExpired.meters.every((meter) => meter.percent === 0 && !meter.dimmed));
-  assert.doesNotMatch(allExpired.accessibleLabel, /ago/);
+  assert.equal(allExpired.dimmed, true);
+  assert.ok(allExpired.meters.every((meter) => meter.percent === 0 && meter.dimmed));
+  assert.match(allExpired.accessibleLabel, /unknown since reset, last seen/);
 });
 
-test('S2 reset wins over stale: empty bar, no age, other window and reset remain accessible', () => {
+test('S2 reset means unknown: dim empty bar, with its age and known other window accessible', () => {
   const shown = row('reset');
   assert.equal(shown.slot, '50% Wed');
   assert.equal(shown.meters[0].percent, 0);
   assert.equal(shown.meters[0].reset, true);
-  assert.equal(shown.meters[0].dimmed, false);
-  assert.match(shown.accessibleLabel, /5h 0%, reset\. week 50%, resets Wed/);
-  assert.doesNotMatch(shown.accessibleLabel, /ago/);
+  assert.equal(shown.meters[0].dimmed, true);
+  assert.match(shown.accessibleLabel, /5h unknown since reset, last seen .* ago\. week 50%, resets Wed/);
 });
 
 test('S1/S2 no figure for Kiro and Antigravity; healthy means a dot only', () => {
@@ -179,7 +178,7 @@ test('S1/S3: popover tags, countdowns, warning bars, ready words and detail incl
   assert.equal(model.header, '6 ready');
   assert.equal(work.slot, 'wk 86% 1d');
   assert.deepEqual(work.detailLines, ['5 hours  17%  Resets 20:00', 'Week  86%  Resets Wed 19:00']);
-  assert.equal(work.detailContext, 'Updated 1m ago');
+  assert.equal(work.detailContext, "Usage updates only from agt's jobs · Updated 1m ago");
   assert.equal(model.rows.find(row => row.runtime === 'kiro').slot, 'Ready');
   assert.equal(model.rows.find(row => row.runtime === 'antigravity').detailContext, 'No usage reported · Updated 0m ago');
   assert.equal(model.rows.find(row => row.name === 'claude-unknown').action, null);

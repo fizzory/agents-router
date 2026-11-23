@@ -121,7 +121,7 @@ def cmd_accounts(args: argparse.Namespace) -> int:
         if args.runtime == "codex":
             from agents_router import usage_view
 
-            result = usage_view.probe_codex(runtime_config, runtime_config.find(args.name), force=True)
+            result = usage_view.probe_codex(runtime_config, runtime_config.find(args.name), due=lambda *_: True)
             usage = ("usage now " + ", ".join(f"{window['utilization']:.0%} of {name}"
                                             for name, window in result.windows.items())) if result else "usage check failed"
             detail = ([" and ".join(cleared) + " cleared"] if cleared else []) + [usage]
@@ -236,6 +236,12 @@ def cmd_setup(args: argparse.Namespace) -> int:
         _refresh_share_launcher(args.dry_run)
         return code
     config = load_config()
+    if args.statusline is not None:
+        from agents_router import statusline
+
+        if not statusline._windows():
+            setup.write_statusline_choice(args.statusline == "on")
+            config.usage.statusline = args.statusline == "on"
     code, report = setup.run_setup(
         config, args.host or ["auto"], args.account, dry_run=False, claude_route=args.claude_route,
         claude_profiles=args.claude_profiles or "this",  # an agent without a terminal asks first: --dry-run --json
@@ -364,6 +370,13 @@ def _account_rows(entry: dict[str, Any], *, method: bool = False) -> list[ui.Lin
         detail.append(ui.warn(text))
     if entry.get("usage"):
         detail.append(ui.muted("used " + ", ".join(f"{share}% of {window}" for window, share in entry["usage"].items())))
+    live = entry.get("statusline_usage")
+    if live in ("live", "no_limits"):
+        detail.append(ui.ok("✓ live usage"))
+    elif live == "off":
+        detail.append(ui.muted("usage from jobs only (off)"))
+    elif live is not None:
+        detail.append(ui.muted("usage from jobs only"))
     if entry.get("held_back_reason"):
         detail.append(ui.warn(entry["held_back_reason"]))
     detail.append(_limits_text(entry).replace("no cap on jobs", "no cap") if method else _limits_text(entry))
@@ -411,16 +424,57 @@ def _kiro_engine(config: Any, report: dict[str, Any], command: list[str]) -> tup
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    from agents_router import bundle
+    from agents_router import bundle, usage_snapshot
 
     install = bundle.diagnostics()
     config = load_config()
     named = getattr(args, "runtime", None)
     names = [named] if named else _runtimes_set_up(config)
+    tap_report = setup.Report()
+    if getattr(args, "fix", False) and "claude" in names:
+        setup.refresh_statuslines(config, tap_report)
     kiro_command = get_runtime("kiro").find_binary(config.runtime("kiro")) if "kiro" in names else None
     reports = {name: tools.account_report(name, command=kiro_command) if name == "kiro" else tools.account_report(name)
                for name in names}
     problems: list[tuple[str, ui.Line]] = []  # what's wrong, and its fix
+    notes = list(config.notes)
+    notes += tap_report.done
+    edited_settings: list[Path] = []
+    if "claude" in names:
+        configured = {accounts._home_key(a.home): a for a in config.runtime("claude").all_accounts()}
+        for entry in reports["claude"].get("accounts", []):
+            home = entry.get("home")
+            if not home:
+                continue
+            account = Account(entry["name"], Path(home))
+            if known := configured.get(accounts._home_key(account.home)):
+                account.login = known.login
+            inspection = usage_snapshot.statusline_inspection(config, account)
+            live = inspection.state
+            if live is None:
+                continue  # generated headless homes aren't user profiles and never get a tap
+            entry["statusline_usage"] = live
+            label = setup.profile_name(account)
+            if live == "missing":
+                problems.append((f"{label} has no status line tap, so its usage updates only from agt's jobs",
+                                 ui.cmd("agt setup")))
+            elif live == "replaced":
+                if not inspection.repairable:
+                    path = inspection.settings_path
+                    edited_settings.append(path)
+                    problems.append((f"{label}'s status line holds an edited agt tap that agt can't read, so agt leaves it alone",
+                                     f'edit "statusLine" in {ui.short_path(path)} yourself'))
+                else:
+                    problems.append((f"Another tool replaced {label}'s status line, so its usage updates only from agt's jobs",
+                                     [ui.cmd("agt setup"), " (keeps the new status line)"]))
+            elif live == "no_limits":
+                notes.append(f"{label}: Claude Code reports no usage limits for this login. Only Pro and Max logins have them.")
+            elif live == "unsupported":
+                notes.append(f"{label}: usage from jobs only (live usage needs macOS or Linux)")
+        if any(entry.get("statusline_usage") == "unset" for entry in reports["claude"].get("accounts", [])):
+            notes.append("Live Claude usage isn't chosen yet. Turn it on: agt config set usage.statusline true")
+    problems += [(line, ui.cmd("agt setup")) for line in tap_report.failed
+                 if not any(ui.short_path(path) in line for path in edited_settings)]
     for name, report in reports.items():
         label = HOST_LABELS.get(name, name)
         if not report.get("binary"):
@@ -444,10 +498,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             problems.append(engine_problem)
     if getattr(args, "json", False):
         found = [{"problem": what, "fix": ui.plain(fix)} for what, fix in problems]
-        _print({**reports[names[0]], "problems": found, "install": install} if named else
-               {"runtimes": list(reports.values()), "problems": found, "install": install})
+        _print({**reports[names[0]], "problems": found, "install": install, "notes": notes} if named else
+               {"runtimes": list(reports.values()), "problems": found, "install": install, "notes": notes})
         return 1 if problems else 0
-    notes = list(config.notes)
     notes += [f"{found}. Two installs both register an MCP server and hooks; remove the old one."
               for found in setup.upstream_installs(config)]
     for name in names:
@@ -509,7 +562,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if problems:
         lines += ["", ui.bold(f"{count} problem{'s' if count != 1 else ''}")]
         for what, fix in problems:
-            lines += [["  ", ui.Span("error-mark", "✗"), " ", what], ["    ", ui.muted("Fix it"), "   ", fix]]
+            lines += [["  ", ui.Span("error-mark", "✗"), " ", what],
+                      ["    ", ui.muted("Fix it"), "   ", *(fix if isinstance(fix, list) else [fix])]]
     if not args.live:
         lines += ["", [ui.code("agt doctor --live"), ui.muted(" starts one tiny job per account and compares what each one loads.")]]
     ui.out(*lines)
@@ -856,9 +910,12 @@ def build_parser() -> argparse.ArgumentParser:
     roles_cli.add_parser(sub)
     synclog.add_parser(sub)
 
-    usage = sub.add_parser("usage", help="Show cached usage windows and account availability; writes nothing.")
-    usage.add_argument("--json", action="store_true", help="Print the versioned usage snapshot as JSON.")
-    usage.add_argument("--refresh", action="store_true", help="First refresh Codex usage from local rollout files.")
+    usage = sub.add_parser("usage", help="Show cached usage windows and account availability; optional Codex refresh.")
+    usage.add_argument("--json", action="store_true", help="Print the versioned result as JSON.")
+    usage_mode = usage.add_mutually_exclusive_group()
+    usage_mode.add_argument("--refresh", action="store_true", help="First refresh Codex usage from local rollout files.")
+    usage_mode.add_argument("--probe-codex", action="store_true",
+                            help="Read live Codex limits for accounts last checked at least 10 minutes ago; no model call.")
 
     mcp_parser = sub.add_parser("mcp", help="Run the MCP server on stdio.")
     mcp_parser.add_argument("--worker", help=argparse.SUPPRESS)
@@ -997,10 +1054,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     hook = sub.add_parser("hook", help="Claude Code hook commands (see hooks/hooks.json).")
     hook.add_argument(
-        "action", choices=HOOK_ACTIONS,
+        "action", choices=(*HOOK_ACTIONS, "statusline"),
         help="await: wake the main session when a job finishes or asks something. "
         "pending: list uncollected results at session start. inbox: a worker's follow-ups. "
-        "roles-context: list installed role agents at session start. roles-first: prefer roles over built-in subagents.",
+        "roles-context: list installed role agents at session start. roles-first: prefer roles over built-in subagents. "
+        "statusline: record usage from Claude Code's status line, then run yours.",
     )
     hook.add_argument("job_id", nargs="?", help="The worker's job (inbox only).")
 
@@ -1032,6 +1090,10 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "agt_home", None):
         os.environ["AGT_HOME"] = args.agt_home
     if args.command == "hook":
+        if args.action == "statusline":  # usage_tap, as entry.quick routes it
+            from agents_router.usage_tap import main as tap
+
+            return tap([])
         from agents_router.hooks import main as run_hook
 
         return run_hook(args.action, args.job_id)
@@ -1045,6 +1107,11 @@ def main(argv: list[str] | None = None) -> int:
 
             return run_job(args.job_id)
         if args.command == "usage":
+            if args.probe_codex:
+                from agents_router.usage_view import probe_codex_accounts
+
+                _print(probe_codex_accounts(load_config(cached_only=True)))
+                return 0
             from agents_router.usage_snapshot import command
 
             return command(args)

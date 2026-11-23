@@ -27,7 +27,7 @@ import json
 import shlex
 from typing import Any
 
-from agents_router import rules, setup, ui
+from agents_router import rules, setup, statusline, ui
 from agents_router.config import load_config
 from agents_router.share import commands as share, picker, scope, settings, state
 from agents_router.share import plan as planner
@@ -41,10 +41,11 @@ SWITCHES = {
     "codex_session": ("Codex's session line (Codex asks you to trust it once in /hooks)", False),
     "mcp": ("MCP servers: your CLIs share their user MCP servers (one with a secret written into it, or set up for one CLI, stays put)", False),
     "plugins": ("Plugins: your Claude Code and Codex plugins install in each other's folders (one a CLI would load only part of waits for your answer)", False),
+    "statusline": ("Live Claude usage: record usage for agt, then run your status line", True),
 }
 # What the picker's count calls each line ("MCP servers on").
 NAMES = {"worktrees": "worktree sharing", "auto_copy": "auto copy", "widen": "tool widening", "rules": "delegation rules",
-         "codex_session": "Codex's session line", "mcp": "MCP servers", "plugins": "plugins"}
+         "codex_session": "Codex's session line", "mcp": "MCP servers", "plugins": "plugins", "statusline": "live Claude usage"}
 # Shorter wording for the screen; SWITCHES keeps the text `--dry-run --json` has always given agents.
 LABELS = {
     "auto_copy": "New agents and skills go to every CLI (auto copy)",
@@ -66,6 +67,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                         help="Repos that share their own agents and skills (default: every repo your CLIs know that has some).")
     parser.add_argument("--rules", choices=("on", "off"), help="Install the delegation rules (off by default).")
     parser.add_argument("--codex-session-line", choices=("on", "off"), help="agt's session entry in Codex (off by default).")
+    parser.add_argument("--statusline", choices=("on", "off"),
+                        help="Record live Claude usage in your status line (recommended on; macOS and Linux).")
     parser.add_argument("--worktrees", choices=settings.WORKTREES, help="How a listed repo's worktrees join (auto by default).")
     parser.add_argument("--mcp", choices=("on", "off"), help="Share your user MCP servers too (off by default).")
     parser.add_argument("--plugins", choices=("on", "off"), help="Install your plugins in your other Claude Code and Codex "
@@ -109,9 +112,16 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     """Everything the screen shows, worked out without writing anything."""
 
     config = load_config()
+    saved_statusline = config.usage.statusline
+    choice = (args.statusline == "on" if args.statusline else
+              saved_statusline if saved_statusline is not None else True)
+    if not statusline._windows():
+        config.usage.statusline = choice  # the proposal only; no consent is saved until Apply
     code, report = setup.run_setup(config, args.host or ["auto"], args.account, dry_run=True, claude_route=args.claude_route,
                                    claude_profiles=args.claude_profiles or "all", role_agents=False)
-    screen: dict[str, Any] = {"setup": report, "setup_code": code}
+    screen: dict[str, Any] = {"setup": report, "setup_code": code, "switches": {}}
+    if report.claude and not statusline._windows():
+        screen["switches"]["statusline"] = choice
     roles = setup.plan_roles(config, args.roles, args.role, args.role_order)
     roles_report = setup.Report(dry_run=True)
     setup.apply_roles(roles, roles_report, setup.selected_folders(report), setup.named_hosts(args.host))
@@ -124,7 +134,8 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     source = setup.plugin_source()
     if args.share == "off":
         content: dict[str, Any] = {"share": "off", "setup": sorted(report.done), "claude": profiles, "source": source,
-                                   "roles": roles.digest()}
+                                   "roles": roles.digest(), "statusline": screen["switches"].get("statusline"),
+                                   "saved_statusline": saved_statusline}
         screen["digest"] = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
         return screen
     saved = settings.load()
@@ -133,9 +144,11 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     sargs.plugins = args.plugins or ("on" if saved.plugins else "off")
     plan = share._plan(sargs, state.load(), saved)
     repos = share._project_choice(sargs, saved)
-    screen.update(saved=saved, sargs=sargs, plan=plan, repos=repos, switches=_switches(args, saved, plan))
+    screen.update(saved=saved, sargs=sargs, plan=plan, repos=repos,
+                  switches={**_switches(args, saved, plan), **screen["switches"]})
     content = {"share": plan.digest, "repos": sorted(str(root) for root in repos), "switches": screen["switches"],
-               "setup": sorted(report.done), "claude": profiles, "source": source, "roles": roles.digest()}
+               "setup": sorted(report.done), "claude": profiles, "source": source, "roles": roles.digest(),
+               "saved_statusline": saved_statusline}
     screen["digest"] = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
     return screen
 
@@ -152,6 +165,8 @@ def command_line(args: argparse.Namespace, screen: dict[str, Any]) -> str:
         parts += ["--claude-profiles", args.claude_profiles or "all"]
     if args.claude_route != "auto":
         parts += ["--claude-route", args.claude_route]
+    if "statusline" in screen["switches"]:
+        parts += ["--statusline", "on" if screen["switches"]["statusline"] else "off"]
     if args.share == "off":
         parts += ["--share", "off"]
     else:
@@ -187,7 +202,8 @@ def short_command(args: argparse.Namespace, screen: dict[str, Any]) -> str:
              ("--share", "off" if args.share == "off" else None), ("--rules", args.rules),
              ("--codex-session-line", args.codex_session_line), ("--worktrees", args.worktrees), ("--mcp", args.mcp),
              ("--plugins", args.plugins), ("--projects", args.projects), ("--auto-copy", args.auto_copy),
-             ("--tool-widening", args.tool_widening), ("--roles", "off" if args.roles == "off" else None))
+             ("--tool-widening", args.tool_widening), ("--roles", "off" if args.roles == "off" else None),
+             ("--statusline", args.statusline))
     for flag, value in given:
         if value is not None:
             parts += [flag, value]
@@ -233,6 +249,8 @@ def proposal(args: argparse.Namespace, screen: dict[str, Any]) -> dict[str, Any]
     if report.claude:
         data["claude_profiles"] = [{"name": item["name"], "folder": item["folder"], "this_session": item["this"],
                                     "gets_plugin": item["selected"]} for item in report.claude]
+    if "statusline" in screen["switches"] and "plan" not in screen:
+        data["switches"] = {"statusline": {"on": screen["switches"]["statusline"], "means": SWITCHES["statusline"][0]}}
     data["roles"] = roles_proposal(screen)
     data.update(still_needed=report.todo, command=command_line(args, screen), next=NEXT)
     return data
@@ -324,6 +342,8 @@ def render(args: argparse.Namespace, screen: dict[str, Any], *, dry_run: bool = 
     lines += profile_lines(report)
     lines += role_lines(screen)
     if "plan" not in screen:
+        if "statusline" in screen["switches"]:
+            lines += ["", ui.bold("Options"), f"  [{'x' if screen['switches']['statusline'] else ' '}] {label('statusline')}"]
         return lines
     plan = screen["plan"]
     labels = [provider.label for provider in plan.included]
@@ -405,6 +425,9 @@ def apply(args: argparse.Namespace, screen: dict[str, Any]) -> int:
     """Do all of it: the plugin, then sharing (with its repos), then the lines that aren't share settings."""
 
     config = load_config()
+    if "statusline" in screen["switches"]:
+        setup.write_statusline_choice(screen["switches"]["statusline"])
+        config.usage.statusline = screen["switches"]["statusline"]
     code, report = setup.run_setup(config, args.host or ["auto"], args.account, dry_run=False, claude_route=args.claude_route,
                                    claude_profiles=args.claude_profiles or "all", role_agents=False)
     todo, report.todo = report.todo, []
@@ -503,6 +526,10 @@ def edit(args: argparse.Namespace, screen: dict[str, Any]) -> None:
 
     _edit_roles(args, screen)
     if "plan" not in screen:
+        if "statusline" in screen["switches"]:
+            lines = picker.ListState("Options", [picker.Choice("statusline", label("statusline"), screen["switches"]["statusline"])])
+            if picker.choose(lines) != picker.QUIT:
+                args.statusline = "on" if "statusline" in lines.checked() else "off"
         return
     share._enable_lists(screen["sargs"], screen["saved"], screen["plan"])
     if screen["repos"]:
@@ -520,6 +547,8 @@ def edit(args: argparse.Namespace, screen: dict[str, Any]) -> None:
     args.codex_session_line = "on" if "codex_session" in checked else "off"
     args.mcp = "on" if "mcp" in checked else "off"
     args.plugins = "on" if "plugins" in checked else "off"
+    if "statusline" in screen["switches"]:
+        args.statusline = "on" if "statusline" in checked else "off"
     args.worktrees = "auto" if "worktrees" in checked else "command"
     args.auto_copy = "on" if "auto_copy" in checked else "off"
     args.tool_widening = "allow-if-shell" if "widen" in checked else "skip"

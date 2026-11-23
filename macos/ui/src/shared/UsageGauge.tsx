@@ -17,7 +17,7 @@ export function UsageGauge({ meters, hidden = false, fresh = false }: UsageGauge
   const last = useRef({ meters, changed: new Set<string>() });
   if (meters !== last.current.meters) {
     const previous = new Map(last.current.meters.map(meter => [meter.name, meter]));
-    const changed = new Set(meters.filter(meter => fresh && meter.present && previous.get(meter.name)?.present
+    const changed = new Set(meters.filter(meter => fresh && meter.present && !meter.reset && !previous.get(meter.name)?.reset && previous.get(meter.name)?.present
       && previous.get(meter.name)?.percent !== meter.percent).map(meter => meter.name));
     last.current = { meters, changed };
   }
@@ -25,12 +25,12 @@ export function UsageGauge({ meters, hidden = false, fresh = false }: UsageGauge
   return (
     <span className={classes} aria-hidden="true">
       {meters.map((meter) => {
-        const bar = ['gauge-bar', meter.dominant ? 'is-main' : 'is-other', meter.warn || (meter.dominant && meter.percent >= WARN_PERCENT) ? 'is-warn' : '',
+        const bar = ['gauge-bar', meter.dominant ? 'is-main' : 'is-other', !meter.reset && (meter.warn || (meter.dominant && meter.percent >= WARN_PERCENT)) ? 'is-warn' : '',
           fresh && last.current.changed.has(meter.name) ? 'is-changing' : '', meter.dimmed ? 'is-stale' : '', meter.reset ? 'is-reset' : ''].filter(Boolean).join(' ');
         const fill: CSSProperties = { transform: `translateX(${meter.percent - 100}%)` };
         return (
           <span key={meter.name} className={bar} data-window={meter.name}>
-            <span className="gauge-fill" style={fill} />
+            {!meter.reset && <span className="gauge-fill" style={fill} />}
           </span>
         );
       })}

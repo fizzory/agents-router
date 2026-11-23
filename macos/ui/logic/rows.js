@@ -10,6 +10,13 @@ export function ageText(observed, now) {
   return `${Math.floor(minutes / 1440)}d ago`;
 }
 
+function windowTimeLabel(window, stale, now, options) {
+  if (window.reset) return ageText(window.observed_at, now);
+  if (stale) return ageText(options.trouble ? options.observed : window.observed_at, now);
+  if (options.popover === true) return countdownText(window.resets_at, now);
+  return resetText(window, now, options);
+}
+
 // One rule for both the popover's marks and its summary. Leases can occupy
 // more slots than there are running jobs, so running_jobs alone is not capacity.
 export function readiness(account) {
@@ -49,13 +56,13 @@ export function accountRow(provider, account, now, options = {}) {
       || (account.availability === 'busy' && capacity !== null) ? jobs
     : popover && NO_WINDOWS.has(provider.runtime) && mark.shape === 'solid' && account.availability === 'ok' ? 'Ready' : stateWord(account.availability);
   const figure = !action && !state && best ? percentText(best) : '';
-  const stale = !!figure && (best.stale || !!options.trouble);
-  const reset = figure ? stale ? ageText(options.trouble ? options.observed : best.observed_at, now)
-    : popover ? countdownText(best.resets_at, now) : resetText(best, now, options) : '';
-  const windowTag = popover && figure ? best.name === 'five_hour' ? '5h' : 'wk' : '';
+  const stale = !!figure && (best.reset || best.stale || !!options.trouble);
+  const reset = figure ? windowTimeLabel(best, stale, now, options) : '';
+  const windowTag = popover && figure && !best.reset ? best.name === 'five_hour' ? '5h' : 'wk' : '';
   const details = windows.map((window) => {
+    if (window.reset) return `${window.name === 'five_hour' ? '5h' : window.name === 'seven_day' ? 'Week' : window.label} unknown since reset, last seen ${ageText(window.observed_at, now)}`;
     const when = popover ? detailResetText(window, now, options) : resetText(window, now, options);
-    const resetLabel = window.reset ? 'reset' : when ? `resets ${when}` : 'reset time unknown';
+    const resetLabel = when ? `resets ${when}` : 'reset time unknown';
     return `${window.label} ${percentText(window)}, ${resetLabel}${window.stale ? `, ${ageText(window.observed_at, now)}` : ''}`;
   });
   const tooltip = [`${providerName} ${account.name}`, popover ? mark.label : state || 'Available', ...details,
@@ -63,22 +70,25 @@ export function accountRow(provider, account, now, options = {}) {
     account.problem || account.reason].filter(Boolean).join('. ');
   const observed = windows.map(window => window.observed_at).filter(Number.isFinite);
   const updated = ageText(options.trouble ? options.observed : observed.length ? Math.min(...observed) : options.observed, now);
-  const detailLines = windows.map(window => `${window.name === 'five_hour' ? '5 hours' : window.name === 'seven_day' ? 'Week' : window.label}  ${percentText(window)}  ${window.reset ? 'Reset' : `Resets ${detailResetText(window, now, options) || 'at an unknown time'}`}`);
-  const detailContext = [NO_WINDOWS.has(provider.runtime) ? 'No usage reported' : jobs || account.problem || account.reason,
+  const detailLines = windows.map(window => `${window.name === 'five_hour' ? '5 hours' : window.name === 'seven_day' ? 'Week' : window.label}  ${percentText(window)}  ${window.reset ? 'Reset, not seen since' : `Resets ${detailResetText(window, now, options) || 'at an unknown time'}`}`);
+  const usageContext = account.statusline_usage == null || account.statusline_usage === 'live' ? ''
+    : account.statusline_usage === 'no_limits' ? 'No usage limits on this login' : "Usage updates only from agt's jobs";
+  const detailContext = [NO_WINDOWS.has(provider.runtime) ? 'No usage reported' : usageContext || jobs || account.problem || account.reason,
     `Updated ${updated}`].filter(Boolean).join(' · ');
+  const usageSetupCommand = !popover && ['missing', 'replaced'].includes(account.statusline_usage) ? 'agt setup' : '';
   const verb = button.replace('…', '');
   return { key: `${provider.runtime}:${account.name}`, runtime: provider.runtime, name: account.name,
     provider: providerName, availability: account.availability, checking: !!account.checking, action, button, figure, reset, windowTag,
-    ...mark, detailLines, detailContext,
+    ...mark, detailLines, detailContext, usageSetupCommand,
     state: button ? '' : state, slot: button || [windowTag, figure, reset].filter(Boolean).join(' ') || state,
     tooltip, accessibleLabel: `${tooltip}. ${button ? `${verb} for ${account.name}` : 'Open in Settings'}.`,
     linkLabel: `${tooltip}. ${popover ? 'Show account detail' : 'Open in Settings'}.`,
     busyLabel: action === 'login' ? `Opening Terminal for ${account.name}` : ['check', 'retry'].includes(action) ? `Checking ${account.name}` : '',
-    tabStops: 1, stale, dimmed: !!options.trouble || (popover ? account.availability === 'off' : stale), threshold: !!figure && best.used_percent >= 95,
+    tabStops: 1, stale, dimmed: !!options.trouble || (popover ? account.availability === 'off' : stale), threshold: !!figure && !best.reset && best.used_percent >= 95,
     meters: ['five_hour', 'seven_day'].map((name) => {
       const window = windows.find((item) => item.name === name);
       return { name, present: !!window, percent: window?.used_percent ?? 0, reset: window?.reset ?? false,
-        dimmed: !!options.trouble || (window?.stale ?? false), dominant: !!window && best === window,
+        dimmed: !!options.trouble || !!window?.reset || (window?.stale ?? false), dominant: !!window && best === window,
         warn: popover && name === 'five_hour' && account.availability === 'cooling' };
     }), hasWindows: windows.length > 0 };
 }

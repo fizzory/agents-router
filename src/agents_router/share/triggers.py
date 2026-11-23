@@ -154,6 +154,8 @@ AGT_HOME={q(record['home'])}; export AGT_HOME
 {config}PYTHONUTF8=1; export PYTHONUTF8
 LOG="$AGT_HOME/state/share/launcher.log"
 if [ ! -x "$PY" ] || [ ! -d "$PKG/agents_router" ]; then
+  # Claude Code's status line runs the usage tap on every message: it stays silent and writes nothing.
+  [ "$1 $2" = "hook statusline" ] && exit 0
   mkdir -p "$AGT_HOME/state/share" 2>/dev/null
   printf '%s %s\\n' "$(date '+%Y-%m-%dT%H:%M:%S')" {q(message)} >> "$LOG" 2>/dev/null
   case "$1 $2" in
@@ -174,6 +176,10 @@ case "$1 $2" in
     # A shared hook's copy: the lean runner (standard library only), its stderr is the hook's answer.
     shift 2
     exec "$PY" -I "$PKG/agents_router/share/hook_run.py" "$@" ;;
+  "hook statusline")
+    # The usage tap behind a wrapped status line: standard library only, never prints.
+    shift 2
+    exec "$PY" -I "$PKG/agents_router/usage_tap.py" "$@" ;;
   "share session"|"share saved")
     # A hook entry never fails the session that runs it.
     mkdir -p "$AGT_HOME/state/share" 2>/dev/null
@@ -198,6 +204,7 @@ AGT_APP_SUPPORT={q(record['app_support'])}; export AGT_APP_SUPPORT
 AGT_BIN_DIR={q(record['bin_dir'])}; export AGT_BIN_DIR
 LOG="$AGT_HOME/state/share/launcher.log"
 if [ ! -x "$AGT" ]; then
+  [ "$1 $2" = "hook statusline" ] && exit 0  # the usage tap stays silent
   case "$1 $2" in
     "share session") printf '%s\\n' {q(session)} ;;
     "share hook-run")

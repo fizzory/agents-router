@@ -43,7 +43,6 @@ button { font: inherit; color: inherit; cursor: default; }
 .popover-account:hover .row-copy, .popover-account:focus-within .row-copy { opacity: 1; pointer-events: auto; }
 .window-tag { flex: 0 0 14px; width: 14px; color: var(--ink-muted); }
 .account-main .reset-time { flex-basis: 40px; width: 40px; white-space: nowrap; text-align: right; overflow: visible; }
-.account-main .row-slot.is-stale .figure { opacity: .5; }
 .account-detail { padding: 0 var(--space-4) var(--space-2) 24px; font: var(--type-small); color: var(--ink-muted); opacity: 1; animation: number-in var(--cross-fade-time) var(--ease-out) both; }
 .account-detail[data-open="false"] { position: absolute; top: 28px; left: 0; right: 0; pointer-events: none; opacity: 0; animation: number-out var(--cross-fade-time) var(--ease-out) both; }
 .account-context { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 24px; }

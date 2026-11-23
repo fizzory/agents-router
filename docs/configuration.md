@@ -77,6 +77,54 @@ Typed by you in a terminal, the change just applies: the command is your words. 
 
 `max_jobs_by_room` and the `[[<runtime>.pools]]` and account tables are edited by hand (`agt accounts` handles accounts).
 
+## Live Claude usage
+
+`usage.statusline` is a user-only setting. It lets agt record live usage in each
+Claude Code profile's status line for the menu bar and job routing. Your status
+line still runs. Unset means you have not answered; `false` means off. Neither
+wraps a status line. Workspace and local files cannot choose for you.
+
+```bash
+agt config set usage.statusline true   # wrap each profile now
+agt config set usage.statusline false  # restore your status lines now
+agt config unset usage.statusline      # restore them and remove the choice
+```
+
+The user file stores the choice as `[usage]` with `statusline = true` or `false`.
+Changes apply in the same call, even with sharing off. Live usage needs macOS
+or Linux; on Windows the choice is saved without wrapping a status line.
+
+Setup asks once with its other choices. Live usage is recommended on; use
+`agt setup --statusline off` to decline. Setup and update re-apply a saved
+`true`, including when another tool replaced the status line. The replacement
+becomes your command after agt's tap. `agt doctor --fix` repairs it too.
+If agt's marker remains but its command was edited beyond agt's template,
+agt leaves it alone. Doctor names `settings.json` for you to edit yourself.
+Uninstall starts with `agt config set usage.statusline false`. This restores
+every recorded file, including profiles no longer in your account list.
+
+The tap runs in the background. Your command keeps its input, output and exit
+code. Figures update after a message in Claude Code's terminal UI here; use
+from other devices appears at the next message. Project or managed status
+lines can override the user line and stop the tap in that project.
+
+Claude accounts in `agt usage --json` and `agt doctor --json` have a
+`statusline_usage` field. Reading either command never installs or repairs a tap.
+Generated headless worker homes omit it; they never run a status line.
+
+| Value | Meaning |
+|---|---|
+| `live` | Wrapped with the current launcher |
+| `missing` | On, but the current tap is missing; run `agt setup` |
+| `replaced` | The tap was replaced or edited; doctor names setup or a manual edit as the fix |
+| `off` | You chose usage from jobs only |
+| `unset` | You have not chosen; doctor prints one note and succeeds |
+| `no_limits` | Wrapped, with `limits: false` in a live file matching this account's login |
+| `unsupported` | Windows; usage comes from jobs only |
+
+Doctor shows `✓ live usage` for installed taps. Off, unset, no limits and
+Windows are notes, not problems. Missing or replaced taps are problems.
+
 ## Usage snapshot
 
 `agt usage` shows one line per account: its canonical name, availability, and
@@ -90,6 +138,15 @@ rescans local Codex rollout files and updates Codex's usage cache. Neither form
 makes a model request. Login state comes from agt's cached checks; an absent,
 expired or invalidated check means `unknown`. Currently only Claude has a persisted
 login-check cache, so the other providers can report blockers but otherwise stay `unknown`.
+
+`agt usage --probe-codex --json` reads Codex's live rate limits, including use
+from other devices, without a model request. It probes an account when the newest
+of its last probe attempt and window observations is at least 600 seconds old.
+Concurrent commands reserve each attempt under the account's lock; failed attempts
+also count toward the interval. All accounts share a 10 second deadline.
+The separate result is `{"schema_version": 1, "probed": ["primary"], "skipped": []}`:
+`probed` lists successful reads, and `skipped` lists fresh accounts or unsuccessful
+reads. It cannot be combined with `--refresh`.
 
 The JSON contract has `schema_version: 1`, `agt_version`, `generated_at` (epoch
 seconds), and `providers`. Each provider has `runtime`, `label` and `accounts`.

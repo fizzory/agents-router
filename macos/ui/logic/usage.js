@@ -19,6 +19,7 @@ function normalizeAccount(account, now) {
           || !optionalTime(window.observed_at) || typeof window.reset !== "boolean"
           || typeof window.stale !== "boolean") throw new Error("Malformed usage window");
       const reset = window.reset || (window.resets_at !== null && window.resets_at <= now);
+      // Keep the numeric contract; reset marks an unknown value, never an observed 0%.
       return { ...window, reset, used_percent: percent({ ...window, reset }),
         stale: !reset && window.stale && window.resets_at !== null && window.resets_at > now };
     });
@@ -45,14 +46,15 @@ export function decodeUsage(input, now) {
   }) };
 }
 
-/** Equal percentages retain agt's window order; an account with no windows returns null. */
+/** Known windows win over reset windows; equal percentages retain agt's order. */
 export function busierWindow(windows) {
   return windows.reduce((best, window) => !finite(window?.used_percent) ? best
-    : best === null || percent(window) > percent(best) ? window : best, null);
+    : best === null || (best.reset && !window.reset)
+      || (!!best.reset === !!window.reset && percent(window) > percent(best)) ? window : best, null);
 }
 
 export function percentText(window) {
-  return window && finite(window.used_percent) ? `${percent(window)}%` : "";
+  return window && finite(window.used_percent) ? window.reset ? '–' : `${percent(window)}%` : "";
 }
 
 /** Today uses a clock; a later day uses its weekday. Reset windows have no future reset text. */

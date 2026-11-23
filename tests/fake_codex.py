@@ -11,6 +11,8 @@
   FAKE_CODEX_APP_SERVER  JSON rateLimits/read result | hang | garbage | error | eof (default)
   FAKE_CODEX_APP_SERVERS JSON object overriding the app-server scenario by account folder name
   FAKE_CODEX_REQUESTS    file to append app-server JSON-RPC requests to
+  FAKE_CODEX_PROBE_ENTERED  file touched when rateLimits/read reaches the fake
+  FAKE_CODEX_PROBE_GATE     FIFO to read before replying to rateLimits/read
   FAKE_CLAUDE_RECORD   file to append {"argv", "env", "stdin"} records to (shared with fake_claude)
 """
 
@@ -51,6 +53,11 @@ def app_server(argv):
             emit({"id": 99, "result": {}})
             emit({"id": request["id"], "result": {"userAgent": "fake-codex"}})
         elif request["method"] == "account/rateLimits/read":
+            if entered := os.environ.get("FAKE_CODEX_PROBE_ENTERED"):
+                Path(entered).write_text("ready\n")
+            if gate := os.environ.get("FAKE_CODEX_PROBE_GATE"):
+                with open(gate) as handle:
+                    handle.readline()
             emit({"method": "notice", "params": {}})
             emit({"id": request["id"], **({"error": {"code": -32601}} if scenario == "error"
                                         else {"result": json.loads(scenario)})})

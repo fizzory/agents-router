@@ -71,6 +71,7 @@ function SettingsAccount({ model, index, animate }: { model: AccountModel; index
   const below = (
     <>
       {model.reason && model.state ? <span className="account-reason">{model.reason}</span> : null}
+      {model.usageSetupCommand && <span className="account-reason">{model.detailContext} · <code>{model.usageSetupCommand}</code></span>}
       {message ? <InlineMessage id={`${model.key}-error`} tone={message.tone}>{message.text}</InlineMessage> : null}
       {loginFailure && <InlineMessage tone="error"><span className="login-failure">
         <span>Couldn't open Terminal.</span><CopyButton key={loginFailure} variant="text" value={loginFailure} copy={api.copyText} onError={settings.report} />

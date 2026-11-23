@@ -20,7 +20,7 @@ If you can't run commands, follow the copy below. It matches the version this sk
 
 # Set up Agents Router (steps for an agent)
 
-You are installing, updating, repairing or removing Agents Router (`agt`) for the person you work with. Do the routine steps yourself. Ask them once, in one message, about the choices. At the end, tell them only what's left for them: logins and reloads. This guide is for agt 0.20.0 or newer; `agt guide setup` prints the copy that matches the installed version.
+You are installing, updating, repairing or removing Agents Router (`agt`) for the person you work with. Do the routine steps yourself. Ask them once, in one message, about the choices. At the end, tell them only what's left for them: logins and reloads. This guide is for agt 0.21.0 or newer; `agt guide setup` prints the copy that matches the installed version.
 
 ## 0. Before you start
 
@@ -62,7 +62,7 @@ agt setup --dry-run --json
 1. **Ask once, in one message.** Show:
    - the Claude profiles that get the plugin, with their folders, marking this session's;
    - the share table (each item with its folders) and the excluded items;
-   - the switches, on or off;
+   - the switches, on or off. On macOS and Linux this includes live Claude usage (recommended on): each profile's line says `<profile>  status line: record usage for agt, then run yours`. `--statusline off` declines. Windows leaves this item out;
    - the role table. Open it with one line on what a role is: a named job your agent hands to its `agt-<role>` agent, and agt picks the provider from the role's settings. Then one bullet per role: **<name>** (<access>; <providers>): <use_when>. Join a read role's providers with " + "; give an edit role's in order, joined with ", then ". Quote `use_when` word for word: it says what the role does and when your agent calls it. Say that the `agt-<role>` agents are for this CLI only, and that they can later change when a role is called or give it standing rules by asking (the orchestrator-customize skill);
    - with roles off (`roles.state` is `off`), no role table. In its place, say that roles are skipped, then this line, word for word: "When you want roles, say 'set up my roles'." Those words start the orchestrator-setup skill;
    - each `needs_answer` item.
@@ -73,6 +73,7 @@ agt setup --dry-run --json
 
 | The person wants | Flag |
 |---|---|
+| Live Claude usage on macOS or Linux | `--statusline on` (recommended); `--statusline off` leaves usage to jobs |
 | The plugin in this profile only, or in named ones | `--claude-profiles this` or `--claude-profiles claude,claude-ntb` |
 | One copy of an item whose copies differ | `--resolve <item>=<label>` |
 | An item kept out of one CLI | `--skip <item>@<label>` |
@@ -152,6 +153,8 @@ Run `agt doctor`.
 - Exit 0 means all good.
 - It checks logins without model calls and flags a profile whose plugin is older than `agt` (fix: `agt update`).
 - It reports the install source, agt and Python versions, and competing copies on PATH. `--verbose` adds the app/runtime versions and all executable paths; `--json` includes the same information in `install`.
+- It reports each Claude profile's live usage source (`statusline_usage` in JSON). A missing or replaced tap is a problem; `agt setup` repairs it and keeps the person's current command. If agt's marker remains but its wrapper was edited beyond agt's template, agt leaves it alone; doctor names `settings.json` for the person to edit. Off, an unanswered choice, no limits for the login and Windows are notes. `agt doctor --fix` re-applies the saved choice.
+- `agt update` re-applies a saved live usage choice too. An unanswered choice never wraps a status line. `agt config set usage.statusline true` turns it on; `false` restores every recorded file.
 - Never run `agt doctor --live` or a real job without the person's OK; both use quota.
 
 ## 8. Repair
@@ -185,7 +188,7 @@ Run `agt doctor`.
 
 Ask first, then work in this order. Only setting it up again undoes it.
 
-1. `agt share disable` stops sharing and removes the watcher and agt's hook entries; its small launcher script goes with `~/.agents-router` in step 8. Add `--remove-copies` only if the person wants agt's copies gone.
+1. First run `agt config set usage.statusline false`. It restores every recorded status line, including profiles no longer listed. If a file cannot be restored, resolve the reported problem before removing agt's folders. Then `agt share disable` stops sharing and removes the watcher and agt's hook entries; its small launcher script goes with `~/.agents-router` in step 8. Add `--remove-copies` only if the person wants agt's copies gone.
 2. `agt rules --remove --target claude` (and `--target codex`), if the rules were installed.
 3. **Each Claude profile:** run `claude plugin uninstall agents-router@agents-router`, then `claude plugin marketplace remove agents-router`, once per profile, in that profile's environment.
    - For `~/.claude`, prefix both with `env -u CLAUDE_CONFIG_DIR`, because your session may have the variable set.
