@@ -2,11 +2,29 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { backText, busierWindow, countdownText, decodeUsage, detailResetText, percentText, resetText, stateWord } from "./usage.js";
+import { popoverModel } from './rows.js';
 
 // Read the producer's golden contract in each test, never a live CLI or home folder.
 const fixture = () => JSON.parse(readFileSync(new URL("../../../tests/fixtures/app/usage.json", import.meta.url), "utf8"));
 const accounts = (data) => data.providers[0].accounts;
 const account = (data, name) => accounts(data).find((item) => item.name === `claude-${name}`);
+
+test('Claude redraw keeps the 30-minute stale threshold and a newer fetch never freshens window age', () => {
+  const raw = fixture(), now = raw.generated_at;
+  const work = account(raw, 'work');
+  work.windows = [{ ...work.windows[0], observed_at: now - 1800, stale: false, source: 'terminal', resets_at: now + 3600 }];
+  assert.equal(account(decodeUsage(raw, now), 'work').windows[0].stale, false);
+  assert.equal(account(decodeUsage(raw, now + 1), 'work').windows[0].stale, true);
+  const old = popoverModel({ usage: raw, fetched_at: now - 120 }, now + 60);
+  const fresh = popoverModel({ usage: raw, fetched_at: now + 60 }, now + 60);
+  const before = old.rows.find(row => row.name === work.name), after = fresh.rows.find(row => row.name === work.name);
+  assert.equal(before.slot, '5h 17% 31m ago');
+  assert.equal(after.slot, before.slot);
+  assert.equal(after.detailContext, before.detailContext);
+  assert.equal(after.stale, true);
+  assert.equal(fresh.freshness, 'Read 0m ago');
+  assert.equal(old.freshness, 'Read 3m ago');
+});
 
 test("decode schema 1, preserve provider/account order, and give no meters to Kiro or Antigravity", () => {
   const raw = fixture();

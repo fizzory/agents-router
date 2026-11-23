@@ -94,6 +94,8 @@ pub struct UsageWindow {
     pub used_percent: f64,
     pub resets_at: Option<f64>,
     pub observed_at: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     pub stale: bool,
     pub reset: bool,
 }

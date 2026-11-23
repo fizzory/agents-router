@@ -7,7 +7,7 @@ import math
 import time
 from typing import Any
 
-from agents_router import __version__, accounts, bundle, health, profiles, statusline, usage_view, window_order
+from agents_router import __version__, accounts, bundle, health, profiles, statusline, usage_tap, usage_view, window_order
 from agents_router.config import Account, Config, RUNTIMES, RuntimeConfig, jobs_dir, state_dir
 from agents_router.fsutil import lock_busy, read_json, same_process
 from agents_router.limits import ACTIVE_STATES, NAMES, STALE_RUNNER_SECONDS
@@ -155,10 +155,13 @@ def _windows(runtime: str, record: dict, now: float) -> list[dict]:
     for name, window in record.get("windows", {}).items():
         observed = window_order.observed_at(window, record)
         reset = window.get("resets_at")
+        source = ("terminal" if window.get("observed_at_source") == usage_tap.OBSERVED_AT_SOURCE else "job") \
+            if runtime == "claude" else None
         result.append({"name": name, "label": usage_view.WINDOW_LABELS.get(name, name),
                        "used_percent": round(window["utilization"] * 100),
                        "resets_at": float(reset) if reset is not None else None,
                        "observed_at": float(observed) if observed is not None else None,
+                       "source": source,
                        "stale": observed is None or now - observed > usage_view.STALE_AFTER_SECONDS,
                        "reset": reset is not None and reset <= now})
     return result

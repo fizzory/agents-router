@@ -8,7 +8,9 @@ so it starts fast.
 It keeps the profile's current 5-hour and weekly figures in `<AGT_HOME>/state/claude-live/<folder key>.json`:
 
     {"login": "3f2a9c...", "limits": true,
-     "windows": {"five_hour": {"utilization": 0.62, "resets_at": 1763900000.0, "observed_at": 1763890000.5}, ...},
+     "windows": {"five_hour": {"utilization": 0.62, "resets_at": 1763900000.0, "observed_at": 1763890000.5,
+                               "observed_at_source": "transcript_assistant_v1", "session_id": "s1",
+                               "claude_version": "2.1.80"}, ...},
      "superseded": {"five_hour": {"utilization": 0.4, "resets_at": 1763903600.0}, ...}}
 
 - The folder is `CLAUDE_CONFIG_DIR`, else `~/.claude`, keyed as `accounts._home_key` keys it. agt's worker homes
@@ -17,7 +19,7 @@ It keeps the profile's current 5-hour and weekly figures in `<AGT_HOME>/state/cl
   `.claude.json`. It is read only once a write could be due, once per write, and never printed. No login, no write.
   Figures belong to the login in the file: when the folder's login is another one, the file is replaced, not merged,
   and the old login's last figures move to `superseded` (values only). `login_since` records when the switch was
-  first seen; windows from transcripts last written before it are ignored. An incoming window in the same window (reset
+  first seen; windows from replies before it are ignored. An incoming window in the same window (reset
   minute) as one of those, and no more used, is never written while that window lasts: within one window
   utilization only rises, so it's the old login's reading from before the new login's first reply, in this session
   or another one. Superseded windows that have reset are pruned on every write.
@@ -25,13 +27,20 @@ It keeps the profile's current 5-hour and weekly figures in `<AGT_HOME>/state/cl
   here, when `rate_limits` is absent and `prompt_cache` is present (a reply came back without usage limits). It
   stays true when a Max login's windows all reset and drop out of the payload. A file replaced for a new login
   before its first window or limits answer has no `limits` (not known yet).
-- `used_percentage` (0-100) becomes `utilization` (0-1). `observed_at` is the earlier of now and the transcript's
-  last write. A window missing from the payload, or an empty `rate_limits`, is no news (Claude Code drops a window
-  once it resets), never 0%. `spend_limit` is a gateway limit, not a 5-hour or weekly window: ignored.
+- `used_percentage` (0-100) becomes `utilization` (0-1). `observed_at` is the newest complete assistant entry's
+  timestamp in the transcript's last 1 MiB. No valid timestamp, no write. A window missing from the payload, or an
+  empty `rate_limits`, is no news (Claude Code drops a window once it resets), never 0%. `spend_limit` is a gateway
+  limit, not a 5-hour or weekly window: ignored.
+- Each window carries `observed_at_source: "transcript_assistant_v1"`. Optional `session_id` (up to 128 characters)
+  and `claude_version` (up to 64, from the payload's `version`) are kept only as printable ASCII. This metadata
+  stays private to live state and never triggers a write alone. No transcript path or content is stored.
+- Readers and same-login comparisons ignore legacy windows without the marker; the next verified write drops
+  them. Their figures still count for historical `limits` and login-switch safeguards, without a new login boundary.
 - It reads the live file and compares before taking any lock (or reading `.claude.json`), so an unchanged payload
   writes nothing anywhere under `state/` (the menu bar app re-reads usage on any change there). A window is news
-  when it beats the stored one in the total order (`window_key`, also used by `window_order`) and its figures changed
-  or its observation moved forward `REFRESH_SECONDS` or more. `.claude.json` is read only when a window isn't a
+  when it beats the stored one under `window_key` (open or no reset, observation time, reset minute, utilization,
+  canonical content; also used by `window_order`) and its figures changed (utilization or reset minute) or its
+  observation moved forward `REFRESH_SECONDS` or more. `.claude.json` is read only when a window isn't a
   superseded login's and is news or differs from the stored one (which may be another login's), or when
   `limits: false` could be due (the file may name another login). A write re-reads and merges under a per-file
   lock, so two sessions of one profile never overwrite each other's newer window; it waits at most `LOCK_SECONDS`
@@ -41,6 +50,7 @@ It keeps the profile's current 5-hour and weekly figures in `<AGT_HOME>/state/cl
 
 from __future__ import annotations
 
+from datetime import datetime
 import hashlib
 import json
 import math
@@ -60,6 +70,9 @@ WINDOWS = ("five_hour", "seven_day")
 REFRESH_SECONDS = 300
 LOCK_SECONDS = 1.0
 MAX_BYTES = 1 << 20
+TRANSCRIPT_SCAN_BYTES = 1 << 20
+TRANSCRIPT_CHUNK_BYTES = 1 << 16
+OBSERVED_AT_SOURCE = "transcript_assistant_v1"
 _MISSING = -math.inf
 
 
@@ -84,16 +97,16 @@ def _or_missing(value: Any) -> float:
 def window_key(window: dict[str, Any], now: float) -> tuple:
     """The total order every merge uses; the greater key wins.
 
-    A window that hasn't reset yet (or has no reset time) beats one that has. Then the reset time to the minute (a
-    later window), the observation time (a newer reading of the same window, even a lower one after a mid-window
-    limit reset), and the utilization. The full content comes last, so equal keys mean equal windows and the result
-    never depends on the order the sources arrive in.
+    A window that hasn't reset yet (or has no reset time) beats one that has. Then the observation time (a newer
+    reading, even if its reset moved earlier), the reset time to the minute, and the utilization. A missing
+    observation sorts lowest among open windows. The canonical content comes last, so equal keys mean equal
+    windows and the result never depends on the order the sources arrive in.
     """
 
     resets = _finite(window.get("resets_at"))
     return (resets is None or resets > now,
-            _MISSING if resets is None else round(resets / 60),
             _or_missing(window.get("observed_at")),
+            _MISSING if resets is None else round(resets / 60),
             _or_missing(window.get("utilization")),
             json.dumps(window, sort_keys=True, default=str))
 
@@ -101,20 +114,72 @@ def window_key(window: dict[str, Any], now: float) -> tuple:
 # The payload ---------------------------------------------------------------------------------------------------
 
 
-def observed_at(payload: dict[str, Any], now: float) -> float:
-    """The earlier of now and the transcript's last write (the figures are as of the session's last reply)."""
+def observed_at(payload: dict[str, Any], now: float) -> float | None:
+    """The newest complete assistant entry's timestamp in the transcript's last 1 MiB, never in the future."""
 
     path = payload.get("transcript_path")
-    if isinstance(path, str) and path:
-        try:
-            return min(now, os.stat(path).st_mtime)
-        except (OSError, ValueError):
-            pass
-    return now
+    if not isinstance(path, str) or not path:
+        return None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(descriptor, "rb", buffering=0) as handle:
+            info = os.fstat(descriptor)
+            if not stat.S_ISREG(info.st_mode):
+                return None
+            start = max(0, info.st_size - TRANSCRIPT_SCAN_BYTES)
+            complete_start = start == 0
+            if start:
+                handle.seek(start - 1)
+                complete_start = handle.read(1) == b"\n"
+            position = info.st_size
+            fragment = b""
+            skip_last = True  # the last line has no trailing newline and may still be being written
+            while position > start:
+                size = min(TRANSCRIPT_CHUNK_BYTES, position - start)
+                position -= size
+                handle.seek(position)
+                lines = (handle.read(size) + fragment).split(b"\n")
+                fragment = lines.pop(0)  # reassemble the line crossing the next chunk boundary
+                if position == start and complete_start:
+                    lines.insert(0, fragment)
+                for line in reversed(lines):
+                    if skip_last:
+                        skip_last = False
+                        continue
+                    if b'"assistant"' not in line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except (ValueError, RecursionError):
+                        continue
+                    if not isinstance(entry, dict) or entry.get("type") != "assistant":
+                        continue
+                    timestamp = entry.get("timestamp")
+                    if not isinstance(timestamp, str):
+                        return None
+                    try:
+                        reply = datetime.fromisoformat(timestamp)
+                        if reply.tzinfo is None:
+                            return None
+                        observed = reply.timestamp()
+                    except (OSError, ValueError, OverflowError):
+                        return None
+                    return observed if observed <= now else None
+    except (OSError, ValueError):
+        return None
+    return None
 
 
-def windows_from(payload: Any, observed: float) -> dict[str, dict[str, Any]] | None:
-    """The 5-hour and weekly windows in a status line payload, each stamped `observed`.
+def window_metadata(value: dict[str, Any]) -> dict[str, str]:
+    """Only bounded, printable ASCII session and Claude version strings, for the tap and live-file reader."""
+
+    return {key: item for key, bound in (("session_id", 128), ("claude_version", 64))
+            if isinstance(item := value.get(key), str) and len(item) <= bound
+            and all(" " <= character <= "~" for character in item)}
+
+
+def _payload_windows(payload: Any) -> dict[str, dict[str, Any]] | None:
+    """The 5-hour and weekly windows with their source and checked session metadata, before observation.
 
     {} when there are none (no news); None when the payload or any window in it is malformed (nothing is written).
     """
@@ -126,6 +191,7 @@ def windows_from(payload: Any, observed: float) -> dict[str, dict[str, Any]] | N
         return {}
     if not isinstance(limits, dict):
         return None
+    metadata = window_metadata({"session_id": payload.get("session_id"), "claude_version": payload.get("version")})
     found: dict[str, dict[str, Any]] = {}
     for name in WINDOWS:
         if name not in limits:
@@ -135,7 +201,18 @@ def windows_from(payload: Any, observed: float) -> dict[str, dict[str, Any]] | N
         resets = _finite(window.get("resets_at")) if isinstance(window, dict) else None
         if used is None or used < 0 or resets is None or resets < 0:
             return None
-        found[name] = {"utilization": used / 100, "resets_at": resets, "observed_at": observed}
+        found[name] = {"utilization": used / 100, "resets_at": resets,
+                       "observed_at_source": OBSERVED_AT_SOURCE, **metadata}
+    return found
+
+
+def windows_from(payload: Any, observed: float) -> dict[str, dict[str, Any]] | None:
+    """The checked payload windows, stamped with their reply's observation time."""
+
+    found = _payload_windows(payload)
+    if found is not None:
+        for window in found.values():
+            window["observed_at"] = observed
     return found
 
 
@@ -284,13 +361,20 @@ def _stored_windows(stored: dict[str, Any]) -> dict[str, Any]:
     return windows if isinstance(windows, dict) else {}
 
 
+def _verified_windows(stored: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Windows with transcript observations; legacy timestamps can't compete or carry over on a write."""
+
+    return {name: window for name, window in _stored_windows(stored).items()
+            if isinstance(window, dict) and window.get("observed_at_source") == OBSERVED_AT_SOURCE}
+
+
 def _minute(window: dict[str, Any]) -> float | None:
     resets = _finite(window.get("resets_at"))
     return None if resets is None else round(resets / 60)
 
 
 def _same_figures(left: dict[str, Any], right: dict[str, Any]) -> bool:
-    """The same utilization and the same reset minute (the total order's notion of one window)."""
+    """The same utilization and reset minute, ignoring observation time for the write throttle."""
 
     return _finite(left.get("utilization")) == _finite(right.get("utilization")) and _minute(left) == _minute(right)
 
@@ -306,6 +390,8 @@ def _news(window: dict[str, Any], old: dict[str, Any], now: float) -> bool:
 
 
 def _had_windows(stored: dict[str, Any]) -> bool:
+    """Historical limits evidence, including legacy windows whose observation times are no longer trusted."""
+
     return stored.get("limits") is True or bool(_stored_windows(stored))
 
 
@@ -360,6 +446,7 @@ def due(stored: dict[str, Any], incoming: dict[str, dict[str, Any]], now: float,
                 if not _not_after(superseded.get(name), window)}
     if stored.get("login") != login:
         return {name: window for name, window in incoming.items() if not _not_after(windows.get(name), window)}
+    windows = _verified_windows(stored)
     return {name: window for name, window in incoming.items()
             if not isinstance(windows.get(name), dict) or _news(window, windows[name], now)}
 
@@ -391,7 +478,7 @@ def updated(stored: dict[str, Any], incoming: dict[str, dict[str, Any]], now: fl
     value = _replacement(stored, login, now) if fresh else dict(stored)
     news = due(stored, _after_switch(value, incoming), now, login)
     if news:
-        value.update(limits=True, windows={**_stored_windows(value), **news})
+        value.update(limits=True, windows={**_verified_windows(value), **news})
     elif no_limits and not _had_windows(value) and value.get("limits") is not False:
         value["limits"] = False
     elif not fresh:
@@ -413,7 +500,7 @@ def might_write(stored: dict[str, Any], incoming: dict[str, dict[str, Any]], now
     """
 
     if incoming:
-        superseded, windows = _superseded(stored, now), _stored_windows(stored)
+        superseded, windows = _superseded(stored, now), _verified_windows(stored)
         return any(not _not_after(superseded.get(name), window)
                    and (not _equals(windows.get(name), window) or _news(window, windows[name], now))
                    for name, window in _after_switch(stored, incoming).items())
@@ -509,12 +596,17 @@ def tap(raw: bytes, now: float) -> bool:
     payload = json.loads(raw.decode("utf-8"))
     if not isinstance(payload, dict):
         return False
-    incoming = windows_from(payload, observed_at(payload, now))
+    incoming = _payload_windows(payload)
     if incoming is None:
         return False
     no_limits = "rate_limits" not in payload and payload.get("prompt_cache") is not None
     if not incoming and not no_limits:
         return False
+    observed = observed_at(payload, now)
+    if observed is None:
+        return False
+    for window in incoming.values():
+        window["observed_at"] = observed
     folder, home = profile_folder(), agt_home()
     try:
         resolved = folder.resolve()

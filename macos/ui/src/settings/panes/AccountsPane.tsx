@@ -50,6 +50,7 @@ function SettingsAccount({ model, index, animate }: { model: AccountModel; index
   const action = (target: RowModel) => (target.action === 'login' ? login()
     : settings.mutate(model.key, 'accounts', () => api.accountsCheck(target.runtime, account.name))).catch(settings.report);
   const badge = model.toggle.kind === 'badge' ? model.toggle : null;
+  const showUsageContext = (model.runtime === 'claude' && !!model.detailContext) || !!model.usageSetupCommand;
   const trailing = (
     <span className="account-trailing">
       <span className="account-toggle">{badge ? (
@@ -70,8 +71,9 @@ function SettingsAccount({ model, index, animate }: { model: AccountModel; index
   );
   const below = (
     <>
-      {model.reason && model.state ? <span className="account-reason">{model.reason}</span> : null}
-      {model.usageSetupCommand && <span className="account-reason">{model.detailContext} · <code>{model.usageSetupCommand}</code></span>}
+      {model.reason && model.state && !showUsageContext ? <span className="account-reason">{model.reason}</span> : null}
+      {showUsageContext && <span className="account-reason account-usage-context">{model.detailContext}
+        {model.usageSetupCommand && <> · <code>{model.usageSetupCommand}</code></>}</span>}
       {message ? <InlineMessage id={`${model.key}-error`} tone={message.tone}>{message.text}</InlineMessage> : null}
       {loginFailure && <InlineMessage tone="error"><span className="login-failure">
         <span>Couldn't open Terminal.</span><CopyButton key={loginFailure} variant="text" value={loginFailure} copy={api.copyText} onError={settings.report} />

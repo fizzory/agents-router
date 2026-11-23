@@ -7,9 +7,9 @@ import os
 import unittest
 from unittest.mock import patch
 
-from helpers import TempHome
+from claude_live_helpers import ClaudeLiveFixture, LIVE_SOURCE
 
-from agents_router import accounts, cli, limits, profiles, usage_snapshot, usage_view
+from agents_router import accounts, cli, limits, usage_snapshot, usage_view
 from agents_router.config import Account, Config, RUNTIMES, RuntimeConfig
 from agents_router.fsutil import write_json
 
@@ -30,19 +30,21 @@ def listing(root):
 
 
 def live_windows(five=0.62, week=0.43, observed=NOW - 30, five_resets=NOW + 2 * HOUR):
-    return {"five_hour": {"utilization": five, "resets_at": five_resets, "observed_at": observed},
-            "seven_day": {"utilization": week, "resets_at": NOW + 3 * DAY, "observed_at": observed}}
+    return {"five_hour": {"utilization": five, "resets_at": five_resets, "observed_at": observed,
+                           "observed_at_source": LIVE_SOURCE},
+            "seven_day": {"utilization": week, "resets_at": NOW + 3 * DAY, "observed_at": observed,
+                           "observed_at_source": LIVE_SOURCE}}
 
 
-class LiveFoldTests(TempHome):
+class LiveFoldTests(ClaudeLiveFixture):
     def setUp(self):
         super().setUp()
         getattr(accounts, "_LIVE_CACHE", {}).clear()
         clock = patch("time.time", return_value=NOW)
         clock.start()
         self.addCleanup(clock.stop)
-        self.login = profiles._hash("uuid-x")
-        self.other_login = profiles._hash("uuid-other")
+        self.login = self.login_hash("uuid-x")
+        self.other_login = self.login_hash("uuid-other")
         # Two folders logged in to one account: X (the person's own profile) and Y.
         self.x = Account("claude-x", self.root / "claude-x", login=self.login)
         self.y = Account("claude-y", self.root / "claude-y", login=self.login)
@@ -61,29 +63,9 @@ class LiveFoldTests(TempHome):
             *(line for account in (self.x, self.y) for line in (
                 "[[claude.accounts]]", f"name = {json.dumps(account.name)}", f"home = {json.dumps(str(account.home))}",
                 'setup = "own"'))]) + "\n", encoding="utf-8")
-        self.ticks = 0
-
-    def claude_json(self, account, uuid):
-        (account.home / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": uuid}}),
-                                                   encoding="utf-8")
-
-    def live_path(self, account):
-        return self.home / "state" / "claude-live" / f"{accounts._home_key(account.home)}.json"
-
-    def put_live(self, account, content):
-        """Write the folder's live file as the tap would, each write with its own mtime."""
-
-        path = self.live_path(account)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content if isinstance(content, bytes) else json.dumps(content).encode("utf-8"))
-        self.ticks += 1
-        os.utime(path, ns=(1_700_000_000_000_000_000 + self.ticks,) * 2)
-        return path
 
     def live(self, account, windows=None, login=None):
-        return self.put_live(account, {"login": self.login if login is None else login, "limits": True,
-                                       "windows": live_windows() if windows is None else windows,
-                                       "superseded": {}})
+        return super().live(account, live_windows() if windows is None else windows, login)
 
     def usage(self, data):
         write_json(self.home / "state" / "claude-usage.json", data)
@@ -155,7 +137,8 @@ class LiveFoldTests(TempHome):
         self.usage({self.x.name: self.job_record()})
         self.live(self.x)
         self.assertEqual(self.percents(self.x.name), {"five_hour": 62, "seven_day": 43})  # a good file folds
-        nan_window = b'{"login": "%s", "windows": {"five_hour": {"utilization": NaN, "resets_at": 1, "observed_at": 1}}}'
+        nan_window = (b'{"login": "%s", "windows": {"five_hour": {"utilization": NaN, "resets_at": 1, '
+                      b'"observed_at": 1, "observed_at_source": "transcript_assistant_v1"}}}')
         bad = {
             "truncated": b'{"login": "',
             "not utf-8": b"\xff\xfe\x00",
@@ -164,10 +147,13 @@ class LiveFoldTests(TempHome):
             "NaN": nan_window % self.login.encode(),
             "windows not an object": {"login": self.login, "windows": [1]},
             "bad windows": {"login": self.login, "windows": {
-                "five_hour": {"utilization": True, "resets_at": NOW + HOUR, "observed_at": NOW},
-                "seven_day": {"utilization": -0.1, "resets_at": NOW + DAY, "observed_at": NOW},
-                "opus": {"utilization": 0.5, "resets_at": "soon", "observed_at": NOW},
-                "sonnet": {"utilization": 0.5, "resets_at": NOW + DAY},
+                "five_hour": {"utilization": True, "resets_at": NOW + HOUR, "observed_at": NOW,
+                              "observed_at_source": LIVE_SOURCE},
+                "seven_day": {"utilization": -0.1, "resets_at": NOW + DAY, "observed_at": NOW,
+                              "observed_at_source": LIVE_SOURCE},
+                "opus": {"utilization": 0.5, "resets_at": "soon", "observed_at": NOW,
+                         "observed_at_source": LIVE_SOURCE},
+                "sonnet": {"utilization": 0.5, "resets_at": NOW + DAY, "observed_at_source": LIVE_SOURCE},
                 "other": "62%"}},
         }
         for label, content in bad.items():
@@ -213,6 +199,56 @@ class LiveFoldTests(TempHome):
         record = accounts.account_record(self.runtime, self.x, {}, now=NOW)
         self.assertEqual(record["windows"]["five_hour"]["utilization"], 0.62)  # the same file, the matching login
 
+    def test_legacy_or_unknown_observation_sources_leave_job_figures_or_nothing(self):
+        for marker in (None, "unverified", 7):
+            with self.subTest(marker=marker):
+                windows = live_windows(observed=NOW)
+                for window in windows.values():
+                    window.pop("observed_at_source")
+                    if marker is not None:
+                        window["observed_at_source"] = marker
+                self.put_live(self.x, {"login": self.login, "limits": True, "windows": windows})
+                job = self.job_record()
+                record = accounts.account_record(self.runtime, self.x, {self.x.name: job}, now=NOW)
+                self.assertEqual(record, job)
+                self.assertIsNone(accounts.account_record(self.runtime, self.x, {}, now=NOW))
+                self.assertEqual(job, self.job_record())  # job records gain no live metadata
+
+    def test_marked_winning_windows_keep_metadata_through_folds_and_out_of_public_usage(self):
+        x_windows = live_windows()
+        for window in x_windows.values():
+            window.update(session_id="s" * 128, claude_version="v" * 64)
+        self.put_live(self.x, {"login": self.login, "windows": x_windows})
+        y_windows = live_windows(five=0.7, observed=NOW - 10)
+        y_windows.pop("seven_day")
+        y_windows["five_hour"].update(session_id="other-session", claude_version="2.1.81")
+        self.put_live(self.y, {"login": self.login, "windows": y_windows})
+        expected = {"five_hour": y_windows["five_hour"], "seven_day": x_windows["seven_day"]}
+        for usage in ({}, {self.x.name: self.job_record()}):
+            for account in (self.x, self.y):
+                with self.subTest(job=bool(usage), account=account.name):
+                    record = accounts.account_record(self.runtime, account, usage, now=NOW)
+                    self.assertEqual(record["windows"], expected)
+        public = json.dumps(self.report())
+        for key in ("observed_at_source", "session_id", "claude_version"):
+            self.assertNotIn(key, public)
+
+    def test_live_reader_revalidates_metadata_in_hand_written_files(self):
+        for key, other, bound in (("session_id", "claude_version", 128), ("claude_version", "session_id", 64)):
+            for value in ("x" * (bound + 1), "bad\nvalue", "bad\x7fvalue", "caf\u00e9", 7, True, None, []):
+                with self.subTest(key=key, value=value):
+                    window = {**live_windows()["five_hour"], key: value, other: "valid",
+                              "transcript_path": "must-not-survive", "content": "must-not-survive"}
+                    expected = {**live_windows()["five_hour"], other: "valid"}
+                    self.assertEqual(accounts._live_window(window), expected)
+                    self.put_live(self.x, {"login": self.login, "windows": {"five_hour": window}})
+                    record = accounts.account_record(self.runtime, self.x, {}, now=NOW)
+                    self.assertEqual(record["windows"], {"five_hour": expected})
+        for session, version in (("s" * 128, "v" * 64), (" ~", " ~"), ("", "")):
+            with self.subTest(session=session, version=version):
+                window = {**live_windows()["five_hour"], "session_id": session, "claude_version": version}
+                self.assertEqual(accounts._live_window(window), window)
+
     def test_settings_listed_accounts_and_primary_take_their_folders_login(self):
         """Accounts from settings carry no login in load_config: admission and the room line read the folder's own,
         as `agt usage --json` does, so all three show the same live figures."""
@@ -239,7 +275,7 @@ class LiveFoldTests(TempHome):
         (self.home / "settings.toml").write_text(f"[claude]\nprimary = {json.dumps(str(primary))}\n", encoding="utf-8")
         stand_in = load_config().runtime("claude").primary_account()
         self.assertEqual((stand_in.name, stand_in.login), ("primary", None))
-        self.live(Account("p", primary), login=profiles._hash("uuid-p"))
+        self.live(Account("p", primary), login=self.login_hash("uuid-p"))
         self.assertEqual(self.five(stand_in, {}, load_config().runtime("claude")), 0.62)
         # A folder now logged in to another account ignores the live file of the old one.
         (primary / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": "uuid-other-p"}}),

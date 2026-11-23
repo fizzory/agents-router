@@ -115,7 +115,7 @@ Per host details: [docs/hosts.md](docs/hosts.md).
 | Re-check Codex usage now | `agt accounts reset primary --runtime codex` | [Codex quota](docs/codex.md#quota) |
 | Test every account | `agt doctor --live --runtime <runtime>` (one tiny job each; uses a little quota) | [Claude Code](docs/claude-code.md#4-check) |
 | See usage and availability | `agt usage` (`--json` for apps; `--refresh` rescans local Codex usage; `--probe-codex` reads live Codex limits) | [Usage snapshot](docs/configuration.md#usage-snapshot) |
-| Keep Claude usage current after each message | `agt config set usage.statusline true` (macOS and Linux; `false` restores your status lines) | [Live Claude usage](docs/configuration.md#live-claude-usage) |
+| Keep Claude usage current after each terminal reply | `agt config set usage.statusline true` (macOS and Linux; `false` restores your status lines) | [Live Claude usage](docs/configuration.md#live-claude-usage) |
 | Preview delegation rules | `agt rules` | [Delegation rules](docs/delegation.md) |
 
 ## Supported CLIs

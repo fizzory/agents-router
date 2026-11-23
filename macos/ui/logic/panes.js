@@ -34,7 +34,7 @@ export function accountModels(list, usage, now, checks = []) {
     const observed = provider?.accounts.find(a => a.name === account.name);
     const fallback = { ...account, windows: [], availability: !account.enabled ? 'off' : account.auth?.loggedIn === true ? 'ok' : account.auth?.loggedIn === false ? 'logged_out' : 'unknown',
       capacity: account.limits?.max_jobs, reason: account.auth?.error || account.auth?.detail || null };
-    const model = accountRow(provider || { runtime: runtime.runtime, label: runtime.runtime }, withAccountCheck(observed || fallback, checks.find(check => check.runtime === runtime.runtime && check.account === account.name)), now);
+    const model = accountRow(provider || { runtime: runtime.runtime, label: runtime.runtime }, withAccountCheck(observed || fallback, checks.find(check => check.runtime === runtime.runtime && check.account === account.name)), now, { usageAvailable: usage != null });
     return { ...model, account, providerFirst: index === 0, reason: (observed || fallback).reason,
       toggle: account.can_toggle === true ? { kind: 'switch', label: `${PROVIDERS[runtime.runtime]} ${account.name}`, enabled: account.enabled }
         : { kind: 'badge', tabIndex: 0, text: account.name === 'primary' ? 'primary' : 'discovered', reason: account.toggle_reason || 'This account cannot be toggled' },

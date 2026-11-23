@@ -2,6 +2,11 @@
 import { backText, busierWindow, clockText, countdownText, decodeUsage, detailResetText, percentText, resetText, stateWord, withAccountCheck } from './usage.js';
 const LABELS = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', kiro: 'Kiro' };
 const NO_WINDOWS = new Set(['kiro', 'antigravity']);
+const TERMINAL_UPDATE_SUFFIXES = new Map([
+  ['missing', 'Terminal updates need repair'], ['replaced', 'Terminal updates need repair'],
+  ['off', 'Terminal updates off'], ['unset', 'Terminal updates not set up'],
+  ['unsupported', 'Terminal updates unavailable on Windows'],
+]);
 export function ageText(observed, now) {
   if (!Number.isFinite(observed)) return 'age unknown';
   const minutes = Math.max(0, Math.floor((now - observed) / 60));
@@ -10,11 +15,42 @@ export function ageText(observed, now) {
   return `${Math.floor(minutes / 1440)}d ago`;
 }
 
-function windowTimeLabel(window, stale, now, options) {
-  if (window.reset) return ageText(window.observed_at, now);
-  if (stale) return ageText(options.trouble ? options.observed : window.observed_at, now);
+function windowTimeLabel(text, stale, now, options, claude) {
+  const { window, age, reset } = text;
+  if (window.reset) return age;
+  if (claude) return options.popover ? age : reset;
+  if (stale) return options.trouble ? ageText(options.observed, now) : age;
   if (options.popover === true) return countdownText(window.resets_at, now);
-  return resetText(window, now, options);
+  return reset;
+}
+
+function claudeSource(window, age) {
+  if (window.source !== 'terminal') return `Last recorded usage, ${age}`;
+  return window.reset ? `Last terminal Claude Code usage seen ${age}` : `As of your last terminal Claude Code reply, ${age}`;
+}
+
+function windowText(window, now, options, claude) {
+  const label = window.name === 'five_hour' ? '5 hours' : window.name === 'seven_day' ? 'Week' : window.label;
+  const tag = window.name === 'five_hour' ? '5h' : label;
+  const age = ageText(window.observed_at, now);
+  const percent = percentText(window);
+  const clock = window.reset ? '' : detailResetText(window, now, options);
+  const reset = !options.popover && !window.reset ? resetText(window, now, options) : clock;
+  const source = claude ? claudeSource(window, age) : '';
+  const when = claude ? clock : reset;
+  const spoken = window.reset ? `${tag} unknown since reset, last seen ${age}`
+    : claude ? `${tag} ${percent}, ${window.stale || options.trouble ? 'stale, ' : ''}${source[0].toLowerCase()}${source.slice(1)}, ${when ? `resets ${when}` : 'reset time unknown'}`
+    : `${window.label} ${percent}, ${when ? `resets ${when}` : 'reset time unknown'}${window.stale ? `, ${age}` : ''}`;
+  const detail = window.reset
+    ? claude ? `Unknown since reset · Last seen ${age}` : 'Reset, not seen since'
+    : `Resets ${clock || 'at an unknown time'}${claude ? ` · ${age}` : ''}`;
+  return { window, age, reset, source, spoken, line: `${label}  ${percent}  ${detail}` };
+}
+
+function claudeContext(account, source, figure, usageAvailable) {
+  if (usageAvailable === false) return '';
+  if (account.statusline_usage === 'no_limits') return [figure ? source : '', 'No usage limits on this login'].filter(Boolean).join(' · ');
+  return [source || 'No terminal usage received yet', TERMINAL_UPDATE_SUFFIXES.get(account.statusline_usage)].filter(Boolean).join(' · ');
 }
 
 // One rule for both the popover's marks and its summary. Leases can occupy
@@ -40,9 +76,12 @@ export function readiness(account) {
 
 export function accountRow(provider, account, now, options = {}) {
   const popover = options.popover === true;
+  const claude = provider.runtime === 'claude';
   const providerName = LABELS[provider.runtime] || provider.label;
   const windows = NO_WINDOWS.has(provider.runtime) ? [] : account.windows;
   const best = busierWindow(windows);
+  const windowTexts = windows.map(window => windowText(window, now, options, claude));
+  const bestText = windowTexts.find(text => text.window === best);
   const action = account.problem || account.checking ? null : popover && account.check_failed ? 'retry' : account.availability === 'logged_out' ? 'login'
     : !popover && account.availability === 'unknown' ? 'check' : null;
   const button = action === 'login' ? 'Log in…' : action === 'check' ? 'Check' : action === 'retry' ? 'Retry' : '';
@@ -57,25 +96,18 @@ export function accountRow(provider, account, now, options = {}) {
     : popover && NO_WINDOWS.has(provider.runtime) && mark.shape === 'solid' && account.availability === 'ok' ? 'Ready' : stateWord(account.availability);
   const figure = !action && !state && best ? percentText(best) : '';
   const stale = !!figure && (best.reset || best.stale || !!options.trouble);
-  const reset = figure ? windowTimeLabel(best, stale, now, options) : '';
+  const reset = figure ? windowTimeLabel(bestText, stale, now, options, claude) : '';
   const windowTag = popover && figure && !best.reset ? best.name === 'five_hour' ? '5h' : 'wk' : '';
-  const details = windows.map((window) => {
-    if (window.reset) return `${window.name === 'five_hour' ? '5h' : window.name === 'seven_day' ? 'Week' : window.label} unknown since reset, last seen ${ageText(window.observed_at, now)}`;
-    const when = popover ? detailResetText(window, now, options) : resetText(window, now, options);
-    const resetLabel = when ? `resets ${when}` : 'reset time unknown';
-    return `${window.label} ${percentText(window)}, ${resetLabel}${window.stale ? `, ${ageText(window.observed_at, now)}` : ''}`;
-  });
-  const tooltip = [`${providerName} ${account.name}`, popover ? mark.label : state || 'Available', ...details,
+  const tooltip = [`${providerName} ${account.name}`, popover ? mark.label : state || 'Available', ...windowTexts.map(text => text.spoken),
     popover && back ? back : '', popover || jobs !== state ? jobs : '',
     account.problem || account.reason].filter(Boolean).join('. ');
   const observed = windows.map(window => window.observed_at).filter(Number.isFinite);
   const updated = ageText(options.trouble ? options.observed : observed.length ? Math.min(...observed) : options.observed, now);
-  const detailLines = windows.map(window => `${window.name === 'five_hour' ? '5 hours' : window.name === 'seven_day' ? 'Week' : window.label}  ${percentText(window)}  ${window.reset ? 'Reset, not seen since' : `Resets ${detailResetText(window, now, options) || 'at an unknown time'}`}`);
-  const usageContext = account.statusline_usage == null || account.statusline_usage === 'live' ? ''
-    : account.statusline_usage === 'no_limits' ? 'No usage limits on this login' : "Usage updates only from agt's jobs";
-  const detailContext = [NO_WINDOWS.has(provider.runtime) ? 'No usage reported' : usageContext || jobs || account.problem || account.reason,
+  const detailLines = windowTexts.map(text => text.line);
+  const detailContext = claude ? [claudeContext(account, bestText?.source, figure, options.usageAvailable), jobs, account.problem || account.reason].filter(Boolean).join(' · ')
+    : [NO_WINDOWS.has(provider.runtime) ? 'No usage reported' : jobs || account.problem || account.reason,
     `Updated ${updated}`].filter(Boolean).join(' · ');
-  const usageSetupCommand = !popover && ['missing', 'replaced'].includes(account.statusline_usage) ? 'agt setup' : '';
+  const usageSetupCommand = options.usageAvailable !== false && !popover && ['missing', 'replaced'].includes(account.statusline_usage) ? 'agt setup' : '';
   const verb = button.replace('…', '');
   return { key: `${provider.runtime}:${account.name}`, runtime: provider.runtime, name: account.name,
     provider: providerName, availability: account.availability, checking: !!account.checking, action, button, figure, reset, windowTag,
@@ -149,7 +181,7 @@ export function popoverModel(snapshot, now, options = {}) {
   const update = updateRow(snapshot.update);
   return { rows, ready, header: last ? last.text : !usage || !rows.length ? TITLE : ready ? `${ready} ready`
     : rows.some(row => row.checking) ? 'Checking accounts…' : until ? `None ready until ${until}` : 'None ready', reading: !!snapshot.reading,
-    freshness: usage ? `Updated ${ageText(observed, now)}` : '',
+    freshness: usage ? `Read ${ageText(observed, now)}` : '',
     empty: !!usage && !rows.length && !snapshot.error, first: !usage && !snapshot.error, footer: last,
     update: last && update?.kind === 'available' ? null : update };
 }

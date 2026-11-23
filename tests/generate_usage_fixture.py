@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import helpers  # isolate every real CLI, home and background service before agt imports
 
-from agents_router import __version__, account_check, accounts, bundle, usage_snapshot
+from agents_router import __version__, account_check, accounts, bundle, profiles, usage_snapshot, usage_tap
 from agents_router.config import Account, Config, RUNTIMES, RuntimeConfig
 from agents_router.fsutil import write_json
 
@@ -55,6 +55,16 @@ def build_fixture(scenario="base") -> dict:
             if scenario != "base":
                 usage["claude-work"]["windows"]["seven_day"].update(
                     utilization=.86, resets_at=now + 86400)
+                # Keep the same figures while exercising a terminal 5h and job week on one account.
+                work = runtime.accounts[0]
+                write_json(work.home / ".claude.json", {"oauthAccount": {"accountUuid": "fixture-work"}})
+                cache[str(work.home.resolve())]["stamp"] = (work.home / ".claude.json").stat().st_mtime
+                write_json(state / "claude-profiles.json", cache)
+                write_json(accounts._live_path(work.home), {
+                    "login": profiles._hash("fixture-work"), "windows": {"five_hour": {
+                        **usage[work.name]["windows"]["five_hour"], "observed_at": now - 60,
+                        "observed_at_source": usage_tap.OBSERVED_AT_SOURCE}}})
+                usage[work.name]["windows"]["five_hour"]["observed_at"] = now - 61
                 usage["claude-cooling"]["cooldown_until"] = now + 9600  # back 21:40 UTC
                 usage["claude-stale"]["windows"]["seven_day"] = {
                     "utilization": .86, "resets_at": now + 86400, "observed_at": now - 7200}

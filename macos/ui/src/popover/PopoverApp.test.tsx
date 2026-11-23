@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { cssTime } from '../shared/motion';
@@ -209,7 +209,7 @@ describe('§9.2 availability states', () => {
   it('each state has its dot and slot copy', async () => {
     await renderPopover();
     const expected: Record<string, [string, string]> = {
-      'claude:claude-work': ['ok', 'wk86%1d'], 'claude:claude-cooling': ['cooling', 'Back 21:40'],
+      'claude:claude-work': ['ok', 'wk86%1m ago'], 'claude:claude-cooling': ['cooling', 'Back 21:40'],
       'claude:claude-logged-out': ['logged_out', 'Log in…'], 'claude:claude-unknown': ['unknown', 'Checking…'],
       'claude:claude-busy': ['busy', '2 of 4 jobs'], 'claude:claude-off': ['off', 'Off'],
       'claude:claude-unhealthy': ['unhealthy', 'Back 19:02'], 'claude:claude-recovering': ['recovering', 'Recovering'],
@@ -242,6 +242,55 @@ describe('§9.2 availability states', () => {
 });
 
 describe('in-place detail', () => {
+  it('uses two right-aligned 14px Claude lines in the existing 96 × 28 slot, and keeps state slots single-line', async () => {
+    render(<style>{sharedStyles}{popoverStyles}</style>);
+    await renderPopover();
+    const target = row('claude:claude-work')!;
+    const slot = target.querySelector<HTMLElement>('.row-slot')!;
+    expect(slot.classList.contains('is-claude-usage')).toBe(true);
+    expect(slot.querySelector('.usage-figure-line')?.textContent).toBe('wk86%');
+    expect(slot.querySelector('.observation-age')?.textContent).toBe('1m ago');
+    expect(slot.querySelector('.observation-age')?.getAttribute('aria-hidden')).toBe('true');
+    expect(getComputedStyle(slot).width).toBe('96px');
+    expect(getComputedStyle(slot).height).toBe('28px');
+    expect(getComputedStyle(slot).flexDirection).toBe('column');
+    expect(getComputedStyle(slot).alignItems).toBe('flex-end');
+    for (const part of ['.usage-figure-line', '.observation-age']) expect(getComputedStyle(slot.querySelector(part)!).height).toBe('14px');
+    expect(getComputedStyle(slot.querySelector('.observation-age')!).textAlign).toBe('right');
+    expect(target.querySelector('.row-link')?.getAttribute('aria-label')).toBe('Claude claude-work. Available. 5h 17%, as of your last terminal Claude Code reply, 1m ago, resets 20:00. Week 86%, last recorded usage, 1m ago, resets Wed 19:00. Show account detail.');
+    for (const key of ['claude:claude-cooling', 'claude:claude-logged-out', 'claude:claude-unknown', 'kiro:primary']) {
+      expect(row(key)?.querySelector('.is-claude-usage, .usage-figure-line, .observation-age')).toBeNull();
+    }
+    for (const target of document.querySelectorAll('.account-row[data-key^="claude:"]:has(.figure)')) {
+      expect(target.querySelector('.observation-age')?.textContent).toMatch(/(?:\d+[mhd] ago|age unknown)$/);
+    }
+  });
+
+  it('shows terminal age, stale/recorded labels and unknown age through component updates', async () => {
+    const { status } = await renderPopover();
+    let generation = 2;
+    for (const [source, observed_at, age, stale, context] of [
+      ['terminal', NOW - 60, '1m ago', false, 'As of your last terminal Claude Code reply, 1m ago'],
+      ['terminal', NOW - 7200, '2h ago', true, 'As of your last terminal Claude Code reply, 2h ago'],
+      ['job', NOW - 7200, '2h ago', true, 'Last recorded usage, 2h ago'],
+      [null, null, 'age unknown', true, 'Last recorded usage, age unknown'],
+    ] as const) {
+      const next = envelope(null, generation++), data = next.usage as typeof usage;
+      const account = data.providers[0]!.accounts[0]!;
+      next.usage = { ...data, providers: [{ ...data.providers[0]!, accounts: [{ ...account, statusline_usage: 'live',
+        windows: [{ ...account.windows[0]!, used_percent: 34, observed_at, source, stale: false }],
+      }] }] };
+      await status(next);
+      const target = row('claude:claude-work')!;
+      expect(target.querySelector('.usage-figure-line')?.textContent).toBe('5h34%');
+      expect(target.querySelector('.observation-age')?.textContent).toBe(age);
+      expect(target.querySelector('.row-slot')?.classList.contains('is-stale')).toBe(stale);
+      const spokenSource = `${context[0]!.toLowerCase()}${context.slice(1)}`;
+      expect(target.querySelector('.row-link')?.getAttribute('aria-label')).toBe(`Claude claude-work. Available. 5h 34%, ${stale ? 'stale, ' : ''}${spokenSource}, resets 20:00. Show account detail.`);
+      expect(target.querySelector('.account-context')?.textContent).toBe(`${context}Settings…`);
+    }
+  });
+
   it('click, Return and Space toggle one panel; closed detail is inert, hidden from readers, and closes with the popover', async () => {
     const user = userEvent.setup();
     const { api } = await renderPopover();
@@ -261,9 +310,9 @@ describe('in-place detail', () => {
     expect(panel.hidden).toBe(false);
     expect(panel.getAttribute('aria-hidden')).toBe('false');
     expect(panel.getAttribute('inert')).toBeNull();
-    expect(panel.textContent).toContain('5 hours  17%  Resets 20:00');
-    expect(panel.textContent).toContain('Week  86%  Resets Wed 19:00');
-    expect(panel.textContent).toContain('Updated 1m ago');
+    expect(panel.textContent).toContain('5 hours  17%  Resets 20:00 · 1m ago');
+    expect(panel.textContent).toContain('Week  86%  Resets Wed 19:00 · 1m ago');
+    expect(panel.textContent).toContain('Last recorded usage, 1m ago · Terminal updates not set up');
     await user.keyboard(' ');
     expect(work.getAttribute('aria-expanded')).toBe('false');
     expect(panel.getAttribute('aria-hidden')).toBe('true');
@@ -292,7 +341,7 @@ describe('trouble and stale data', () => {
     await status(next);
     expect(screen.getByRole('alert').textContent).toBe(`${error} The numbers below are from 4 minutes ago.`);
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe("Can't read agt");
-    expect(slot('claude:claude-work')).toBe('wk86%4m ago');
+    expect(slot('claude:claude-work')).toBe('wk86%1m ago');
     expect(slot('claude:claude-cooling')).toBe('Back 21:40');
     expect(document.querySelectorAll('#accounts .account-main.is-dimmed')).toHaveLength(accounts.length);
     const retry = button('Retry');
@@ -312,7 +361,7 @@ describe('trouble and stale data', () => {
     expect(document.querySelector('.refresh-feedback')?.getAttribute('data-checked')).toBe('false');
     await status({ ...envelope(null, 5), error: null });
     expect(visible('trouble-row')).toBe(false);
-    expect(slot('claude:claude-work')).toBe('wk86%1d');
+    expect(slot('claude:claude-work')).toBe('wk86%1m ago');
   });
 
   it('retains the last successful snapshot when a failure envelope has no usage', async () => {
@@ -320,7 +369,7 @@ describe('trouble and stale data', () => {
     await status({ ...envelope('unreadable', 2), fetched_at: null });
     expect(document.querySelectorAll('#accounts .account-row')).toHaveLength(accounts.length);
     expect(document.querySelectorAll('#accounts .account-main.is-dimmed')).toHaveLength(accounts.length);
-    expect(slot('claude:claude-work')).toBe('wk86%0m ago');
+    expect(slot('claude:claude-work')).toBe('wk86%1m ago');
   });
 
   it('2h ago appears on popover stale rows and off rows are dimmed', async () => {
@@ -962,7 +1011,7 @@ describe('fresh usage, motion and lifetime', () => {
     try {
       const { status, fresh } = await renderPopover();
       show();
-      expect(button('Refresh usage').getAttribute('data-tooltip')).toBe('Refresh ⌘R · Updated 0m ago');
+      expect(button('Refresh usage').getAttribute('data-tooltip')).toBe('Refresh ⌘R · Read 0m ago');
       fireEvent.click(button('Refresh usage'));
       await status(envelope('reading', 2));
       expect(document.querySelector('#refresh .is-turning')).not.toBeNull();

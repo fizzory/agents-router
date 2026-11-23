@@ -87,6 +87,7 @@ h2 { margin: 0; }
 .account-badge::after { content: ""; position: absolute; inset: -3px -1px; }
 .account-badge:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
 .account-reason { grid-column: 1 / -1; padding: 0 0 var(--space-2) 14px; overflow: hidden; color: var(--ink-muted); font: var(--type-small); text-overflow: ellipsis; white-space: nowrap; }
+.account-usage-context { min-width: 0; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
 .settings-account .inline-message { grid-column: 1 / -1; padding-left: 14px; }
 .add-account { margin: var(--space-4) var(--space-4) 0; }
 

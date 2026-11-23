@@ -2,7 +2,9 @@
 
 import ast
 import contextlib
+from datetime import datetime, timezone
 import io
+import itertools
 import json
 import os
 from pathlib import Path
@@ -10,6 +12,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -25,6 +28,8 @@ HOUR = 3600
 DAY = 86400
 FIVE_RESET = NOW + 3 * HOUR
 WEEK_RESET = NOW + 4 * DAY
+TRANSCRIPT_SCAN = 1 << 20
+LIVE_METADATA = {"observed_at_source": "transcript_assistant_v1", "session_id": "s1"}
 
 
 def payload(five=62, week=41, **extra):
@@ -38,6 +43,11 @@ def payload(five=62, week=41, **extra):
 
 def raw(value):
     return value if isinstance(value, bytes) else json.dumps(value).encode("utf-8")
+
+
+def assistant_entry(observed):
+    timestamp = datetime.fromtimestamp(observed, timezone.utc).isoformat().replace("+00:00", "Z")
+    return {"type": "assistant", "timestamp": timestamp}
 
 
 def tree(root):
@@ -87,14 +97,36 @@ class TapBase(unittest.TestCase):
     def stored(self, folder=None, home=None):
         return json.loads(self.live(folder, home).read_text(encoding="utf-8"))
 
+    def transcript(self, observed=NOW, *, entries=None):
+        """A real JSONL reply at `observed`, or the supplied entries, in this test's temporary folder."""
+
+        count = getattr(self, "transcript_count", 0) + 1
+        self.transcript_count = count
+        path = self.root / f"session-{count}.jsonl"
+        path.write_bytes(b"".join(raw(entry) + b"\n" for entry in
+                                 ([assistant_entry(observed)] if entries is None else entries)))
+        return path
+
+    def with_transcript(self, value, observed=None):
+        """Give a payload its last reply, keeping explicitly supplied paths (including invalid ones)."""
+
+        if isinstance(value, bytes):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                return value
+        if isinstance(value, dict) and "transcript_path" not in value:
+            value = {**value, "transcript_path": str(self.transcript(time.time() if observed is None else observed))}
+        return value
+
     def tap(self, value, now=NOW):
-        return usage_tap.tap(raw(value), now)
+        return usage_tap.tap(raw(self.with_transcript(value, now)), now)
 
     def run_main(self, value):
         """The tap as Claude Code's wrapper runs it in-process: returns (exit code, stdout + stderr)."""
 
         out, err = io.StringIO(), io.StringIO()
-        stdin = io.TextIOWrapper(io.BytesIO(raw(value)))
+        stdin = io.TextIOWrapper(io.BytesIO(raw(self.with_transcript(value))))
         with patch("sys.stdin", stdin), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = usage_tap.main([])
         return code, out.getvalue() + err.getvalue()
@@ -102,7 +134,8 @@ class TapBase(unittest.TestCase):
     def run_isolated(self, value, env=None):
         """The tap as the launcher runs it: `python -I usage_tap.py`, the rest of agt out of reach."""
 
-        return subprocess.run([sys.executable, "-I", str(TAP)], input=raw(value), capture_output=True, timeout=60,
+        return subprocess.run([sys.executable, "-I", str(TAP)], input=raw(self.with_transcript(value)),
+                              capture_output=True, timeout=60,
                               env={**os.environ, **(env or {})})
 
 
@@ -110,8 +143,8 @@ class RecordingTests(TapBase):
     def test_used_percentage_becomes_utilization_with_its_reset_and_observation(self):
         self.assertTrue(self.tap(payload()))
         self.assertEqual(self.stored(), {"login": self.login, "limits": True, "windows": {
-            "five_hour": {"utilization": 0.62, "resets_at": FIVE_RESET, "observed_at": NOW},
-            "seven_day": {"utilization": 0.41, "resets_at": WEEK_RESET, "observed_at": NOW}}})
+            "five_hour": {"utilization": 0.62, "resets_at": FIVE_RESET, "observed_at": NOW, **LIVE_METADATA},
+            "seven_day": {"utilization": 0.41, "resets_at": WEEK_RESET, "observed_at": NOW, **LIVE_METADATA}}})
 
     def test_no_rate_limits_is_no_news(self):
         # Absent (an API-key login, or before the first reply), empty (every window just reset), null, or only a
@@ -122,28 +155,25 @@ class RecordingTests(TapBase):
                 self.assertFalse(self.tap(value))
                 self.assertEqual(os.listdir(self.agt), [])
 
-    def test_observed_at_is_the_earlier_of_now_and_the_transcript(self):
-        transcript = self.root / "session.jsonl"
-        transcript.write_text("{}\n")
-        cases = ((NOW - 1000, NOW - 1000), (NOW + 1000, NOW))  # a clock ahead of ours never dates a figure ahead
-        for mtime, expected in cases:
+    def test_observed_at_is_the_last_reply_even_when_the_transcript_was_touched_now(self):
+        expected = NOW - 4 * DAY
+        transcript = self.transcript(expected)
+        for mtime in (NOW, NOW + 1000):
             with self.subTest(mtime=mtime):
                 os.utime(transcript, (mtime, mtime))
                 self.live().unlink(missing_ok=True)
+                self.assertEqual(usage_tap.observed_at({"transcript_path": str(transcript)}, NOW), expected)
                 self.assertTrue(self.tap(payload(transcript_path=str(transcript))))
                 self.assertEqual(self.stored()["windows"]["five_hour"]["observed_at"], expected)
-        for missing in (str(self.root / "gone.jsonl"), "", None, 7):
-            with self.subTest(transcript=missing):
-                self.live().unlink()
-                self.assertTrue(self.tap(payload(transcript_path=missing)))
-                self.assertEqual(self.stored()["windows"]["seven_day"]["observed_at"], NOW)
 
     def test_a_payload_with_one_window_keeps_the_stored_other(self):
         self.tap(payload())
         self.assertTrue(self.tap(payload(five=70, week=None), now=NOW + 60))
         windows = self.stored()["windows"]
-        self.assertEqual(windows["five_hour"], {"utilization": 0.7, "resets_at": FIVE_RESET, "observed_at": NOW + 60})
-        self.assertEqual(windows["seven_day"], {"utilization": 0.41, "resets_at": WEEK_RESET, "observed_at": NOW})
+        self.assertEqual(windows["five_hour"], {"utilization": 0.7, "resets_at": FIVE_RESET,
+                                               "observed_at": NOW + 60, **LIVE_METADATA})
+        self.assertEqual(windows["seven_day"], {"utilization": 0.41, "resets_at": WEEK_RESET,
+                                               "observed_at": NOW, **LIVE_METADATA})
 
     def test_keys_it_does_not_know_are_kept(self):
         # For the same login; another login's file is replaced whole (LoginTests).
@@ -166,6 +196,21 @@ class RecordingTests(TapBase):
         self.assertFalse(self.tap(payload(five=80), now=NOW - 600))  # a session whose last reply came earlier
         self.assertEqual(self.stored()["windows"]["five_hour"]["utilization"], 0.5)
 
+    def test_a_newer_reply_with_an_earlier_reset_wins_in_both_arrival_orders(self):
+        stale = payload(five=None, week=90, transcript_path=str(self.transcript(NOW - 4 * DAY)))
+        stale["rate_limits"]["seven_day"]["resets_at"] = WEEK_RESET + DAY
+        current = payload(five=None, week=20, transcript_path=str(self.transcript(NOW - 60)))
+        expected = {"seven_day": {"utilization": 0.2, "resets_at": WEEK_RESET, "observed_at": NOW - 60, **LIVE_METADATA}}
+        for first, second in itertools.permutations((stale, current)):
+            with self.subTest(first=first):
+                self.live().unlink(missing_ok=True)
+                self.assertTrue(self.tap(first, now=NOW))
+                before = self.live().read_bytes()
+                self.assertEqual(self.tap(second, now=NOW + 1), second is current)
+                self.assertEqual(self.stored()["windows"], expected)
+                if second is stale:
+                    self.assertEqual(self.live().read_bytes(), before)
+
     def test_a_new_window_after_a_reset_replaces_the_old_one(self):
         self.tap(payload(five=90), now=NOW)
         later = FIVE_RESET + 60
@@ -174,20 +219,362 @@ class RecordingTests(TapBase):
         self.assertEqual(self.stored()["windows"]["five_hour"]["utilization"], 0.03)
 
 
+class ProvenanceTests(TapBase):
+    def test_written_windows_identify_the_transcript_observation_and_bounded_metadata(self):
+        for session, version in (("session-1", "2.1.80"), ("s" * 128, "v" * 64), (" ~", " ~"), ("", "")):
+            with self.subTest(session=session, version=version):
+                self.live().unlink(missing_ok=True)
+                self.assertTrue(self.tap(payload(session_id=session, version=version)))
+                for window in self.stored()["windows"].values():
+                    self.assertEqual(window.get("observed_at_source"), "transcript_assistant_v1")
+                    self.assertEqual(window["session_id"], session)
+                    self.assertEqual(window["claude_version"], version)
+                    self.assertEqual(set(window), {"utilization", "resets_at", "observed_at",
+                                                   "observed_at_source", "session_id", "claude_version"})
+
+    def test_invalid_metadata_is_omitted_without_dropping_the_window_or_valid_other_field(self):
+        for field, stored_key, bound, other_field, other_key in (
+                ("session_id", "session_id", 128, "version", "claude_version"),
+                ("version", "claude_version", 64, "session_id", "session_id")):
+            for value in ("x" * (bound + 1), "bad\nvalue", "bad\x7fvalue", "caf\u00e9", 7, True, None, []):
+                with self.subTest(field=field, value=value):
+                    self.live().unlink(missing_ok=True)
+                    self.assertTrue(self.tap(payload(**{field: value, other_field: "valid"})))
+                    for window in self.stored()["windows"].values():
+                        self.assertNotIn(stored_key, window)
+                        self.assertEqual(window.get(other_key), "valid")
+                        self.assertEqual(window["observed_at_source"], usage_tap.OBSERVED_AT_SOURCE)
+
+    def test_metadata_only_changes_keep_the_file_bytes_and_state_untouched(self):
+        self.assertTrue(self.tap(payload(session_id="s1", version="2.1.80")))
+        for window in self.stored()["windows"].values():
+            self.assertEqual({key: window.get(key) for key in (*LIVE_METADATA, "claude_version")},
+                             {**LIVE_METADATA, "claude_version": "2.1.80"})
+        before, state = self.live().read_bytes(), tree(self.agt)
+        for metadata in ({"session_id": "s2", "version": "2.1.81"},
+                         {"session_id": None, "version": None}):
+            with self.subTest(metadata=metadata), patch.object(usage_tap, "read_login") as read:
+                self.assertFalse(self.tap(payload(**metadata)))
+                read.assert_not_called()
+                self.assertEqual(self.live().read_bytes(), before)
+                self.assertEqual(tree(self.agt), state)
+
+    def test_metadata_and_marker_alone_are_not_news_for_equal_figures_and_observation(self):
+        window = usage_tap.windows_from(payload(version="2.1.80"), NOW)["five_hour"]
+        self.assertEqual({key: window.get(key) for key in (*LIVE_METADATA, "claude_version")},
+                         {**LIVE_METADATA, "claude_version": "2.1.80"})
+        for metadata in ({"session_id": "s2"}, {"claude_version": "2.1.81"},
+                         {"observed_at_source": "another-source"}):
+            other = {**window, **metadata}
+            with self.subTest(metadata=metadata):
+                self.assertFalse(usage_tap._news(window, other, NOW))
+                self.assertFalse(usage_tap._news(other, window, NOW))
+
+    def test_a_verified_reply_replaces_newer_legacy_windows_and_drops_other_legacy_names(self):
+        legacy = {"utilization": 0.62, "resets_at": FIVE_RESET, "observed_at": NOW + HOUR}
+        for marker in (None, "unverified"):
+            with self.subTest(marker=marker):
+                old = {**legacy, **({"observed_at_source": marker} if marker is not None else {})}
+                stored = {"login": self.login, "limits": True,
+                          "windows": {"five_hour": old, "seven_day": old, "old_model": old}}
+                self.live().parent.mkdir(parents=True, exist_ok=True)
+                self.live().write_text(json.dumps(stored))
+                incoming = usage_tap.windows_from(payload(week=None), NOW)
+                self.assertTrue(usage_tap.might_write(stored, incoming, NOW))
+                self.assertEqual(usage_tap.due(stored, incoming, NOW, self.login), incoming)
+                self.assertTrue(self.tap(payload(week=None)))
+                self.assertEqual(self.stored(), {"login": self.login, "limits": True, "windows": incoming})
+                self.assertNotIn("login_since", self.stored())  # migration is not a login switch
+
+    def test_legacy_windows_still_supply_limits_history_and_login_switch_safeguards(self):
+        legacy = {"five_hour": {"utilization": 0.62, "resets_at": FIVE_RESET, "observed_at": NOW + HOUR}}
+        self.live().parent.mkdir(parents=True)
+        for limits in ({"limits": True}, {}):
+            with self.subTest(limits=limits):
+                self.live().write_text(json.dumps({"login": self.login, "windows": legacy, **limits}))
+                before = self.live().read_bytes()
+                self.assertFalse(self.tap(NO_LIMITS))
+                self.assertEqual(self.live().read_bytes(), before)
+        login_b = self.login_as("uuid-b")
+        # Equal figures, despite a verified observation, still belong to the superseded login.
+        self.assertTrue(self.tap(payload(week=None), now=NOW + 60))
+        self.assertEqual(self.stored(), {"login": login_b, "login_since": NOW + 60, "windows": {},
+                                         "superseded": {"five_hour": A_SUPERSEDED["five_hour"]}})
+        self.assertFalse(self.tap(payload(60, None), now=NOW + 120))
+        before = self.live().read_bytes()
+        delayed = payload(96, None, transcript_path=str(self.transcript(NOW + 20)))
+        self.assertFalse(self.tap(delayed, now=NOW + 120))  # login_since is still enforced
+        self.assertEqual(self.live().read_bytes(), before)
+
+
+class ObservationTests(TapBase):
+    def assert_no_observation(self, value):
+        self.assertIsNone(usage_tap.observed_at(value, NOW))
+        before = tree(self.agt)
+        with patch.object(usage_tap, "windows_from", wraps=usage_tap.windows_from) as windows:
+            self.assertFalse(usage_tap.tap(raw(value), NOW))
+        windows.assert_not_called()
+        self.assertEqual(tree(self.agt), before)
+
+    def test_missing_or_invalid_transcript_paths_write_nothing(self):
+        self.assert_no_observation(payload())
+        for path in (str(self.root / "gone.jsonl"), "", None, 7, [], "bad\x00path"):
+            with self.subTest(path=path):
+                self.assert_no_observation(payload(transcript_path=path))
+
+    def test_empty_and_startup_transcripts_with_current_mtimes_write_nothing(self):
+        startup = [{"type": kind, "timestamp": assistant_entry(NOW - DAY)["timestamp"]}
+                   for kind in ("attachment", "user", "system", "api-request")]
+        for entries in ([], startup):
+            with self.subTest(entries=entries):
+                transcript = self.transcript(entries=entries)
+                os.utime(transcript, (NOW, NOW))
+                self.assert_no_observation(payload(transcript_path=str(transcript)))
+                self.assertFalse((self.agt / "state").exists())
+
+    def test_payloads_before_a_transcript_and_before_its_first_reply_preserve_newer_live_bytes(self):
+        self.assertTrue(self.tap(payload(), now=NOW + 60))
+        before = self.live().read_bytes()
+        before_tree = tree(self.agt)
+        transcript = self.root / "starting-session.jsonl"
+        value = payload(five=90, week=80, transcript_path=str(transcript))
+        self.assertFalse(self.tap(value, now=NOW + 120))
+        self.assertEqual(self.live().read_bytes(), before)
+        self.assertEqual(tree(self.agt), before_tree)
+        transcript.write_bytes(raw({"type": "system", "timestamp": assistant_entry(NOW - DAY)["timestamp"]}) + b"\n")
+        os.utime(transcript, (NOW + 180, NOW + 180))
+        self.assertFalse(self.tap(value, now=NOW + 180))
+        self.assertEqual(self.live().read_bytes(), before)
+        self.assertEqual(tree(self.agt), before_tree)
+
+    def test_unreadable_or_nonregular_transcripts_write_nothing(self):
+        self.assert_no_observation(payload(transcript_path=str(self.root)))
+        transcript = self.transcript()
+        if hasattr(os, "geteuid") and os.geteuid() != 0:
+            transcript.chmod(0)
+            try:
+                self.assert_no_observation(payload(transcript_path=str(transcript)))
+            finally:
+                transcript.chmod(0o600)
+        if hasattr(os, "mkfifo"):
+            fifo = self.root / "pipe.jsonl"
+            os.mkfifo(fifo)
+            done = self.run_isolated(payload(transcript_path=str(fifo)))
+            self.assertEqual((done.returncode, done.stdout, done.stderr), (0, b"", b""))
+            self.assertEqual(os.listdir(self.agt), [])
+
+    def test_requests_users_and_system_entries_are_not_replies(self):
+        transcript = self.transcript(entries=[{"type": kind, "timestamp": assistant_entry(NOW)["timestamp"],
+                                              "message": {"type": "assistant"}}
+                                             for kind in ("api-request", "user", "system", "summary")])
+        self.assert_no_observation(payload(transcript_path=str(transcript)))
+
+    def test_no_assistant_within_the_scan_bound_writes_nothing(self):
+        transcript = self.transcript(NOW - 4 * DAY)
+        other = raw({"type": "api-request", "padding": "x" * 1024}) + b"\n"
+        with transcript.open("ab") as handle:
+            handle.write(other * (TRANSCRIPT_SCAN // len(other) + 2))
+        self.assert_no_observation(payload(transcript_path=str(transcript)))
+
+    def test_a_reply_in_a_large_transcripts_tail_is_used(self):
+        expected = NOW - HOUR
+        transcript = self.transcript(NOW - DAY)
+        with transcript.open("ab") as handle:
+            handle.write(raw({"type": "system", "padding": "x" * TRANSCRIPT_SCAN}) + b"\n")
+            handle.write(raw(assistant_entry(expected)) + b"\n")
+            handle.write(raw({"type": "api-request", "timestamp": assistant_entry(NOW)["timestamp"]}) + b"\n")
+        self.assertTrue(self.tap(payload(transcript_path=str(transcript))))
+        self.assertEqual(self.stored()["windows"]["five_hour"]["observed_at"], expected)
+
+    def test_a_complete_reply_exactly_at_the_scan_boundary_is_used(self):
+        expected = NOW - HOUR
+        reply = raw(assistant_entry(expected)) + b"\n"
+        overhead = len(raw({"type": "system", "padding": ""})) + 1
+        rest = raw({"type": "system", "padding": "x" * (TRANSCRIPT_SCAN - len(reply) - overhead)}) + b"\n"
+        transcript = self.transcript(entries=[])
+        transcript.write_bytes(raw({"type": "system"}) + b"\n" + reply + rest)
+        self.assertGreater(transcript.stat().st_size, TRANSCRIPT_SCAN)
+        self.assertEqual(len(reply + rest), TRANSCRIPT_SCAN)
+        self.assertEqual(usage_tap.observed_at({"transcript_path": str(transcript)}, NOW), expected)
+
+    def test_the_newest_reply_straddling_chunk_boundaries_is_reassembled(self):
+        chunk = 1 << 16
+        overhead = len(raw({"type": "system", "padding": ""})) + 1
+        suffix = raw({"type": "system", "padding": "x" * (chunk - 32 - overhead)}) + b"\n"
+        for padding in (0, 2 * chunk):
+            with self.subTest(padding=padding):
+                expected = NOW - HOUR
+                transcript = self.transcript(NOW - DAY)
+                reply = raw({**assistant_entry(expected), "padding": "x" * padding}) + b"\n"
+                with transcript.open("ab") as handle:
+                    handle.write(reply + suffix)
+                self.assertLess(len(suffix), chunk)
+                self.assertGreater(len(reply + suffix), chunk)
+                self.assertEqual(usage_tap.observed_at({"transcript_path": str(transcript)}, NOW), expected)
+
+    def test_a_reply_at_the_end_reads_at_most_two_chunks(self):
+        transcript = self.transcript(entries=[{"type": "system", "padding": "x" * TRANSCRIPT_SCAN},
+                                              assistant_entry(NOW - HOUR)])
+        reads = []
+        fdopen = os.fdopen
+
+        def counted_open(*args, **kwargs):
+            handle = fdopen(*args, **kwargs)
+            read = handle.read
+
+            def counted_read(size=-1):
+                data = read(size)
+                reads.append(len(data))
+                return data
+
+            counter = patch.object(handle, "read", side_effect=counted_read)
+            counter.start()
+            self.addCleanup(counter.stop)
+            return handle
+
+        with patch.object(usage_tap.os, "fdopen", side_effect=counted_open):
+            self.assertEqual(usage_tap.observed_at({"transcript_path": str(transcript)}, NOW), NOW - HOUR)
+        self.assertTrue(reads)
+        self.assertLessEqual(sum(reads), 2 * (1 << 16))
+
+    def test_payloads_without_usable_limits_never_read_the_transcript_or_login(self):
+        for value in ({}, {"session_id": "startup"}, payload(None, None),
+                      payload(rate_limits=None), payload(rate_limits=[]),
+                      payload(rate_limits={"five_hour": {"used_percentage": "bad"}})):
+            with self.subTest(value=value), \
+                    patch.object(usage_tap, "observed_at", side_effect=AssertionError("opened transcript")), \
+                    patch.object(usage_tap, "read_login", side_effect=AssertionError("read login")):
+                self.assertFalse(usage_tap.tap(raw(value), NOW))
+
+    def test_the_first_boundary_fragment_is_skipped_even_if_it_looks_like_a_reply(self):
+        fragment = raw(assistant_entry(NOW)) + b"\n"
+        overhead = len(raw({"type": "system", "padding": ""})) + 1
+        rest = raw({"type": "system", "padding": "x" * (TRANSCRIPT_SCAN - len(fragment) - overhead)}) + b"\n"
+        # A partial line at the scan boundary can itself be valid JSON; it still isn't a complete entry.
+        tail = fragment + rest
+        self.assertEqual(len(tail), TRANSCRIPT_SCAN)
+        transcript = self.transcript(entries=[])
+        transcript.write_bytes(b"prefix of an unfinished line " + tail)
+        self.assert_no_observation(payload(transcript_path=str(transcript)))
+
+    def test_the_newest_assistant_with_an_invalid_or_future_timestamp_blocks_older_replies(self):
+        for timestamp in (assistant_entry(NOW + 1)["timestamp"], "not a timestamp", "2026-99-99T00:00:00Z",
+                          "2026-01-01T00:00:00", "", None, 7):
+            with self.subTest(timestamp=timestamp):
+                transcript = self.transcript(entries=[assistant_entry(NOW - HOUR),
+                                                     {"type": "assistant", "timestamp": timestamp}])
+                self.assert_no_observation(payload(transcript_path=str(transcript)))
+        transcript = self.transcript(entries=[assistant_entry(NOW - HOUR), {"type": "assistant"}])
+        self.assert_no_observation(payload(transcript_path=str(transcript)))
+
+    def test_half_written_last_lines_are_skipped(self):
+        for ending in (raw(assistant_entry(NOW)), b'{"type":"assistant","timestamp":',
+                       b'{"type":"assistant", broken JSON}\n'):
+            with self.subTest(ending=ending):
+                transcript = self.transcript(NOW - HOUR)
+                with transcript.open("ab") as handle:
+                    handle.write(ending)
+                self.live().unlink(missing_ok=True)
+                self.assertTrue(self.tap(payload(transcript_path=str(transcript))))
+                self.assertEqual(self.stored()["windows"]["five_hour"]["observed_at"], NOW - HOUR)
+
+    def test_malformed_middle_lines_are_skipped_and_the_last_complete_reply_wins(self):
+        expected = NOW - 123.125
+        transcript = self.transcript(entries=[assistant_entry(NOW - HOUR), assistant_entry(expected)])
+        with transcript.open("ab") as handle:
+            handle.write(b'{"type":"assistant", broken JSON}\n')
+            handle.write(b'\xff"assistant"\n')
+            handle.write(raw({"type": "api-request", "timestamp": assistant_entry(NOW)["timestamp"]}) + b"\n")
+        self.assertTrue(self.tap(payload(transcript_path=str(transcript))))
+        self.assertEqual(self.stored()["windows"]["seven_day"]["observed_at"], expected)
+
+    def test_reply_order_comes_from_entries_rather_than_the_greatest_timestamp(self):
+        transcript = self.transcript(entries=[assistant_entry(NOW - 1), assistant_entry(NOW - HOUR)])
+        self.assertEqual(usage_tap.observed_at({"transcript_path": str(transcript)}, NOW), NOW - HOUR)
+
+    def test_idle_statusline_rerenders_never_refresh_the_observation(self):
+        transcript = self.transcript(NOW)
+        value = payload(transcript_path=str(transcript))
+        self.assertTrue(self.tap(value))
+        before = tree(self.agt)
+        os.utime(transcript, (NOW + DAY, NOW + DAY))
+        self.assertFalse(self.tap(value, now=NOW + DAY))
+        self.assertEqual(tree(self.agt), before)
+        self.assertEqual(self.stored()["windows"]["seven_day"]["observed_at"], NOW)
+
+    def test_the_first_complete_reply_sets_the_timestamp_and_later_rerenders_keep_it(self):
+        expected = NOW - 123.125
+        transcript = self.transcript(entries=[{"type": "attachment", "timestamp": assistant_entry(NOW - DAY)["timestamp"]}])
+        value = payload(transcript_path=str(transcript))
+        os.utime(transcript, (NOW, NOW))
+        self.assertFalse(self.tap(value))
+        self.assertFalse((self.agt / "state").exists())
+        with transcript.open("ab") as handle:
+            handle.write(raw(assistant_entry(expected)))  # the first reply isn't complete yet
+        os.utime(transcript, (NOW, NOW))
+        self.assertFalse(self.tap(value))
+        self.assertFalse((self.agt / "state").exists())
+        with transcript.open("ab") as handle:
+            handle.write(b"\n")
+        os.utime(transcript, (NOW, NOW))
+        self.assertTrue(self.tap(value))
+        self.assertEqual({name: window["observed_at"] for name, window in self.stored()["windows"].items()},
+                         {"five_hour": expected, "seven_day": expected})
+        before = self.live().read_bytes()
+        before_tree = tree(self.agt)
+        for later in (NOW + usage_tap.REFRESH_SECONDS, NOW + DAY):
+            with self.subTest(later=later):
+                os.utime(transcript, (later, later))
+                self.assertFalse(self.tap(value, now=later))
+                self.assertEqual(self.live().read_bytes(), before)
+                self.assertEqual(tree(self.agt), before_tree)
+
+    def test_no_limits_without_an_observation_never_reads_the_login_or_creates_state(self):
+        paths = [self.root / "missing.jsonl", self.transcript(entries=[]),
+                 self.transcript(entries=[{"type": "api-request", "timestamp": assistant_entry(NOW - DAY)["timestamp"]}]),
+                 self.transcript(entries=[{"type": "assistant", "timestamp": "bad timestamp"}]),
+                 self.transcript(NOW + 1)]
+        values = [NO_LIMITS, *({**NO_LIMITS, "transcript_path": str(path)} for path in paths)]
+        with patch.object(usage_tap, "read_login", side_effect=AssertionError("no observation must not read .claude.json")) as read:
+            for value in values:
+                with self.subTest(value=value):
+                    self.assert_no_observation(value)
+                    self.assertFalse((self.agt / "state").exists())
+                    self.assertEqual(os.listdir(self.agt), [])
+            read.assert_not_called()
+
+    def test_no_limits_needs_an_observation_too(self):
+        self.assert_no_observation(NO_LIMITS)
+        transcript = self.transcript(entries=[{"type": "api-request"}])
+        self.assert_no_observation({**NO_LIMITS, "transcript_path": str(transcript)})
+        self.assertTrue(self.tap({**NO_LIMITS, "transcript_path": str(self.transcript(NOW - HOUR))}))
+        self.assertEqual(self.stored(), {"login": self.login, "limits": False, "windows": {}})
+        before = tree(self.agt)
+        self.login_as("another-login")
+        self.assert_no_observation(NO_LIMITS)
+        self.assertEqual(tree(self.agt), before)
+
+
 class WriteRuleTests(TapBase):
     def test_an_unchanged_payload_within_five_minutes_touches_nothing_under_state(self):
-        self.tap(payload(), now=NOW)
+        observed = NOW - 600
+        self.tap(payload(transcript_path=str(self.transcript(observed))), now=NOW)
         before = tree(self.agt)
-        for later in (NOW + 1, NOW + usage_tap.REFRESH_SECONDS - 1):
-            with self.subTest(later=later):
-                self.assertFalse(self.tap(payload(), now=later))
+        for advance in (1, usage_tap.REFRESH_SECONDS - 1):
+            with self.subTest(advance=advance):
+                value = payload(transcript_path=str(self.transcript(observed + advance)))
+                self.assertFalse(self.tap(value, now=NOW + 600 + advance))
                 self.assertEqual(tree(self.agt), before)
+        value = payload(transcript_path=str(self.transcript(observed + usage_tap.REFRESH_SECONDS)))
+        self.assertTrue(self.tap(value, now=NOW + 900))
+        self.assertEqual({window["observed_at"] for window in self.stored()["windows"].values()},
+                         {observed + usage_tap.REFRESH_SECONDS})
 
     def test_the_no_change_path_never_creates_the_lock_file(self):
         self.live().parent.mkdir(parents=True)
         self.live().write_text(json.dumps({"windows": {
-            "five_hour": {"utilization": 0.62, "resets_at": FIVE_RESET, "observed_at": NOW},
-            "seven_day": {"utilization": 0.41, "resets_at": WEEK_RESET, "observed_at": NOW}}}))
+            "five_hour": {"utilization": 0.62, "resets_at": FIVE_RESET, "observed_at": NOW, **LIVE_METADATA},
+            "seven_day": {"utilization": 0.41, "resets_at": WEEK_RESET, "observed_at": NOW, **LIVE_METADATA}}}))
         set_times(self.live(), NOW)
         set_times(self.live().parent, NOW)
         before = tree(self.agt)
@@ -228,10 +615,10 @@ class WriteRuleTests(TapBase):
 
     def test_two_sessions_finishing_in_reverse_order_keep_each_newest_window(self):
         # Session A read five_hour last; session B read seven_day last. A decides to write, then B finishes first.
-        a = {"five_hour": {"utilization": 0.7, "resets_at": FIVE_RESET, "observed_at": NOW},
-             "seven_day": {"utilization": 0.4, "resets_at": WEEK_RESET, "observed_at": NOW - 900}}
-        b = {"five_hour": {"utilization": 0.6, "resets_at": FIVE_RESET, "observed_at": NOW - 900},
-             "seven_day": {"utilization": 0.45, "resets_at": WEEK_RESET, "observed_at": NOW}}
+        a = {"five_hour": {"utilization": 0.7, "resets_at": FIVE_RESET, "observed_at": NOW, **LIVE_METADATA},
+             "seven_day": {"utilization": 0.4, "resets_at": WEEK_RESET, "observed_at": NOW - 900, **LIVE_METADATA}}
+        b = {"five_hour": {"utilization": 0.6, "resets_at": FIVE_RESET, "observed_at": NOW - 900, **LIVE_METADATA},
+             "seven_day": {"utilization": 0.45, "resets_at": WEEK_RESET, "observed_at": NOW, **LIVE_METADATA}}
         live, login = self.live(), self.login
         self.assertEqual(usage_tap.due(usage_tap.read_live(live), a, NOW, login), a)  # A's check, before any lock
         self.assertTrue(usage_tap.record(live, b, NOW, login))  # B runs start to finish meanwhile
@@ -328,7 +715,7 @@ class FolderTests(TapBase):
         self.assertTrue(self.live(home=other).exists())
         self.assertFalse((self.agt / "state").exists())
         third = self.root / "third-agt"
-        stdin = io.TextIOWrapper(io.BytesIO(raw(payload())))
+        stdin = io.TextIOWrapper(io.BytesIO(raw(self.with_transcript(payload()))))
         with patch("sys.stdin", stdin):
             self.assertEqual(entry.main(["--home", str(third), "hook", "statusline"]), 0)
         self.assertTrue(self.live(home=third).exists())
@@ -472,21 +859,22 @@ class LoginTests(TapBase):
         self.assertTrue(self.tap(b_reply(), now=NOW + 1000))
         self.assertEqual(self.stored(), {"login": login_b, "login_since": NOW + usage_tap.REFRESH_SECONDS + 100,
                                          "limits": True, "superseded": A_SUPERSEDED, "windows": {
-            "five_hour": {"utilization": 0.05, "resets_at": FIVE_RESET - HOUR, "observed_at": NOW + 1000}}})
+            "five_hour": {"utilization": 0.05, "resets_at": FIVE_RESET - HOUR,
+                           "observed_at": NOW + 1000, **LIVE_METADATA}}})
         # B's next replies merge as usual.
         self.assertTrue(self.tap(b_reply(6, seven_day=(12, WEEK_RESET + DAY)), now=NOW + 1100))
         self.assertEqual(self.stored(), {"login": login_b, "login_since": NOW + usage_tap.REFRESH_SECONDS + 100,
                                          "limits": True, "superseded": A_SUPERSEDED, "windows": {
-            "five_hour": {"utilization": 0.06, "resets_at": FIVE_RESET - HOUR, "observed_at": NOW + 1100},
-            "seven_day": {"utilization": 0.12, "resets_at": WEEK_RESET + DAY, "observed_at": NOW + 1100}}})
+            "five_hour": {"utilization": 0.06, "resets_at": FIVE_RESET - HOUR, "observed_at": NOW + 1100, **LIVE_METADATA},
+            "seven_day": {"utilization": 0.12, "resets_at": WEEK_RESET + DAY, "observed_at": NOW + 1100, **LIVE_METADATA}}})
 
     def test_a_stale_session_after_the_switch_never_writes_the_old_logins_figures(self):
         self.assertTrue(self.tap(payload(), now=NOW))  # sessions 1 and 2, both on login A
         login_b = self.login_as("uuid-other")  # session 1 runs /login
         self.assertTrue(self.tap(b_reply(5, seven_day=(12, WEEK_RESET - DAY)), now=NOW + 60))  # session 1, as B
         expected = {"login": login_b, "login_since": NOW + 60, "limits": True, "superseded": A_SUPERSEDED, "windows": {
-            "five_hour": {"utilization": 0.05, "resets_at": FIVE_RESET - HOUR, "observed_at": NOW + 60},
-            "seven_day": {"utilization": 0.12, "resets_at": WEEK_RESET - DAY, "observed_at": NOW + 60}}}
+            "five_hour": {"utilization": 0.05, "resets_at": FIVE_RESET - HOUR, "observed_at": NOW + 60, **LIVE_METADATA},
+            "seven_day": {"utilization": 0.12, "resets_at": WEEK_RESET - DAY, "observed_at": NOW + 60, **LIVE_METADATA}}}
         self.assertEqual(self.stored(), expected)
         before = tree(self.agt)
         with patch.object(usage_tap, "read_login", wraps=usage_tap.read_login) as read:
@@ -527,7 +915,7 @@ class LoginTests(TapBase):
                                                  "limits": True, "superseded": A_SUPERSEDED,
                                                  "windows": {"five_hour": {"utilization": 0.03,
                                                                            "resets_at": FIVE_RESET - HOUR,
-                                                                           "observed_at": NOW + 60}}})
+                                                                           "observed_at": NOW + 60, **LIVE_METADATA}}})
 
     def test_another_session_of_the_old_login_never_leaks_its_older_figures(self):
         # Session 2 last replied as A at 60/40; session 1 later at 62/41, which is what the file holds.
@@ -536,8 +924,8 @@ class LoginTests(TapBase):
         login_b = self.login_as("uuid-other")  # session 1 runs /login, and replies as B
         self.assertTrue(self.tap(b_reply(5, seven_day=(12, WEEK_RESET - DAY)), now=NOW + 700))
         expected = {"login": login_b, "login_since": NOW + 700, "limits": True, "superseded": A_SUPERSEDED, "windows": {
-            "five_hour": {"utilization": 0.05, "resets_at": FIVE_RESET - HOUR, "observed_at": NOW + 700},
-            "seven_day": {"utilization": 0.12, "resets_at": WEEK_RESET - DAY, "observed_at": NOW + 700}}}
+            "five_hour": {"utilization": 0.05, "resets_at": FIVE_RESET - HOUR, "observed_at": NOW + 700, **LIVE_METADATA},
+            "seven_day": {"utilization": 0.12, "resets_at": WEEK_RESET - DAY, "observed_at": NOW + 700, **LIVE_METADATA}}}
         self.assertEqual(self.stored(), expected)
         before = tree(self.agt)
         with patch.object(usage_tap, "read_login", wraps=usage_tap.read_login) as read:
@@ -557,7 +945,7 @@ class LoginTests(TapBase):
         self.assertTrue(self.tap(payload(63, None), now=NOW + 60))  # the same window minute, but above A's 62%
         self.assertEqual(self.stored(), {"login": login_b, "login_since": NOW + 60,
                                          "limits": True, "superseded": A_SUPERSEDED, "windows": {
-            "five_hour": {"utilization": 0.63, "resets_at": FIVE_RESET, "observed_at": NOW + 60}}})
+            "five_hour": {"utilization": 0.63, "resets_at": FIVE_RESET, "observed_at": NOW + 60, **LIVE_METADATA}}})
 
     def test_a_login_change_seen_first_through_another_sessions_older_figures_writes_no_windows(self):
         self.tap(payload(), now=NOW)  # A's last figures: 62/41
@@ -567,20 +955,19 @@ class LoginTests(TapBase):
                                          "windows": {}, "superseded": A_SUPERSEDED})
         self.assertTrue(self.tap(b_reply(), now=NOW + 120))  # B's own first reply
         self.assertEqual(self.stored()["windows"], {
-            "five_hour": {"utilization": 0.05, "resets_at": FIVE_RESET - HOUR, "observed_at": NOW + 120}})
+            "five_hour": {"utilization": 0.05, "resets_at": FIVE_RESET - HOUR, "observed_at": NOW + 120, **LIVE_METADATA}})
 
     def test_a_file_from_before_logins_is_replaced(self):
         self.live().parent.mkdir(parents=True)
         self.live().write_text(json.dumps({"windows": {
-            "five_hour": {"utilization": 0.9, "resets_at": FIVE_RESET + HOUR, "observed_at": NOW}}}))
+            "five_hour": {"utilization": 0.9, "resets_at": FIVE_RESET + HOUR, "observed_at": NOW, **LIVE_METADATA}}}))
         self.assertTrue(self.tap(payload(), now=NOW + 60))
         self.assertEqual(self.stored()["login"], self.login)
         self.assertEqual(self.stored()["windows"]["five_hour"]["utilization"], 0.62)
 
     def test_a_delayed_higher_figure_from_before_the_switch_never_becomes_bs(self):
-        transcript = self.root / "old-session.jsonl"
-        transcript.write_text("{}\n")
-        os.utime(transcript, (NOW + 20, NOW + 20))
+        transcript = self.transcript(NOW + 20)
+        os.utime(transcript, (NOW + 120, NOW + 120))
         delayed = payload(96, None, transcript_path=str(transcript))
         self.assertTrue(self.tap(payload(80, None), now=NOW))
         login_b = self.login_as("uuid-b")
@@ -597,9 +984,8 @@ class LoginTests(TapBase):
         self.assertEqual(tree(self.agt), before)
 
     def test_a_stale_a_session_writes_nothing_after_a_to_b_to_c(self):
-        transcript = self.root / "a-session.jsonl"
-        transcript.write_text("{}\n")
-        os.utime(transcript, (NOW + 20, NOW + 20))
+        transcript = self.transcript(NOW + 20)
+        os.utime(transcript, (NOW + 180, NOW + 180))
         self.assertTrue(self.tap(payload(80, None), now=NOW))
         self.login_as("uuid-b")
         self.assertTrue(self.tap(b_reply(), now=NOW + 60))
@@ -614,9 +1000,8 @@ class LoginTests(TapBase):
         self.assertEqual(self.stored()["windows"]["five_hour"]["utilization"], 0.07)
 
     def test_a_switch_first_seen_through_a_delayed_higher_figure_records_no_windows(self):
-        transcript = self.root / "delayed-session.jsonl"
-        transcript.write_text("{}\n")
-        os.utime(transcript, (NOW + 20, NOW + 20))
+        transcript = self.transcript(NOW + 20)
+        os.utime(transcript, (NOW + 60, NOW + 60))
         self.assertTrue(self.tap(payload(80, None), now=NOW))
         login_b = self.login_as("uuid-b")
         self.assertTrue(self.tap(payload(96, None, transcript_path=str(transcript)), now=NOW + 60))
@@ -637,7 +1022,7 @@ class LoginTests(TapBase):
             self.assertEqual(read.call_count, 2)
 
     def test_without_a_login_the_writers_write_nothing(self):
-        windows = {"five_hour": {"utilization": 0.5, "resets_at": FIVE_RESET, "observed_at": NOW}}
+        windows = {"five_hour": {"utilization": 0.5, "resets_at": FIVE_RESET, "observed_at": NOW, **LIVE_METADATA}}
         self.assertEqual(usage_tap.due({}, windows, NOW), {})
         self.assertFalse(usage_tap.record(self.live(), windows, NOW))
         self.assertFalse(usage_tap.commit(self.live(), windows, NOW))
@@ -761,7 +1146,8 @@ class RouteTests(TapBase):
         probe = ("import json, sys\nsys.argv = ['agt', 'hook', 'statusline']\n"
                  "from agents_router.entry import main\ncode = main()\n"
                  "print(json.dumps([code, sorted(m for m in sys.modules if m.startswith('agents_router'))]), file=sys.stderr)\n")
-        done = subprocess.run([sys.executable, "-c", probe], input=raw(payload()), capture_output=True, timeout=60,
+        done = subprocess.run([sys.executable, "-c", probe], input=raw(self.with_transcript(payload())),
+                              capture_output=True, timeout=60,
                               env={**os.environ, "PYTHONPATH": str(SRC)})
         code, loaded = json.loads(done.stderr.decode().strip().splitlines()[-1])
         self.assertEqual(code, 0)
@@ -780,7 +1166,7 @@ class LauncherTests(TapBase):
         return path
 
     def run_launcher(self, path, value=None):
-        return subprocess.run(["/bin/sh", str(path), "hook", "statusline"], input=raw(value or payload()),
+        return subprocess.run(["/bin/sh", str(path), "hook", "statusline"], input=raw(self.with_transcript(value or payload())),
                               capture_output=True, timeout=60,
                               env={"HOME": str(self.user), "PATH": "/usr/bin:/bin", "CLAUDE_CONFIG_DIR": str(self.profile)})
 
