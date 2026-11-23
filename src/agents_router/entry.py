@@ -3,6 +3,9 @@
 Claude Code runs `agt hook …` on its events, an agent CLI starts `agt mcp`, and each job runs
 `agt _runner`. Importing every other command first would add tens of milliseconds to each of
 them. Any other command, or one of these with flags, goes to `cli.main` as before.
+
+`agt hook statusline` (Claude Code's status line, through agt's wrapper) goes to `usage_tap`, which
+imports nothing else from agt, not to `hooks.main`.
 """
 
 from __future__ import annotations
@@ -11,6 +14,7 @@ import os
 import sys
 
 HOOK_ACTIONS = ("await", "pending", "inbox", "roles-context", "roles-first")
+STATUSLINE = "statusline"
 
 
 def quick(argv: list[str]) -> tuple[str | None, str, list[str]] | None:
@@ -23,6 +27,8 @@ def quick(argv: list[str]) -> tuple[str | None, str, list[str]] | None:
         return None
     if argv[:1] == ["hook"] and len(argv) in (2, 3) and argv[1] in HOOK_ACTIONS:
         return home, "hook", argv[1:]
+    if argv == ["hook", STATUSLINE]:
+        return home, STATUSLINE, []
     if argv == ["mcp"]:
         return home, "mcp", []
     if argv[:2] == ["mcp", "--worker"] and len(argv) == 3 and not argv[2].startswith("-"):
@@ -45,6 +51,10 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
     if home:
         os.environ["AGT_HOME"] = home
+    if command == STATUSLINE:
+        from agents_router.usage_tap import main as tap
+
+        return tap([])
     if command == "hook":
         from agents_router.hooks import main as run_hook
 

@@ -503,6 +503,33 @@ Python's read actually saw, and read again on a mismatch.
 
 ## Popover integration contract
 
+Opening the popover or pressing Refresh also starts `agt usage --probe-codex --json`
+as `CommandKind::UsageProbeCodex`, through `AgtClient::mutate`. At most one probe
+command runs at a time, with a 15 second timeout. It never enters the usage read
+queue or publishes a usage snapshot; its state writes trigger the normal watcher.
+Timer, wake, reactivation and watcher reads never start a probe. Python probes
+only accounts whose latest attempt or window observation is at least 600 seconds
+old, reserving attempts under each account's lock before the free app-server read.
+The separate result has `schema_version: 1`, `probed` and `skipped` account-name
+arrays. Failed reads are included in `skipped`. Regenerate its fixture with
+`PYTHONPATH=src:tests python3 tests/generate_codex_probe_fixture.py`; decode it with
+`agt-app-check --stdin usage-probe-codex`.
+
+Usage accounts may include `statusline_usage`: `live`, `missing`, `replaced`,
+`off`, `unset`, `unsupported` or `no_limits`. Rust preserves this optional
+string when passing usage to either page; older producers may omit it.
+`live` or absent keeps the detail context as `Updated <age>`. `no_limits`
+adds `No usage limits on this login`; the other values, including unknown
+future strings, add `Usage updates only from agt's jobs`. Settings also shows
+`agt setup` for `missing` and `replaced`. These notes do not change readiness.
+
+A window with `reset: true`, including one whose reset time passes before
+render, is unknown since reset. Its slot shows `– <age>` with no window tag,
+the figure is dimmed, and its meter is a dimmed empty dashed track. The row
+prefers a known window when one remains. Detail says `Reset, not seen since`;
+the accessible label names the window and says `unknown since reset, last
+seen <age>`. Popover and Settings share these rules.
+
 `ui/tauri.js` is the only frontend Tauri adapter. The popover alone may invoke:
 `get_snapshot`, `get_account_checks`, `refresh_usage`, `hide_popover`, `show_popover_menu`, `set_popover_height`, `open_settings`, `login_account`, `get_login_command`, `copy_text`,
 `check_account`, `get_update_status`, `install_update`, `open_releases` and `quit_app`. Account actions take

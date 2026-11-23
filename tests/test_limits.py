@@ -144,7 +144,9 @@ class LimitTests(TempHome):
         self.assertIn("95% of its usage window (usage_ceiling 90%)", str(raised.exception))
         self.assertIn("Room: Claude primary 5% left (5h, resets", str(raised.exception))
         # A window that has reset since the record was written does not block.
-        accounts.record_rate_limit_event("claude", "primary", {"rateLimitType": "five_hour", "utilization": 0.99, "resetsAt": time.time() - 5})
+        data = accounts.load_usage("claude")
+        data["primary"]["windows"]["five_hour"].update(utilization=0.99, resets_at=time.time() - 5)
+        (self.home / "state" / "claude-usage.json").write_text(json.dumps(data), encoding="utf-8")
         self.assertEqual(self.admit("claude").account, "primary")
         # Without usage data nothing is guessed.
         (self.home / "state" / "claude-usage.json").unlink()
@@ -349,7 +351,7 @@ class UsageViewTests(TempHome):
         )
         accounts.record_rate_limit_event("claude", "a2", {"rateLimitType": "five_hour", "utilization": 0.4, "resetsAt": time.time() + 600})
         data = accounts.load_usage("claude")
-        data["a2"]["updated"] = time.time() - 7200
+        data["a2"]["windows"]["five_hour"]["observed_at"] = time.time() - 7200  # the window's own age is shown
         (self.home / "state" / "claude-usage.json").write_text(json.dumps(data), encoding="utf-8")
         line = usage_view.room_line(load_config(), ["claude"])
         self.assertIn("a2 60% left", line)

@@ -76,6 +76,8 @@ pub struct AccountUsage {
     pub capacity: Option<u64>,
     pub unhealthy_models: Vec<ModelHealth>,
     pub windows: Vec<UsageWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub statusline_usage: Option<String>,
     pub problem: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -467,9 +469,17 @@ pub struct ChoiceCell {
     pub note: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodexProbeResult {
+    pub schema_version: SchemaVersion,
+    pub probed: Vec<String>,
+    pub skipped: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommandKind {
     Usage,
+    UsageProbeCodex,
     ConfigShow,
     ConfigSet,
     ConfigUnset,
@@ -493,6 +503,7 @@ impl CommandKind {
     pub fn prefix(self) -> &'static [&'static str] {
         match self {
             Self::Usage => &["usage"],
+            Self::UsageProbeCodex => &["usage", "--probe-codex"],
             Self::ConfigShow => &["config", "show"],
             Self::ConfigSet => &["config", "set"],
             Self::ConfigUnset => &["config", "unset"],
@@ -533,6 +544,7 @@ impl CommandKind {
 #[serde(untagged)]
 pub enum Snapshot {
     Usage(Usage),
+    UsageProbeCodex(CodexProbeResult),
     Config(ConfigShow),
     ConfigWrite(ConfigWrite),
     Accounts(AccountsList),
@@ -611,6 +623,7 @@ pub fn decode(kind: CommandKind, bytes: &[u8]) -> Result<Snapshot, String> {
     }
     match kind {
         CommandKind::Usage => parse!(Usage, Usage),
+        CommandKind::UsageProbeCodex => parse!(CodexProbeResult, UsageProbeCodex),
         CommandKind::ConfigShow => parse!(ConfigShow, Config),
         CommandKind::ConfigSet | CommandKind::ConfigUnset | CommandKind::ConfigRevert => {
             parse!(ConfigWrite, ConfigWrite)
@@ -638,6 +651,7 @@ pub fn decode(kind: CommandKind, bytes: &[u8]) -> Result<Snapshot, String> {
 /// Explicit inventory: unknown files fail the checker, so a new producer needs a model.
 pub const FIXTURES: &[(&str, CommandKind)] = &[
     ("usage.json", CommandKind::Usage),
+    ("usage-probe-codex.json", CommandKind::UsageProbeCodex),
     ("usage-popover.json", CommandKind::Usage),
     ("usage-nothing.json", CommandKind::Usage),
     ("usage-idle.json", CommandKind::Usage),

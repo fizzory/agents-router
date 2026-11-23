@@ -8,7 +8,7 @@ save a backup in `<AGT_HOME>/state/backups/settings/`, and log the change.
 Where a change goes: `.agt/settings.toml` in a workspace, your user file in
 your home folder, `--local`, `--workspace` or `--user` to pick. Account picks
 go to `.agt/settings.local.toml`, because they're yours; `primary`, `binary`
-and the `share.*` keys go to your user file, because they're machine-wide (a
+and the `share.*` and `usage.*` keys go to your user file, because they're machine-wide (a
 repo's own share settings come with sharing a repo's items). `unset` removes
 the key from the file whose value is in effect, unless you name a level.
 
@@ -147,6 +147,9 @@ KEYS: dict[str, Key] = {key.name: key for key in [
     Key("job_retention_days", "int", "Days agt keeps finished jobs' records.", minimum=1),
     Key("subagents.prefer_roles", "bool", "Prefer installed agt role agents for subagent work in Claude Code.",
         applies="the next subagent call or session start"),
+    Key("usage.statusline", "bool", "agt's tap in each Claude Code profile's status line: live usage for the menu bar "
+        "and job routing. Your status line still runs.", user_only=True,
+        applies="once (agt updates each Claude Code profile's status line now)"),
     *(key for runtime in config.RUNTIMES for key in _runtime_keys(runtime)),
     Key("share.enabled", "fixed", "Whether agt shares agents and skills between your CLIs.",
         changed_by="agt share enable / agt share disable", applies=SYNC),
@@ -373,11 +376,15 @@ def _change(args: argparse.Namespace, unset: bool) -> int:
     previous = {"level": level, "present": level_old is not levels.MISSING, "value": _plain(level_old)}
     if unset:
         if level_old is levels.MISSING:
+            triggers = _refresh_usage(key, _effective(layers)[0]) if key.name == "usage.statusline" else []
             if args.json:
                 print(json.dumps({"ok": True, "key": key.name, "file": str(location), "level": level,
-                                  "changed": False, "previous": previous, "revision": old_revision}, indent=2))
+                                  "changed": False, "previous": previous, "revision": old_revision,
+                                  **({"triggers": triggers} if key.name == "usage.statusline" else {})}, indent=2))
             else:
                 print(f"{key.name} isn't set in {location} ({level}); nothing to unset.")
+                for line in triggers:
+                    print(line)
             return 0
         new_text = levels.drop_line(old_text, key.table, key.field, location)
     else:
@@ -423,7 +430,7 @@ def _change(args: argparse.Namespace, unset: bool) -> int:
                     "old_present": previous["present"], "new_present": not unset,
                     "revision": levels.revision(new_text.encode("utf-8")),
                     "command": command, **who})
-    triggers = _refresh_share(key)
+    triggers = _refresh_share(key) + _refresh_usage(key, after_cfg)
     report = {"ok": True, "key": key.name, "old": old, "new": new, "file": str(location), "level": level, "applies": key.applies,
               "changed": True, "previous": previous, "revision": levels.revision(new_text.encode("utf-8")),
               "effective": new, "overridden_by": overridden, "still_limited_by": limited, "undo": undo,
@@ -458,6 +465,18 @@ def _refresh_share(key: Key) -> list[str]:
 
     saved = share_settings.load()
     return share_commands._refresh_triggers(saved) if saved.enabled else []
+
+
+def _refresh_usage(key: Key, loaded: config.Config) -> list[str]:
+    """Apply consent now, including restoring status lines when consent is unset."""
+
+    if key.name != "usage.statusline":
+        return []
+    from agents_router import statusline
+
+    refreshed = statusline.refresh(loaded, enabled=loaded.usage.statusline is True)
+    return refreshed.lines + (["Live Claude usage needs macOS or Linux; status lines were left unchanged."]
+                              if refreshed.unsupported else [])
 
 
 def _argument(key: Key, value: Any) -> str:

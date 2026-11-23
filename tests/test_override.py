@@ -10,7 +10,7 @@ import sys
 import time
 from unittest.mock import patch
 
-from helpers import TempHome
+from helpers import TempHome, patch_runner_sleep
 from agents_router import accounts, cli, jobs, limits, tools
 from agents_router.config import QuotaPool, load_config, save_config
 from agents_router.follow import follow
@@ -251,7 +251,7 @@ class OverrideTests(TempHome):
         self.runtime.primary_max_effort = "medium"
         save_config(self.config)
         try:
-            with patch("agents_router.runner.time.sleep", side_effect=AssertionError("override queued")):
+            with patch_runner_sleep(AssertionError("override queued")):
                 self.assertEqual(Runner(status["job_id"]).run(), 0)
         finally:
             held.release()

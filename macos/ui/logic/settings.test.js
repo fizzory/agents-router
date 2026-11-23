@@ -28,9 +28,9 @@ test('user-only row under Workspace shows the user value read-only and User only
 });
 test('keys split into General, one pane per provider and Sharing; search matches label, key and description', async () => {
   const base = await fixture('config-show');
-  assert.deepEqual(paneRows(base, 'general').map(row => row.key), ['max_jobs', 'max_depth', 'job_retention_days', 'subagents.prefer_roles']);
+  assert.deepEqual(paneRows(base, 'general').map(row => row.key), ['max_jobs', 'max_depth', 'job_retention_days', 'subagents.prefer_roles', 'usage.statusline']);
   const counts = Object.fromEntries(['general', 'claude', 'codex', 'antigravity', 'kiro', 'sharing'].map(pane => [pane, paneRows(base, pane).length]));
-  assert.deepEqual(counts, { general: 4, claude: 27, codex: 30, antigravity: 30, kiro: 26, sharing: 14 });
+  assert.deepEqual(counts, { general: 5, claude: 27, codex: 30, antigravity: 30, kiro: 26, sharing: 14 });
   assert.equal(paneForKey('claude.max_jobs'), 'claude'); assert.equal(paneForKey('roles.builder'), 'roles'); assert.equal(paneForKey('max_jobs'), 'general');
   assert.equal(groupFor(row('claude.max_jobs')), 'Limits'); assert.equal(groupFor(row('codex.circuit_open_seconds')), 'Retries and health');
   assert.equal(groupFor(row('kiro.max_jobs_by_room')), 'File only'); assert.equal(groupFor({ key: 'claude.new_thing', kind: 'int' }), 'Other');

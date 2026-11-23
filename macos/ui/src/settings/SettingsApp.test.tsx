@@ -20,7 +20,7 @@ describe('sidebar and panes', () => {
   it('renders only the selected pane; every config key appears once across the nine panes', async () => {
     await renderSettings();
     expect(document.body.dataset.pane).toBe('general');
-    expect(paneKeys()).toEqual(['max_jobs', 'max_depth', 'job_retention_days', 'subagents.prefer_roles']);
+    expect(paneKeys()).toEqual(['max_jobs', 'max_depth', 'job_retention_days', 'subagents.prefer_roles', 'usage.statusline']);
     const seen: string[] = [...paneKeys() as string[]];
     for (const pane of ['claude', 'codex', 'antigravity', 'kiro', 'sharing', 'roles', 'accounts', 'activity']) {
       fireEvent.click(nav(pane)!);
@@ -80,7 +80,7 @@ describe('search', () => {
     fireEvent.keyDown(search, { key: 'Escape' });
     await settle();
     expect((search as HTMLInputElement).value).toBe('');
-    expect(paneKeys()).toHaveLength(4);
+    expect(paneKeys()).toHaveLength(5);
     for (const call of [api.rolesShow, api.accountsList, api.shareList, api.activityLog]) expect(call).toHaveBeenCalledTimes(1);
   });
 

@@ -48,7 +48,7 @@ describe('UsageGauge', () => {
     expect((seven?.firstElementChild as HTMLElement).style.transform).toBe('translateX(-4%)');
     rerender(<UsageGauge meters={[meter('five_hour', 0, { reset: true }), meter('seven_day', 40, { dominant: true, dimmed: true })]} />);
     expect(bars()[0]?.classList.contains('is-reset')).toBe(true);
-    expect((bars()[0]?.firstElementChild as HTMLElement).style.transform).toBe('translateX(-100%)');
+    expect(bars()[0]?.querySelector('.gauge-fill')).toBeNull();
     expect(bars()[1]?.classList.contains('is-stale')).toBe(true);
     expect(bars()[1]?.classList.contains('is-warn')).toBe(false);
     rerender(<UsageGauge hidden meters={[meter('five_hour', 0), meter('seven_day', 0)]} />);

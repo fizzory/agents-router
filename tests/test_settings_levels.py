@@ -159,6 +159,59 @@ class SubagentsTests(LevelsBase):
         self.assertFalse(load_config(cwd=self.project).subagents.prefer_roles)
 
 
+class UsageSettingsTests(LevelsBase):
+    def test_consent_round_trips_unset_true_and_false_through_save_config(self):
+        self.assertIsNone(config.defaults().usage.statusline)
+        for expected in (None, True, False):
+            with self.subTest(consent=expected):
+                text = "" if expected is None else f"[usage]\nstatusline = {str(expected).lower()}\n"
+                self.user(text + '[share]\nenabled = false\n[roles.reviewer]\nenabled = false\n')
+                loaded = load_config(cwd=self.project)
+                self.assertIs(loaded.usage.statusline, expected)
+                config.save_config(loaded)
+                saved = levels.read("user", self.home / "settings.toml").data
+                self.assertIs(load_config(cwd=self.project).usage.statusline, expected)
+                self.assertEqual(saved.get("usage", {}), {} if expected is None else {"statusline": expected})
+                self.assertFalse(saved["share"]["enabled"])
+                self.assertFalse(saved["roles"]["reviewer"]["enabled"])
+
+    def test_save_uses_the_config_value_including_removing_an_old_choice(self):
+        self.user("[usage]\nstatusline = true\n")
+        loaded = load_config(cwd=self.project)
+        for expected in (False, True, None):
+            with self.subTest(consent=expected):
+                loaded.usage.statusline = expected
+                config.save_config(loaded)
+                self.assertIs(load_config(cwd=self.project).usage.statusline, expected)
+
+    def test_workspace_and_local_cannot_grant_or_withdraw_consent(self):
+        for expected in (None, True, False):
+            for value in ("true", "false"):
+                with self.subTest(consent=expected, workspace=value):
+                    self.user("" if expected is None else f"[usage]\nstatusline = {str(expected).lower()}\n")
+                    self.workspace(self.project, f"[usage]\nstatusline = {value}\n",
+                                   local=f"[usage]\nstatusline = {value}\n")
+                    loaded = load_config(cwd=self.project)
+                    self.assertIs(loaded.usage.statusline, expected)
+                    notes = [note for note in loaded.notes if "[usage] statusline" in note]
+                    self.assertEqual(len(notes), 2)
+                    for filename in ("settings.toml", "settings.local.toml"):
+                        self.assertTrue(any(f"{self.project / '.agt' / filename}:2:" in note and "ignored here" in note
+                                            for note in notes))
+
+    def test_statusline_refuses_non_booleans_with_the_file_and_line(self):
+        for value in ('"false"', "0", "1", "[]", "{}"):
+            with self.subTest(value=value):
+                self.user(f"[usage]\nstatusline = {value}\n")
+                with self.assertRaisesRegex(levels.SettingsError, r"settings.toml:2: \[usage\] statusline must be true or false"):
+                    load_config(cwd=self.project)
+
+    def test_usage_must_be_a_table(self):
+        self.user('usage = "no"\n')
+        with self.assertRaisesRegex(levels.SettingsError, r"settings.toml:1: usage must be a \[usage\] table"):
+            load_config(cwd=self.project)
+
+
 class WorkspaceTests(LevelsBase):
     def test_a_subfolder_finds_the_checkout_and_a_nearer_agt_folder_wins(self):
         (self.project / ".git").mkdir()

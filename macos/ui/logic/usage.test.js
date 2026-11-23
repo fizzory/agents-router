@@ -57,10 +57,10 @@ test("busier window uses percent, keeps ties stable, and does not prefer a reset
   assert.equal(busierWindow(account(raw, "cooling").windows), null);
 });
 
-test("percent text shows usage, an empty reset, and no invented figure", () => {
+test("percent text shows usage, an unknown reset, and no invented figure", () => {
   const raw = fixture();
   assert.equal(percentText(busierWindow(account(raw, "work").windows)), "42%");
-  assert.equal(percentText(account(raw, "reset").windows[0]), "0%");
+  assert.equal(percentText(account(raw, "reset").windows[0]), "–");
   assert.equal(percentText(busierWindow(account(raw, "cooling").windows)), "");
   const window = account(raw, "work").windows[0];
   assert.equal(percentText({ ...window, used_percent: -5 }), "0%");

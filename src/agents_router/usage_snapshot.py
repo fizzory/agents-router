@@ -7,7 +7,7 @@ import math
 import time
 from typing import Any
 
-from agents_router import __version__, accounts, bundle, health, profiles, usage_view
+from agents_router import __version__, accounts, bundle, health, profiles, statusline, usage_view, window_order
 from agents_router.config import Account, Config, RUNTIMES, RuntimeConfig, jobs_dir, state_dir
 from agents_router.fsutil import lock_busy, read_json, same_process
 from agents_router.limits import ACTIVE_STATES, NAMES, STALE_RUNNER_SECONDS
@@ -153,7 +153,7 @@ def _windows(runtime: str, record: dict, now: float) -> list[dict]:
         return []
     result = []
     for name, window in record.get("windows", {}).items():
-        observed = window.get("observed_at", record.get("observed_at", record.get("updated")))
+        observed = window_order.observed_at(window, record)
         reset = window.get("resets_at")
         result.append({"name": name, "label": usage_view.WINDOW_LABELS.get(name, name),
                        "used_percent": round(window["utilization"] * 100),
@@ -190,19 +190,30 @@ def _health(runtime: RuntimeConfig, account: Account, now: float) -> dict:
     return health.read_record(runtime, account, now=now, read_only=True)["circuits"]
 
 
-def _merged(runtime: RuntimeConfig, account: Account, usage: dict, now: float) -> dict:
-    # account_record's shared-login window selection needs each source's own
-    # timestamp retained, rather than one timestamp from the merged record.
-    prepared = {}
-    for name, record in usage.items():
-        prepared[name] = {**record, "windows": {
-            key: {**window, "observed_at": window.get("observed_at", record.get("observed_at", record.get("updated")))}
-            for key, window in record.get("windows", {}).items()}}
-    return accounts.account_record(runtime, account, prepared, now=now) or {}
+def statusline_inspection(config: Config, account: Account, *,
+                         sources: accounts.LiveSources | None = None) -> statusline.Inspection:
+    """The profile's live source, read without installing, repairing or recording anything."""
+
+    installed = statusline.inspect(account.home, enabled=config.usage.statusline)
+    if installed.state == "live":
+        sources = sources if sources is not None else accounts.LiveSources()
+        login = sources.login(account)
+        live = sources.file(account.home)
+        if login and live.login == login and live.limits is False:
+            return replace(installed, state="no_limits")
+    return installed
+
+
+def statusline_usage(config: Config, account: Account) -> str | None:
+    """The profile's usage-source label, without installing or repairing anything."""
+
+    return statusline_inspection(config, account).state
 
 
 def _account(runtime: RuntimeConfig, account: Account, usage: dict, problems: dict,
-             leases: list[dict], active: dict, now: float) -> dict:
+             leases: list[dict], active: dict, now: float, *,
+             live_sources: accounts.LiveSources | None = None,
+             live_identity: tuple[RuntimeConfig, Account] | None = None) -> dict:
     occupied = sum(lease["runtime"] == runtime.runtime and lease["home_key"] == accounts._home_key(account.home)
                    for lease in leases)
     capacity = account_cap(runtime, account)
@@ -214,7 +225,8 @@ def _account(runtime: RuntimeConfig, account: Account, usage: dict, problems: di
     try:
         if account.name in problems:
             raise ValueError(problems[account.name])
-        record = _merged(runtime, account, usage, now)
+        record = accounts.account_record(runtime, account, usage, now=now, live_sources=live_sources,
+                                         live_identity=live_identity) or {}
         result["windows"] = _windows(runtime.runtime, record, now)
         circuits = _health(runtime, account, now)
         for scope, circuit in sorted(circuits.items()):
@@ -278,6 +290,7 @@ def snapshot(config: Config, *, now: float | None = None) -> dict:
                            "state": "running", "surviving_worker": lease["worker"]}
     providers = []
     known = {}
+    live_sources = accounts.LiveSources()
     for name in RUNTIMES:
         runtime = _runtime(config.runtime(name))
         listed = _listed(runtime)
@@ -291,30 +304,48 @@ def snapshot(config: Config, *, now: float | None = None) -> dict:
             if matched and job and not job["account"]:
                 job["account"] = matched.name
         raw = _store(accounts._usage_path(name))
-        usage, problems = {}, {}
+        usage, problems, grouping_logins = {}, {}, {}
         for account in listed:
             try:
                 usage[account.name] = _usage(raw.get(account.name, {})) if isinstance(raw, dict) else _usage(raw)
                 if runtime.runtime == "claude":
-                    account.login = profiles.account_info(account.home)["login"] or usage[account.name].get("login")
-                    for other in runtime.all_accounts():
-                        if profiles.same_folder(other.home, account.home):
-                            other.login = account.login
+                    grouping_logins[accounts._home_key(account.home)] = (
+                        live_sources.login(account) or usage[account.name].get("login"))
             except ValueError as exc:
                 problems[account.name] = str(exc)
         # A primary folder may now have a discovered canonical profile name.
         primary = runtime.primary_account()
+        aliased_primary = False
         if (isinstance(raw, dict) and "primary" in raw and primary.name != "primary"
                 and primary.name not in raw):
             try:
                 usage[primary.name] = _usage(raw["primary"])
-                for account in listed:
-                    if account.name == primary.name:
-                        account.login = account.login or usage[primary.name].get("login")
+                aliased_primary = True
             except ValueError as exc:
                 problems[primary.name] = str(exc)
+        # Group job records with the historical fallback, while diagnostics retain the configured/current
+        # login. Build account views at this boundary instead of changing the runtime's account objects.
+        def grouped(account: Account, *, listed: bool = False) -> Account:
+            login = grouping_logins.get(accounts._home_key(account.home), account.login)
+            if listed and aliased_primary and account.name == primary.name:
+                login = login or usage[primary.name].get("login")
+            return replace(account, login=login)
+
+        grouped_runtime = runtime
+        grouped_listed = listed
+        if name == "claude":
+            grouped_runtime = replace(runtime, accounts=[grouped(a) for a in runtime.accounts],
+                                      _found=[grouped(a) for a in runtime._found] if runtime._found is not None else None)
+            grouped_listed = [grouped(a, listed=True) for a in listed]
+        entries = [_account(grouped_runtime, a, usage, problems, leases, active, now, live_sources=live_sources,
+                            live_identity=(runtime, current))
+                   for a, current in zip(grouped_listed, listed)]
+        if name == "claude":
+            for account, entry in zip(listed, entries):
+                if (live := statusline_inspection(config, account, sources=live_sources).state) is not None:
+                    entry["statusline_usage"] = live
         providers.append({"runtime": name, "label": "Claude Code" if name == "claude" else NAMES[name],
-                          "accounts": [_account(runtime, a, usage, problems, leases, active, now) for a in listed]})
+                          "accounts": entries})
 
     blockers = {key: {"kind": "surviving_worker" if job["surviving_worker"] else "active_job",
                       "job_id": job["job_id"], "runtime": job["runtime"], "account": job["account"]}

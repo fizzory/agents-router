@@ -11,7 +11,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from helpers import TempHome
+from helpers import TempHome, patch_runner_sleep
 
 from agents_router import accounts, health, jobs, limits, tools
 from agents_router.config import Account, QuotaPool, RuntimeConfig, load_config, save_config
@@ -321,7 +321,7 @@ class HealthRoutingTests(TempHome):
         self.assertTrue(busy)
         status = self.create(start=False)
         runner = Runner(status["job_id"])
-        with patch("agents_router.runner.time.sleep", side_effect=lambda _: held.release()) as sleep:
+        with patch_runner_sleep(lambda _: held.release()) as sleep:
             lease = runner._wait_for_account(set())
         self.assertEqual(sleep.call_count, 1)
         self.assertEqual(lease.account.name, "a")
@@ -380,7 +380,7 @@ class HealthRoutingTests(TempHome):
         self.trip()
         self.trip("b")
         status = self.create()
-        with patch("agents_router.runner.time.sleep", side_effect=AssertionError("unhealthy job queued")):
+        with patch_runner_sleep(AssertionError("unhealthy job queued")):
             self.assertEqual(Runner(status["job_id"]).run(), 1)
         self.assertEqual(jobs.read_status(status["job_id"])["outcome"], "no_account")
         lease, until, busy = self.acquire(override="run more jobs")
@@ -715,7 +715,7 @@ class HealthRunnerTests(TempHome):
             self.assertEqual(jobs.read_status(runner.job_id)["message"], expected)
             held.release()
 
-        with patch("agents_router.runner.time.sleep", side_effect=release) as sleep:
+        with patch_runner_sleep(release) as sleep:
             self.assertEqual(runner.run(), 0)
         self.assertEqual(sleep.call_count, 1)
         self.assertEqual(jobs.read_status(runner.job_id)["account"], "a")
@@ -772,7 +772,7 @@ class HealthRunnerTests(TempHome):
         self.assertRegex(status["message"], r"^every codex account is unhealthy; retrying around \d\d:\d\d$")
         runner = self.runner(access="read")
         with patch.object(limits, "acquire_execution_slots", return_value=None) as cap:
-            with patch("agents_router.runner.time.sleep", side_effect=AssertionError("waited behind full cap")):
+            with patch_runner_sleep(AssertionError("waited behind full cap")):
                 self.assertEqual(runner.run(), 1)
         cap.assert_not_called()
         self.assertEqual(jobs.read_status(runner.job_id)["outcome"], "no_account")

@@ -10,9 +10,9 @@ from __future__ import annotations
 from threading import Thread
 import time
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, Callable, Iterable, TYPE_CHECKING
 
-from agents_router import accounts, health_view, quota
+from agents_router import accounts, health_view, quota, window_order
 from agents_router.config import Account, Config, RuntimeConfig, state_dir
 from agents_router.fsutil import file_lock
 from agents_router.limits import NAMES, utilization
@@ -71,13 +71,7 @@ def refresh_codex(config: Config, *, live: bool = True, pinned: str | None = Non
             due = [account for account in ordered if _probe_due(runtime, usage.get(account.name) or {}, now)]
             if due:
                 deadline = time.monotonic() + CODEX_PROBE_TIMEOUT_SECONDS
-                probes = [Thread(target=probe_codex, args=(runtime, account),
-                                 kwargs={"deadline": deadline}, daemon=True) for account in due]
-                for probe in probes:
-                    probe.start()
-                for probe in probes:
-                    # Cleanup must not extend admission's deadline or hold up interpreter exit.
-                    probe.join(timeout=max(0, deadline - time.monotonic()))
+                _run_probes(probe_codex, ((runtime, account) for account in due), deadline)
         except Exception:
             pass  # corrupt usage metadata cannot fail a start
     # TODO: Antigravity (agy) exposes no usage; see plans.md 3f.
@@ -101,7 +95,58 @@ def _probe_due(runtime: RuntimeConfig, record: dict[str, Any], now: float) -> bo
                 and now - float(record.get("probed_at") or 0) >= CODEX_PROBE_INTERVAL_SECONDS)
 
 
-def probe_codex(runtime: RuntimeConfig, account: Account, *, force: bool = False,
+def codex_live_due(record: dict[str, Any], now: float) -> bool:
+    """A recent attempt or window observation makes a popover probe unnecessary."""
+
+    stamps = [record.get("probed_at")]
+    stamps.extend(window.get("observed_at", record.get("observed_at"))
+                  for window in (record.get("windows") or {}).values()
+                  if isinstance(window, dict))
+    newest = max((stamp for stamp in stamps if type(stamp) in (int, float)), default=0)
+    return now - newest >= CODEX_PROBE_INTERVAL_SECONDS
+
+
+def _run_probes(target: Callable, calls: Iterable[tuple], deadline: float, *, cleanup_grace: float = 0) -> None:
+    """Start daemon probes together. Admission's cleanup must not extend its shared deadline."""
+
+    probes = [Thread(target=target, args=args, kwargs={"deadline": deadline}, daemon=True) for args in calls]
+    for probe in probes:
+        probe.start()
+    for probe in probes:
+        probe.join(timeout=max(0, deadline - time.monotonic()))
+    if cleanup_grace:
+        cleanup_deadline = time.monotonic() + cleanup_grace
+        for probe in probes:
+            probe.join(timeout=max(0, cleanup_deadline - time.monotonic()))
+
+
+def probe_codex_accounts(config: Config) -> dict[str, Any]:
+    """Free live reads, in parallel under one deadline; failures also reserve the throttle."""
+
+    runtime = config.runtime("codex")
+    listed = runtime.listed_accounts()
+    results = [None] * len(listed)
+    deadline = time.monotonic() + CODEX_PROBE_TIMEOUT_SECONDS
+    usage, now = accounts.load_usage("codex"), time.time()
+    candidates = []
+    for index, account in enumerate(listed):
+        try:
+            if codex_live_due(usage.get(account.name) or {}, now):
+                candidates.append((index, account))
+        except Exception:
+            continue  # malformed metadata skips the account, as the locked probe does
+
+    def run(index: int, account: Account, *, deadline: float) -> None:
+        results[index] = probe_codex(runtime, account, due=codex_live_due, deadline=deadline)
+
+    _run_probes(run, candidates, deadline, cleanup_grace=2)
+    return {"schema_version": 1,
+            "probed": [account.name for account, result in zip(listed, results) if result is not None],
+            "skipped": [account.name for account, result in zip(listed, results) if result is None]}
+
+
+def probe_codex(runtime: RuntimeConfig, account: Account, *,
+                due: Callable[[dict[str, Any], float], bool] | None = None,
                 deadline: float | None = None) -> RateLimits | None:
     """Reserve a probe attempt before starting it, including failed attempts in the throttle."""
 
@@ -114,9 +159,9 @@ def probe_codex(runtime: RuntimeConfig, account: Account, *, force: bool = False
         with file_lock(lock, timeout=max(0, deadline - time.monotonic())):
             now = time.time()
             record = accounts.load_usage("codex").get(account.name) or {}
-            if not force and not _probe_due(runtime, record, now):
-                return None
             if time.monotonic() >= deadline:
+                return None
+            if not (due(record, now) if due is not None else _probe_due(runtime, record, now)):
                 return None
             record = accounts.update_usage("codex", account.name, probed_at=now, deadline=deadline)
             cooldown = record.get("cooldown_revision") if _usage_cooldown(record, now) else None
@@ -152,8 +197,11 @@ def held_back(runtime: RuntimeConfig, record: dict[str, Any], now: float) -> str
     return text
 
 
-def _age(record: dict[str, Any], now: float) -> float:
-    return now - float(record.get("observed_at") or record.get("updated") or now)
+def _age(record: dict[str, Any], window: dict[str, Any], now: float) -> float:
+    """How old the window's own figure is; a metadata write to the record never makes it younger."""
+
+    observed = window_order.observed_at(window, record)
+    return 0.0 if observed is None else now - observed
 
 
 def _hours(seconds: float) -> str:
@@ -181,7 +229,7 @@ def account_quota(runtime: str, account: Any, record: dict[str, Any] | None, now
     """What is known of one account's quota, and the words agt shows for it (the one wording source).
 
     `left_percent` is the share left in the busiest open window, `resets_at` when that window resets, and
-    `observed_at` when the figure was read; all None when unknown. `text` starts with the account's name, e.g.
+    `observed_at` when that window's figure was read; all None when unknown. `text` starts with the account's name, e.g.
     "claude-work 8% left (5h, resets 14:20, as of 40 min ago)" or "primary unknown (no usage data)"."""
 
     record = record or {}
@@ -209,10 +257,11 @@ def account_quota(runtime: str, account: Any, record: dict[str, Any] | None, now
     detail = [WINDOW_LABELS.get(name, name)]
     if resets is not None:
         detail.append(f"resets {time.strftime('%H:%M', time.localtime(resets))}")
-    age = _age(record, now)
+    age = _age(record, window, now)
     if age > STALE_AFTER_SECONDS:
         detail.append(f"as of {_hours(age)} ago")
     return {**found, "known": True, "left_percent": left, "window": name, "resets_at": float(resets) if resets else None,
+            "observed_at": window_order.observed_at(window, record),
             "text": f"{account.name}{tag} {left}% left ({', '.join(detail)})"}
 
 
@@ -240,7 +289,7 @@ def room_line(config: Config, runtimes: list[str] | None = None, now: float | No
         state = quota.pool_state(runtime, counts, now)
         texts = []
         for account in listed:
-            record = usage.get(account.name) or {}
+            record = accounts.account_record(runtime, account, usage, now=now) or {}
             text = _account_text(runtime, account, record, now)
             pools = quota.pool_report(runtime, account.name, state, record, now)
             if pools:

@@ -1,4 +1,5 @@
 import atexit
+import contextlib
 import io
 import json
 import os
@@ -8,11 +9,34 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 FAKE_CLAUDE = Path(__file__).with_name("fake_claude.py")
 FAKE_KIRO = json.dumps([sys.executable, str(Path(__file__).with_name("fake_kiro.py"))])
 FAKE_LAUNCHD = Path(__file__).with_name("fake_launchd.py")
+
+
+class _RunnerTime:
+    """The runner's time module, with sleep replaced."""
+
+    def __init__(self, sleep):
+        self.sleep = sleep
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+@contextlib.contextmanager
+def patch_runner_sleep(side_effect):
+    """Stub sleep for the runner alone.
+
+    Patching runner.time.sleep changes the shared time module too. Popen.wait's
+    exit polling and fsutil's lock retries must keep their real sleeps.
+    """
+
+    sleep = MagicMock(side_effect=side_effect)
+    with patch("agents_router.runner.time", _RunnerTime(sleep)):
+        yield sleep
 
 
 def fake_launchd(root: Path) -> dict[str, str]:

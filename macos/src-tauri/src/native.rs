@@ -489,6 +489,7 @@ fn show_from(app: &tauri::AppHandle, mtm: MainThreadMarker, now: Now, open: Open
     log_visibility_now_and_later(app, mtm);
     app::request_account_checks(app);
     app::request_usage(app, true, "open");
+    app::request_codex_probe(app, "open");
 }
 
 /// Called only through the main-thread dispatcher. AppKit owns the animation,

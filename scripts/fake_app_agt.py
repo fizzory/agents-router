@@ -15,7 +15,9 @@ args = sys.argv[1:]
 if os.environ.get("AGT_APP_TEST_CALLS"):
     with Path(os.environ["AGT_APP_TEST_CALLS"]).open("a") as stream:
         stream.write(json.dumps(args) + "\n")
-if args[:1] == ["usage"] and "--json" in args:
+if args == ["usage", "--probe-codex", "--json"]:
+    print((FIXTURES / "usage-probe-codex.json").read_text())
+elif args[:1] == ["usage"] and "--json" in args:
     name = os.environ.get("AGT_APP_TEST_USAGE_FIXTURE", "usage.json")
     if name not in ("usage.json", "usage-popover.json", "usage-nothing.json"):
         raise SystemExit("unsupported usage fixture")

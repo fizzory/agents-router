@@ -390,6 +390,11 @@ class SubagentsConfig:
 
 
 @dataclass
+class UsageConfig:
+    statusline: bool | None = None  # None: consent has never been answered
+
+
+@dataclass
 class Config:
     runtimes: dict[str, RuntimeConfig]
     job_retention_days: int = 7
@@ -398,6 +403,7 @@ class Config:
     notes: list[str] = field(default_factory=list)  # settings agt ignored, each with its file and line
     roles: dict[str, Any] = field(default_factory=dict)  # name -> roles.Role, merged over every level
     subagents: SubagentsConfig = field(default_factory=SubagentsConfig)
+    usage: UsageConfig = field(default_factory=UsageConfig)
 
     def runtime(self, name: str) -> RuntimeConfig:
         if name not in self.runtimes:
@@ -728,6 +734,27 @@ def subagents_from_layers(found: list[levels.Layer]) -> SubagentsConfig:
     return settings
 
 
+def usage_from_layers(found: list[levels.Layer], notes: list[str]) -> UsageConfig:
+    """Status line consent belongs to the person, never to a workspace."""
+
+    settings = UsageConfig()
+    for layer in found:
+        table = layer.data.get("usage", {})
+        if not isinstance(table, dict):
+            raise levels.error(layer, None, "usage", "usage must be a [usage] table")
+        if "statusline" not in table:
+            continue
+        if layer.level != "user":
+            notes.append(f"{levels.where(layer, 'usage', 'statusline')}: [usage] statusline is set in your user settings "
+                         f"only ({user_settings_path()}); ignored here")
+            continue
+        value = table["statusline"]
+        if not isinstance(value, bool):
+            raise levels.error(layer, "usage", "statusline", "[usage] statusline must be true or false")
+        settings.statusline = value
+    return settings
+
+
 def from_layers(found: list[levels.Layer], notes: list[str] | None = None, *, cached_only: bool = False) -> Config:
     """The settings these files give, lowest level first (see load_config)."""
 
@@ -765,7 +792,7 @@ def from_layers(found: list[levels.Layer], notes: list[str] | None = None, *, ca
                          f"which isn't one of your {name} accounts; ignored")
         runtimes[name].picked = [item for item in chosen if item in known] or None
     return Config(runtimes=runtimes, notes=notes, roles=roles.from_layers(found),
-                  subagents=subagents_from_layers(found), **_top_from(top))
+                  subagents=subagents_from_layers(found), usage=usage_from_layers(found, notes), **_top_from(top))
 
 
 def _account_lines(runtime: str, account: Account) -> list[str]:
@@ -807,6 +834,8 @@ def dump_config(config: Config) -> str:
         lines.append(f"max_jobs = {config.max_jobs}")
     if not config.subagents.prefer_roles:
         lines += ["", "[subagents]", "prefer_roles = false"]
+    if config.usage.statusline is not None:
+        lines += ["", "[usage]", f"statusline = {_toml_value(config.usage.statusline)}"]
     for name in RUNTIMES:
         runtime = config.runtimes[name]
         lines += [
