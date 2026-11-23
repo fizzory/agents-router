@@ -79,10 +79,11 @@ Typed by you in a terminal, the change just applies: the command is your words. 
 
 ## Live Claude usage
 
-`usage.statusline` is a user-only setting. It lets agt record live usage in each
-Claude Code profile's status line for the menu bar and job routing. Your status
-line still runs. Unset means you have not answered; `false` means off. Neither
-wraps a status line. Workspace and local files cannot choose for you.
+`usage.statusline` is a user-only setting. It lets agt record usage from each
+Claude Code profile's last terminal reply through its status line for the menu
+bar and job routing. Your status line still runs. Unset means you have not
+answered; `false` means off. Neither wraps a status line. Workspace and local
+files cannot choose for you.
 
 ```bash
 agt config set usage.statusline true   # wrap each profile now
@@ -91,10 +92,10 @@ agt config unset usage.statusline      # restore them and remove the choice
 ```
 
 The user file stores the choice as `[usage]` with `statusline = true` or `false`.
-Changes apply in the same call, even with sharing off. Live usage needs macOS
+Changes apply in the same call, even with sharing off. The tap needs macOS
 or Linux; on Windows the choice is saved without wrapping a status line.
 
-Setup asks once with its other choices. Live usage is recommended on; use
+Setup asks once with its other choices and recommends turning it on. Use
 `agt setup --statusline off` to decline. Setup and update re-apply a saved
 `true`, including when another tool replaced the status line. The replacement
 becomes your command after agt's tap. `agt doctor --fix` repairs it too.
@@ -104,9 +105,12 @@ Uninstall starts with `agt config set usage.statusline false`. This restores
 every recorded file, including profiles no longer in your account list.
 
 The tap runs in the background. Your command keeps its input, output and exit
-code. Figures update after a message in Claude Code's terminal UI here; use
-from other devices appears at the next message. Project or managed status
-lines can override the user line and stop the tap in that project.
+code. Figures from the status line are as of the last terminal Claude Code reply.
+Usage from Orca, agt jobs, claude.ai and other devices appears after your next
+terminal Claude Code reply on this account. Project or managed status lines can
+override the user line and stop the tap in that project.
+
+Live files written by 0.21.0 are ignored after the update until your next terminal reply, so a profile can briefly show `No terminal usage received yet` or a job figure.
 
 Claude accounts in `agt usage --json` and `agt doctor --json` have a
 `statusline_usage` field. Reading either command never installs or repairs a tap.
@@ -154,8 +158,9 @@ Each account has `name`, `enabled`, `availability`, `reason`, `until` (epoch or
 null), `running_jobs`, `busy_slots` (occupied account execution leases), `capacity`
 (the account's concurrent-job cap, or null for unlimited), `unhealthy_models`,
 and `windows`. Each window carries `name`, `label`, `used_percent`, `resets_at`,
-`observed_at`, `stale` and `reset`. Shared logins share usage and cooldowns;
-each window keeps its source observation time.
+`observed_at`, `source`, `stale` and `reset`. Shared logins share usage and cooldowns;
+each window keeps its source observation time. `source` is `terminal` (from a terminal Claude Code reply), `job` (from an agt job) or `null` (other providers).
+The field is additive; older output omits it.
 
 Availability uses this precedence: `off`, `logged_out`, `unhealthy`, `cooling`,
 `recovering`, `busy`, `ok`, `unknown`. Model-only health circuits appear in

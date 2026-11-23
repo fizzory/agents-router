@@ -2,6 +2,7 @@
 
 import contextlib
 import io
+import itertools
 import json
 import os
 from pathlib import Path
@@ -10,10 +11,10 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from helpers import TempHome
+from claude_live_helpers import ClaudeLiveFixture
 from generate_usage_fixture import FIXTURE, NOW, POPOVER_FOLDER, fixture_text, fixture_texts, popover_states_text
 
-from agents_router import accounts, cli, health, profiles, usage_snapshot
+from agents_router import accounts, cli, health, usage_snapshot, usage_tap, window_order
 from agents_router.config import Account, Config, RUNTIMES, RuntimeConfig, load_config
 from agents_router.fsutil import lock_busy, read_json, try_lock, unlock, write_json
 
@@ -38,7 +39,7 @@ class PopoverFixtureTests(unittest.TestCase):
         self.assertEqual((POPOVER_FOLDER / "states.json").read_text(), popover_states_text())
 
 
-class UsageTests(TempHome):
+class UsageTests(ClaudeLiveFixture):
     def setUp(self):
         super().setUp()
         self.now = NOW
@@ -82,6 +83,89 @@ class UsageTests(TempHome):
 
     def entries(self):
         return {a["name"]: a for p in self.report()["providers"] for a in p["accounts"] if p["runtime"] == "claude"}
+
+    def live(self, account, windows):
+        login = self.claude_json(account, "usage-source")
+        super().live(account, windows, login)
+        return login
+
+    def test_window_source_tracks_terminal_and_job_winners_in_both_arrival_orders(self):
+        for winner in ("terminal", "job"):
+            terminal = {"utilization": .2, "resets_at": self.now + 3600,
+                        "observed_at": self.now - (20 if winner == "terminal" else 120)}
+            job = {"utilization": .8, "resets_at": self.now + 3600,
+                   "observed_at": self.now - (20 if winner == "job" else 120)}
+            for order in itertools.permutations(("terminal", "job")):
+                with self.subTest(winner=winner, arrival=order):
+                    self.usage({})
+                    accounts._live_path(self.a.home).unlink(missing_ok=True)
+                    for source in order:
+                        if source == "terminal":
+                            self.live(self.a, {"five_hour": terminal})
+                        else:
+                            self.usage({self.a.name: {"windows": {"five_hour": job}}})
+                    window, = self.entries()[self.a.name]["windows"]
+                    self.assertEqual((window.get("source"), window["observed_at"], window["used_percent"]),
+                                     (winner, self.now - 20, 20 if winner == "terminal" else 80))
+
+    def test_window_sources_are_per_window_and_private_metadata_stays_private(self):
+        login = self.live(self.a, {
+            "five_hour": {"utilization": .2, "resets_at": self.now + 3600, "observed_at": self.now - 20,
+                          "session_id": "private-session", "claude_version": "2.1.0"},
+            "seven_day": {"utilization": .4, "resets_at": self.now + 86400, "observed_at": self.now - 120}})
+        self.usage({self.a.name: {"login": login, "windows": {
+            "five_hour": {"utilization": .8, "resets_at": self.now + 3600, "observed_at": self.now - 120},
+            "seven_day": {"utilization": .6, "resets_at": self.now + 86400, "observed_at": self.now - 30}}}})
+        report = self.report()
+        account = next(a for p in report["providers"] if p["runtime"] == "claude"
+                       for a in p["accounts"] if a["name"] == self.a.name)
+        self.assertEqual({w["name"]: (w.get("source"), w["observed_at"]) for w in account["windows"]},
+                         {"five_hour": ("terminal", self.now - 20), "seven_day": ("job", self.now - 30)})
+        for private in ("observed_at_source", "session_id", "claude_version", "private-session"):
+            self.assertNotIn(private, json.dumps(report))
+
+    def test_deterministic_job_terminal_metadata_ties_project_the_job_winner(self):
+        job = {"utilization": .2, "resets_at": self.now + 3600, "observed_at": self.now - 20}
+        terminal = {**job, "observed_at_source": usage_tap.OBSERVED_AT_SOURCE}
+        for order in itertools.permutations((job, terminal)):
+            with self.subTest(arrival=order):
+                merged = window_order.merge_windows(*({"five_hour": w} for w in order), now=self.now)
+                self.assertEqual(merged["five_hour"], job)
+                projected, = usage_snapshot._windows("claude", {"windows": merged}, self.now)
+                self.assertEqual(projected.get("source"), "job")
+        self.live(self.a, {"five_hour": terminal})
+        self.usage({self.a.name: {"windows": {"five_hour": job}}})
+        window, = self.entries()[self.a.name]["windows"]
+        self.assertEqual(window.get("source"), "job")
+
+    def test_deterministic_live_metadata_ties_across_folders_and_arrival_orders(self):
+        window = {"utilization": .2, "resets_at": self.now + 3600, "observed_at": self.now - 20}
+        for metadata in (({"session_id": "session-a"}, {"session_id": "session-z"}),
+                         ({"claude_version": "2.1.0"}, {"claude_version": "2.2.0"}),
+                         ({"session_id": "session-a", "claude_version": "2.1.0"},
+                          {"session_id": "session-z", "claude_version": "2.2.0"})):
+            candidates = [{**window, **extra} for extra in metadata]
+            expected = {**candidates[1], "observed_at_source": usage_tap.OBSERVED_AT_SOURCE}
+            for order in itertools.permutations(candidates):
+                with self.subTest(arrival=order):
+                    for account, candidate in zip((self.a, self.b), order):
+                        self.live(account, {"five_hour": candidate})
+                    for account in (self.a, self.b):
+                        record = accounts.account_record(self.runtime, account, {}, now=self.now)
+                        self.assertEqual(record["windows"]["five_hour"], expected)
+                    for account in self.entries().values():
+                        projected, = account["windows"]
+                        self.assertEqual(projected.get("source"), "terminal")
+                        self.assertEqual(projected["observed_at"], self.now - 20)
+
+    def test_non_claude_window_source_is_explicitly_null(self):
+        self.usage({"primary": {"windows": {"five_hour": {
+            "utilization": .5, "observed_at": self.now - 60,
+            "observed_at_source": usage_tap.OBSERVED_AT_SOURCE}}}}, runtime="codex")
+        codex = next(p for p in self.report()["providers"] if p["runtime"] == "codex")
+        window, = codex["accounts"][0]["windows"]
+        self.assertIn("source", window)
+        self.assertIsNone(window["source"])
 
     def slot(self, account=None, index=0, owner=None, runtime=None):
         path = accounts._slot_path(runtime or self.runtime, account or self.a, index)
@@ -168,6 +252,7 @@ class UsageTests(TempHome):
         self.assertEqual([w["used_percent"] for w in windows], [17, 70, 0])
         self.assertEqual([w["reset"] for w in windows], [False, True, False])
         self.assertEqual([w["stale"] for w in windows], [False, True, False])
+        self.assertEqual([w.get("source") for w in windows], ["job", "job", "job"])  # legacy job windows
         self.assertIsNone(windows[-1]["resets_at"])
         self.usage({self.a.name: {"windows": {"five_hour": {"utilization": 1}}}})
         self.assertIsNone(self.entries()[self.a.name]["windows"][0]["observed_at"])

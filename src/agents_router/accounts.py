@@ -220,12 +220,14 @@ def account_record(runtime: RuntimeConfig, account: Account, usage: dict[str, An
                    live_identity: tuple[RuntimeConfig, Account] | None = None) -> dict[str, Any] | None:
     """The account's usage record, merged with every folder that has the same login.
 
-    Folders logged in to one account share its limits, so each window's newest observation
-    (`window_order.window_key`) and the latest cooldown of any of them hold for all. Merged
-    windows carry their own `observed_at`, since the merged record has no `updated`.
+    Folders logged in to one account share its limits, so each window's greatest `window_order.window_key`
+    (open or no reset, observation time, reset minute, utilization, canonical content) and the latest cooldown
+    of any of them hold for all. Merged windows carry their own `observed_at`, since the merged record has no `updated`.
 
     Claude Code's status line figures (`usage_tap`) fold in the same way, from the live file of
-    every folder in the login group that names the account's login. Reading never writes, and
+    every folder in the login group that names the account's login. Only windows marked with
+    `usage_tap.OBSERVED_AT_SOURCE` count; legacy observations are ignored. Their marker and checked
+    session metadata survive the fold, private to live state. Reading never writes, and
     never changes `usage` or a record in it.
     `live_identity` keeps the snapshot's historical job grouping separate from the current login that trusts live files.
     """
@@ -304,15 +306,16 @@ def _live_path(home: Path) -> Path:
     return state_dir() / "claude-live" / f"{_home_key(home)}.json"
 
 
-def _live_window(window: Any) -> dict[str, float] | None:
-    """A live window rebuilt from its checked numbers, or None when any is missing or bad."""
+def _live_window(window: Any) -> dict[str, Any] | None:
+    """A marked live window rebuilt from checked numbers and bounded session metadata; legacy windows are ignored."""
 
-    if not isinstance(window, dict):
+    if not isinstance(window, dict) or window.get("observed_at_source") != usage_tap.OBSERVED_AT_SOURCE:
         return None
     used, resets, observed = (window_order._finite(window.get(key)) for key in ("utilization", "resets_at", "observed_at"))
     if used is None or used < 0 or resets is None or observed is None:
         return None
-    return {"utilization": used, "resets_at": resets, "observed_at": observed}
+    return {"utilization": used, "resets_at": resets, "observed_at": observed,
+            "observed_at_source": usage_tap.OBSERVED_AT_SOURCE, **usage_tap.window_metadata(window)}
 
 
 def _parse_live(data: dict[str, Any]) -> LiveUsage:

@@ -518,15 +518,36 @@ arrays. Failed reads are included in `skipped`. Regenerate its fixture with
 Usage accounts may include `statusline_usage`: `live`, `missing`, `replaced`,
 `off`, `unset`, `unsupported` or `no_limits`. Rust preserves this optional
 string when passing usage to either page; older producers may omit it.
-`live` or absent keeps the detail context as `Updated <age>`. `no_limits`
-adds `No usage limits on this login`; the other values, including unknown
-future strings, add `Usage updates only from agt's jobs`. Settings also shows
-`agt setup` for `missing` and `replaced`. These notes do not change readiness.
+Claude's detail context starts with `As of your last terminal Claude Code reply,
+<age>` for a terminal figure, or `Last recorded usage, <age>` for an unverified
+origin. Its age is the displayed window's own `observed_at`. `live`, absent
+or unknown values keep this line. `missing` and `replaced` append
+` · Terminal updates need repair`; `off` appends ` · Terminal updates off`;
+`unset` appends ` · Terminal updates not set up`; `unsupported` appends
+` · Terminal updates unavailable on Windows`. When a figure is shown,
+`no_limits` keeps its displayed window's source and age and appends
+` · No usage limits on this login`; without a figure, it reads
+`No usage limits on this login` alone. A read snapshot with no windows reads
+`No terminal usage received yet`, with the same suffixes. Before a snapshot
+arrives, or if no snapshot can be read, Settings shows no source line.
+Settings shows the available context once below
+the row, always visible and wrapping, followed by `agt setup` for `missing`
+and `replaced`. Jobs, problem or reason follow with ` · `. These notes do not
+change readiness. Codex keeps its existing context and `Updated <age>`.
+
+Each usage window may include `source` (`terminal`, `job` or null); Rust preserves
+this optional string, including future values, and accepts older producers that omit it.
+Only `source: "terminal"` gets terminal wording. Jobs, null, missing and
+unknown sources all use `Last recorded usage, <age>`.
 
 A window with `reset: true`, including one whose reset time passes before
 render, is unknown since reset. Its slot shows `– <age>` with no window tag,
 the figure is dimmed, and its meter is a dimmed empty dashed track. The row
-prefers a known window when one remains. Detail says `Reset, not seen since`;
+prefers a known window when one remains. Claude detail says
+`5 hours  –  Unknown since reset · Last seen <age>`. With only reset windows,
+its context is `Last terminal Claude Code usage seen <age>` for a terminal
+source, otherwise `Last recorded usage, <age>`. Codex detail keeps
+`Reset, not seen since`;
 the accessible label names the window and says `unknown since reset, last
 seen <age>`. Popover and Settings share these rules.
 
@@ -700,8 +721,20 @@ Existing rows never stagger on refresh; new rows enter 24 ms apart, with the
 delay capped at eight rows. Refresh shows a check for 1500 ms after success.
 The summary counts solid marks through one readiness rule, including running
 accounts with spare execution slots. Full accounts keep a waiting half disc.
-Quota slots name their window and show a countdown; stale slots show compact
-ages such as `2h ago`, also used by shared Settings rows. Read errors appear
+Claude quota slots use two right-aligned 14px lines in the existing 96 × 28px
+area: window tag and figure above, muted observation age below. Fresh and
+stale figures both show age, such as `5h 65%` above `12m ago`. Missing
+observation time reads `age unknown` and is stale. Figures older than 30
+minutes dim. Each window keeps its own age during read failures, independent
+of newer fetch times. Detail keeps reset clocks, such as
+`5 hours  65%  Resets 14:20 · 12m ago`. Settings keeps its reset slot and
+shows source and age below the row without ellipsis when usage is available,
+including alongside a no-limits note when a figure is shown. Spoken summaries include
+`5h 65%, as of your last terminal Claude Code reply, 12m ago, resets 14:20`,
+adding `stale, ` before the source for older figures; unverified sources use
+`last recorded usage, <age>`. Codex keeps its countdown and stale-age slots.
+Refresh's tooltip says `Refresh ⌘R · Read <age>` using the fetch time.
+Read errors appear
 under the header with Retry and the retained data's age; retained rows dim.
 Popover rows have no manual Check button. Settings keeps its Check button.
 

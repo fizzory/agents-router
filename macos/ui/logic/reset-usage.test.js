@@ -10,7 +10,7 @@ const rawAccount = () => ({ name: 'claude-ntb', enabled: true, availability: 'ok
   reason: null, problem: null, until: null, running_jobs: 0, busy_slots: 0, capacity: null,
   windows: ['five_hour', 'seven_day'].map((name, index) => ({ name, label: index ? 'week' : '5h',
     used_percent: 0, observed_at: seen, resets_at: seen + (index ? 7 * 86400 : 5 * 3600),
-    reset: true, stale: false })) });
+    reset: true, stale: false, source: 'terminal' })) });
 const snapshot = (account = rawAccount()) => ({ schema_version: 1, generated_at: now,
   providers: [{ runtime: 'claude', label: 'Claude', accounts: [account] }] });
 const settingsRow = (account = rawAccount(), time = now) => {
@@ -28,8 +28,8 @@ test('S3: claude-ntb is unknown 20d after reset in popover and Settings, never 0
     assert.equal(row.windowTag, '');
     assert.equal(row.stale, true); // The figure dims even though each producer stale flag is false.
     assert.ok(row.meters.every(meter => meter.reset && meter.dimmed && meter.percent === 0));
-    assert.deepEqual(row.detailLines, ['5 hours  –  Reset, not seen since', 'Week  –  Reset, not seen since']);
-    assert.equal(row.detailContext, 'Updated 20d ago');
+    assert.deepEqual(row.detailLines, ['5 hours  –  Unknown since reset · Last seen 20d ago', 'Week  –  Unknown since reset · Last seen 20d ago']);
+    assert.equal(row.detailContext, 'Last terminal Claude Code usage seen 20d ago');
     assert.equal(row.accessibleLabel, 'Claude claude-ntb. Available. 5h unknown since reset, last seen 20d ago. Week unknown since reset, last seen 20d ago. Open in Settings.');
     assert.doesNotMatch([row.slot, row.tooltip, ...row.detailLines].join(' '), /0%/);
   }
@@ -70,12 +70,24 @@ test('S3: a usage read failure cannot make an unknown window look recently obser
   assert.match(row.tooltip, /last seen 20d ago/);
 });
 
+for (const source of ['job', null, undefined, 'future-source']) {
+  test(`S3: reset-only ${source ?? 'missing/null'} origin stays unverified`, () => {
+    const account = rawAccount();
+    account.windows.forEach(window => { window.source = source; });
+    for (const row of [settingsRow(account), popoverModel({ usage: snapshot(account) }, now).rows[0]]) {
+      assert.equal(row.detailContext, 'Last recorded usage, 20d ago');
+      assert.equal(row.slot, '– 20d ago');
+      assert.equal(row.tooltip, 'Claude claude-ntb. Available. 5h unknown since reset, last seen 20d ago. Week unknown since reset, last seen 20d ago');
+    }
+  });
+}
+
 for (const state of ['missing', 'replaced', 'off', 'unset', 'unsupported', 'no_limits', 'future-state', 'live', undefined]) {
   test(`S3: statusline_usage ${state ?? 'absent'} supplies its context without changing readiness`, () => {
     const account = { ...rawAccount(), ...(state === undefined ? {} : { statusline_usage: state }) };
-    const expected = state === 'no_limits' ? 'No usage limits on this login · Updated 20d ago'
-      : state === undefined || state === 'live' ? 'Updated 20d ago'
-      : "Usage updates only from agt's jobs · Updated 20d ago";
+    const suffix = { missing: 'Terminal updates need repair', replaced: 'Terminal updates need repair', off: 'Terminal updates off',
+      unset: 'Terminal updates not set up', unsupported: 'Terminal updates unavailable on Windows', no_limits: 'No usage limits on this login' }[state];
+    const expected = ['Last terminal Claude Code usage seen 20d ago', suffix].filter(Boolean).join(' · ');
     for (const row of [settingsRow(account), popoverModel({ usage: snapshot(account) }, now).rows[0]]) {
       assert.equal(row.detailContext, expected);
       assert.equal(row.label, 'Available');

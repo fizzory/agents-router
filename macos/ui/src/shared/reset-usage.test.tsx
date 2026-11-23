@@ -1,8 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { envelope, NOW, renderPopover, row } from '../test/popover';
-import { envelope as settingsEnvelope, NOW as SETTINGS_NOW, renderSettings } from '../test/settings';
+import { envelope as settingsEnvelope, fakeSettingsApi, NOW as SETTINGS_NOW, renderSettings, settle } from '../test/settings';
+import { SettingsApp } from '../settings/SettingsApp';
 import sharedStyles from './shared.css?raw';
+import settingsStyles from '../settings/settings.css?raw';
 import { UsageGauge } from './UsageGauge';
 import type { Meter } from './types';
 
@@ -13,7 +15,7 @@ const usage = (now: number, name = 'claude-ntb', statusline_usage?: string) => (
     running_jobs: 0, busy_slots: 0, capacity: null, statusline_usage,
     windows: ['five_hour', 'seven_day'].map((name, index) => ({ name, label: index ? 'week' : '5h',
       used_percent: 0, reset: true, stale: false, observed_at: now - 20 * 86400,
-      resets_at: now - (index ? 13 : 19) * 86400 })),
+      resets_at: now - (index ? 13 : 19) * 86400, source: 'terminal' as string | null | undefined })),
   }] }],
 });
 
@@ -36,9 +38,9 @@ describe('S3 unknown since reset', () => {
     const link = target.querySelector<HTMLButtonElement>('.row-link')!;
     expect(link.getAttribute('aria-label')).toBe('Claude claude-ntb. Available. 5h unknown since reset, last seen 20d ago. Week unknown since reset, last seen 20d ago. Show account detail.');
     fireEvent.click(link);
-    expect(screen.getByText('5 hours – Reset, not seen since')).toBeTruthy();
-    expect(screen.getByText('Week – Reset, not seen since')).toBeTruthy();
-    expect(screen.getByText('Updated 20d ago')).toBeTruthy();
+    expect(screen.getByText('5 hours – Unknown since reset · Last seen 20d ago')).toBeTruthy();
+    expect(screen.getByText('Week – Unknown since reset · Last seen 20d ago')).toBeTruthy();
+    expect(screen.getByText('Last terminal Claude Code usage seen 20d ago')).toBeTruthy();
     expect(target.textContent).not.toContain('0%');
   });
 
@@ -53,7 +55,7 @@ describe('S3 unknown since reset', () => {
       expect(target.querySelectorAll('.gauge-bar.is-reset.is-stale')).toHaveLength(2);
       if (state === 'missing' || state === 'replaced') {
         expect(target.querySelector('code')?.textContent).toBe('agt setup');
-        expect(target.querySelector('.account-reason')?.textContent).toContain("Usage updates only from agt's jobs · Updated 20d ago");
+        expect(target.querySelector('.account-usage-context')?.textContent).toBe('Last terminal Claude Code usage seen 20d ago · Terminal updates need repair · agt setup');
       } else expect(target.querySelector('code')).toBeNull();
       expect(target.querySelector('.row-slot')?.textContent).not.toContain('0%');
     }
@@ -70,5 +72,113 @@ describe('S3 unknown since reset', () => {
     rerender(<UsageGauge fresh meters={[{ ...known, percent: 12 }]} />);
     expect(document.querySelector('.gauge-fill')).toBeTruthy();
     expect(document.querySelector('.is-changing')).toBeNull();
+  });
+});
+
+describe('Settings Claude source and age', () => {
+  it('keeps the reset slot and always shows one wrapping source line with the displayed window age and repair command', async () => {
+    render(<style>{settingsStyles}</style>);
+    const view = await renderSettings({ target: { pane: 'accounts' } });
+    const now = SETTINGS_NOW / 1000;
+    const clock = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+    let generation = 2;
+    for (const source of ['terminal', 'job', null, undefined, 'future-source']) {
+      for (const [state, suffix] of [
+        ['live', ''], ['missing', ' · Terminal updates need repair'], ['replaced', ' · Terminal updates need repair'],
+        ['off', ' · Terminal updates off'], ['unset', ' · Terminal updates not set up'],
+        ['unsupported', ' · Terminal updates unavailable on Windows'], ['no_limits', ' · No usage limits on this login'],
+      ]) {
+        const data = usage(now, 'work', state);
+        const account = data.providers[0]!.accounts[0]!;
+        account.windows = [
+          { ...account.windows[0]!, used_percent: 34, reset: false, observed_at: now - 60, resets_at: now + 3600, source: 'terminal' },
+          { ...account.windows[1]!, used_percent: 65, reset: false, observed_at: now - 7200, resets_at: now + 86400, source },
+        ];
+        await view.emit('onSettingsStatus', { ...settingsEnvelope(generation++), usage: data });
+        const target = document.querySelector('.settings-account[data-key="claude:work"]')!;
+        const line = target.querySelector('.account-usage-context')!;
+        const context = `${source === 'terminal' ? 'As of your last terminal Claude Code reply' : 'Last recorded usage'}, 2h ago${suffix}`;
+        const repair = state === 'missing' || state === 'replaced' ? ' · agt setup' : '';
+        expect(target.querySelectorAll('.account-usage-context')).toHaveLength(1);
+        expect(line.textContent).toBe(context + repair);
+        expect(line.closest('.account-detail')).toBeNull();
+        expect((line as HTMLElement).hidden).toBe(false);
+        expect(getComputedStyle(line).whiteSpace).toBe('normal');
+        expect(getComputedStyle(line).textOverflow).toBe('clip');
+        expect(getComputedStyle(line).overflow).toBe('visible');
+        expect(target.querySelector('.figure')?.textContent).toBe('65%');
+        expect(target.querySelector('.reset-time')?.textContent).toBe('Sat');
+        expect(target.querySelector('.usage-figure-line')).toBeNull();
+        expect(target.querySelector('.visually-hidden')?.textContent).toBe(`Claude work. Available. 5h 34%, as of your last terminal Claude Code reply, 1m ago, resets ${clock(now + 3600)}. Week 65%, stale, ${source === 'terminal' ? 'as of your last terminal Claude Code reply' : 'last recorded usage'}, 2h ago, resets Sat ${clock(now + 86400)}`);
+      }
+    }
+  });
+
+  it('shows no source line before a snapshot arrives, while its first read is pending, or after a failed read', async () => {
+    const view = fakeSettingsApi({ target: { pane: 'accounts' } });
+    view.api.getSnapshot.mockReturnValue(new Promise(() => {}));
+    render(<SettingsApp api={view.api} now={() => SETTINGS_NOW} timeZone="UTC" />);
+    await settle();
+    const expectUnavailable = () => {
+      const rows = [...document.querySelectorAll('.settings-account[data-key^="claude:"]')];
+      expect(rows.length).toBeGreaterThan(0);
+      for (const target of rows) {
+        expect(target.querySelector('.account-usage-context')).toBeNull();
+        expect(target.querySelector('.figure')).toBeNull();
+        expect(target.textContent).not.toContain('No terminal usage received yet');
+      }
+    };
+    expectUnavailable();
+    await view.emit('onSettingsStatus', { ...settingsEnvelope(2), usage: null, reading: true });
+    expectUnavailable();
+    await view.emit('onSettingsStatus', { ...settingsEnvelope(3), usage: null, error: "Can't read agt", reading: false });
+    expectUnavailable();
+  });
+
+  it('shows a read-but-empty context for every terminal-update state without a figure', async () => {
+    const view = await renderSettings({ target: { pane: 'accounts' } });
+    for (const [index, [state, suffix]] of [
+      [undefined, ''], ['live', ''], ['future-state', ''],
+      ['missing', ' · Terminal updates need repair · agt setup'], ['replaced', ' · Terminal updates need repair · agt setup'],
+      ['off', ' · Terminal updates off'], ['unset', ' · Terminal updates not set up'],
+      ['unsupported', ' · Terminal updates unavailable on Windows'], ['no_limits', ''],
+    ].entries()) {
+      const data = usage(SETTINGS_NOW / 1000, 'work', state);
+      data.providers[0]!.accounts[0]!.windows = [];
+      await view.emit('onSettingsStatus', { ...settingsEnvelope(index + 2), usage: data });
+      const target = document.querySelector('.settings-account[data-key="claude:work"]')!;
+      expect(target.querySelector('.figure')).toBeNull();
+      expect(target.querySelector('.account-usage-context')?.textContent).toBe(state === 'no_limits'
+        ? 'No usage limits on this login' : `No terminal usage received yet${suffix}`);
+    }
+  });
+});
+
+describe('Popover Claude no-limits context', () => {
+  for (const source of ['terminal', 'job']) {
+    it(`keeps the displayed ${source} figure source and age`, async () => {
+      const data = usage(NOW, 'claude-ntb', 'no_limits');
+      const account = data.providers[0]!.accounts[0]!;
+      account.windows = [
+        { ...account.windows[0]!, used_percent: 34, reset: false, observed_at: NOW - 60, resets_at: NOW + 3600, source: 'terminal' },
+        { ...account.windows[1]!, used_percent: 65, reset: false, observed_at: NOW - 7200, resets_at: NOW + 86400, source },
+      ];
+      await renderPopover({ ...envelope(null), usage: data });
+      const target = row('claude:claude-ntb')!;
+      expect(target.querySelector('.figure')?.textContent).toBe('65%');
+      expect(target.querySelector('.observation-age')?.textContent).toBe('2h ago');
+      fireEvent.click(target.querySelector<HTMLButtonElement>('.row-link')!);
+      expect(target.querySelector('.account-context > span')?.textContent).toBe(`${source === 'terminal' ? 'As of your last terminal Claude Code reply' : 'Last recorded usage'}, 2h ago · No usage limits on this login`);
+    });
+  }
+
+  it('shows the no-limits context alone without a figure', async () => {
+    const data = usage(NOW, 'claude-ntb', 'no_limits');
+    data.providers[0]!.accounts[0]!.windows = [];
+    await renderPopover({ ...envelope(null), usage: data });
+    const target = row('claude:claude-ntb')!;
+    expect(target.querySelector('.figure')).toBeNull();
+    fireEvent.click(target.querySelector<HTMLButtonElement>('.row-link')!);
+    expect(target.querySelector('.account-context > span')?.textContent).toBe('No usage limits on this login');
   });
 });

@@ -90,6 +90,9 @@
 .row-slot.is-stale .figure { opacity: .5; }
 .row-slot .figure.is-warn { font-weight: 600; color: var(--signal-warn); }
 .reset-time { flex: 0 0 48px; width: 48px; overflow: hidden; color: var(--ink-muted); text-overflow: ellipsis; }
+.row-slot.is-claude-usage { flex-direction: column; align-items: flex-end; gap: 0; height: 28px; }
+.usage-figure-line { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); height: 14px; }
+.row-slot.is-claude-usage .observation-age { flex: 0 0 14px; width: 100%; height: 14px; overflow: visible; color: var(--ink-muted); font: var(--type-small); text-align: right; white-space: nowrap; }
 .state-word { overflow: hidden; color: var(--ink-muted); text-overflow: ellipsis; }
 .row-action { z-index: 2; }
 

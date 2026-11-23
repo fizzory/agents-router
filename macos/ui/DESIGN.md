@@ -226,7 +226,8 @@ pick. Detail opens in place.
 The header is 32px tall. Put the summary on the left in `--type-title`.
 Put Refresh, Settings and More icon buttons on the right. Keep the tooltips
 `Refresh ⌘R`, `Settings ⌘,` and `More`. Add freshness to Refresh's tooltip:
-`Refresh ⌘R · Updated 2m ago`.
+`Refresh ⌘R · Read 2m ago`. This is the last successful read's age, separate
+from each window's observation age.
 
 | Condition | Summary |
 | --- | --- |
@@ -265,7 +266,7 @@ leaves 348px for the row. Read left to right:
 | Status mark | 8px; shape and state label from the table below |
 | Name | About 150px, flexible; 12px / 16px, middle ellipsis |
 | Gauge | 56 × 10px; two 4px pill bars, 2px apart; 5 hours above week |
-| Slot | 96px, right-aligned; window tag, figure and countdown, or state/action |
+| Slot | 96px, right-aligned; Claude window tag and figure above observation age; Codex countdown, or state/action |
 
 The figure names the busier usage window. Its bar uses `--gauge-main`, with
 `--signal-warn` at 95% or above. The other bar uses `--gauge-other`.
@@ -291,14 +292,29 @@ colour alone.
 | --- | --- |
 | Window tag | `5h` or `wk`; 14px column, muted 11px |
 | Figure | `42%`; 32px column, `--type-figure`, rounded tabular digits |
-| Countdown | 40px column, muted 11px; `42m`, `2h 10m`, `3d 4h`, `<1m` |
-| Stale age | Replace the countdown with `4m ago` or `2h ago`; dim figure and bars |
+| Claude observation age | Second line, muted `--type-small`; `12m ago`, `2h ago`, or `age unknown` |
+| Codex countdown | 40px column, muted 11px; `42m`, `2h 10m`, `3d 4h`, `<1m` |
+| Stale | Dim figure and bars; Claude keeps its observation age; Codex replaces its countdown with age |
 | Unknown since reset | – plus age; dim figure and bars |
 
-For example, show `wk 86% 2d 22h` or `5h 42% 2h 10m`. Countdowns express
-time remaining. Use clock times in detail and return states. Age units have
-no space before the suffix: `2m ago`, `2h ago`, `3d ago`. This `ageText`
-format also applies to Settings rows in Phase 1.
+Claude usage slots occupy two 14px lines within the existing 96px × 28px
+area: window tag and figure above, observation age below. Show age for fresh
+and stale figures; missing time reads `age unknown` and is stale. Reset
+times remain in detail. For example, `5h 65%` above `12m ago`, or `wk 86%`
+above `2h ago`. Unknown since reset shows `–` above `20d ago`, with no tag.
+The age always comes from that window's `observed_at`, including during read
+failures. Figures older than 30 minutes dim; younger figures keep their age.
+
+Codex keeps its countdown, such as `5h 42% 2h 10m`. Countdowns express time
+remaining. Use clock times in detail and return states. Age units have no
+space before the suffix: `2m ago`, `2h ago`, `3d ago`.
+
+Settings retains its existing reset slot. Every visible Claude figure has
+an always-visible source and age line below its row. This line may wrap;
+never ellipsize away the source or age. Render it once and keep any `agt setup`
+repair command after it. Show the no-terminal and no-limits contexts below
+rows without a figure too, after a usage snapshot has been read. Before a
+snapshot arrives, or if no snapshot can be read, show no source line.
 
 | State | Slot text or action |
 | --- | --- |
@@ -326,11 +342,32 @@ Use 11px / 14px lines, indented to the name:
 
 | Line | Example |
 | --- | --- |
-| Five-hour window | `5 hours  17%  Resets 14:20` |
-| Weekly window | `Week  86%  Resets Wed 09:00` |
-| Context and freshness | `2 of 4 jobs · Updated 2m ago`, or the account's reason and age |
-| No jobs or reason | `Updated 2m ago` |
+| Claude five-hour window | `5 hours  65%  Resets 14:20 · 12m ago` |
+| Claude weekly window | `Week  86%  Resets Wed 09:00 · 2h ago` |
+| Claude unknown since reset | `5 hours  –  Unknown since reset · Last seen 20d ago` |
+| Claude terminal source | `As of your last terminal Claude Code reply, 12m ago` |
+| Claude unverified source | `Last recorded usage, 2h ago` |
+| Claude with a read snapshot and no windows | `No terminal usage received yet` |
+| Claude without a readable usage snapshot | No source line |
+| Claude with only reset windows, terminal source | `Last terminal Claude Code usage seen 20d ago` |
+| Codex windows | `5 hours  17%  Resets 14:20`, `Week  86%  Resets Wed 09:00` |
+| Codex context | `2 of 4 jobs · Updated 2m ago`, or the account's reason and age; `Updated 2m ago` alone |
 | Kiro or Antigravity | `No usage reported · Updated 2m ago` |
+
+Claude uses the displayed window's source and observation age for context.
+Only `source: "terminal"` gets terminal wording. `job`, null, missing and
+unknown sources use `Last recorded usage, <age>`, including reset windows.
+Append jobs, problem or reason with ` · `. Do not add `Updated <age>`.
+
+| Claude `statusline_usage` | Context suffix or replacement |
+| --- | --- |
+| `live`, absent or unknown | Keep the source line |
+| `missing` or `replaced` | ` · Terminal updates need repair` |
+| `off` | ` · Terminal updates off` |
+| `unset` | ` · Terminal updates not set up` |
+| `unsupported` | ` · Terminal updates unavailable on Windows` |
+| `no_limits`, figure shown | Keep the displayed window's source and age, then append ` · No usage limits on this login` |
+| `no_limits`, no figure | `No usage limits on this login` alone |
 
 Put inline `Settings…` at the right of the last line. It opens that account
 in Settings. Always include a reset's time; a weekday alone is incomplete.
@@ -373,7 +410,8 @@ Put `Retry` at the right. While reading, replace it with `Retrying…` at the
 same width. Refresh already turns for that read. For missing or old agt,
 use `Install…` or `Repair…`; both open Settings.
 
-Keep the last values and dim the rows as stale. Usage slots show age instead
+Keep the last values and dim the rows as stale. Claude keeps each window's
+observation age; a read never freshens it. Codex usage slots show age instead
 of countdown, such as `4m ago`. Timed return states keep `Back 13:05`.
 
 ### Update row
@@ -424,6 +462,11 @@ Every button has a visible accent `:focus-visible` outline and its accessible
 name. Keep icon-button tooltips and all accessible labels. Announce copy
 success in a polite live region. Row state, quota window, figure, reset and
 reason remain available to screen readers after row tooltips are removed.
+Claude's fresh window says `5h 65%, as of your last terminal Claude Code reply,
+12m ago, resets 14:20`. A stale window adds `stale, ` before its source.
+Unverified origins say `last recorded usage, 2h ago`; reset windows keep
+`5h unknown since reset, last seen 20d ago`. Settings' spoken summary uses
+the same window words.
 
 ### Popover motion
 

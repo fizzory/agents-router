@@ -68,6 +68,23 @@ test('account names stay canonical; usage states take precedence over auth fallb
   const [model] = accountModels(list, fixture('usage-popover'), 1794337200);
   assert.equal(model.name, 'claude-work'); assert.equal(model.availability, 'ok'); assert.equal(model.figure, '86%');
 });
+test('Settings distinguishes unavailable usage from a successfully read empty snapshot in every terminal-update state', () => {
+  const now = 1794337200;
+  for (const statusline_usage of [undefined, 'live', 'missing', 'replaced', 'off', 'unset', 'unsupported', 'no_limits', 'future-state']) {
+    const account = { name: 'claude-work', enabled: true, can_toggle: true, statusline_usage, auth: { loggedIn: null } };
+    const list = { runtimes: [{ runtime: 'claude', accounts: [account] }] };
+    for (const usage of [null, undefined]) {
+      const [unavailable] = accountModels(list, usage, now);
+      assert.equal(unavailable.detailContext, '', `${statusline_usage}/${usage}`);
+      assert.equal(unavailable.usageSetupCommand, '');
+      assert.equal(unavailable.slot, 'Check');
+    }
+    const usage = { schema_version: 1, generated_at: now, providers: [{ runtime: 'claude', label: 'Claude', accounts: [{ ...account, windows: [], availability: 'ok', until: null }] }] };
+    const [empty] = accountModels(list, usage, now);
+    assert.match(empty.detailContext, statusline_usage === 'no_limits' ? /^No usage limits on this login$/ : /^No terminal usage received yet(?: · |$)/);
+    assert.equal(empty.figure, '');
+  }
+});
 test('Add account stays disabled until agt passes its current provider/name check', async () => {
   let finish; const gate = new AccountNameCheck(() => new Promise(resolve => { finish = resolve; }));
   const pending = gate.validate('claude', 'spare'); assert.equal(gate.state.valid, false); assert.equal(gate.state.checking, true);

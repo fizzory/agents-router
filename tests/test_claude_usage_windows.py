@@ -5,9 +5,9 @@ import json
 import unittest
 from unittest.mock import patch
 
-from helpers import TempHome
+from claude_live_helpers import ClaudeLiveFixture
 
-from agents_router import accounts, usage_snapshot, usage_view
+from agents_router import accounts, usage_snapshot, usage_tap, usage_view, window_order
 from agents_router.config import Account, Config, RUNTIMES, RuntimeConfig, load_config
 
 NOW = 1_800_000_000.0  # on a whole minute
@@ -29,8 +29,29 @@ C = {"five_hour": {"utilization": 0.2, "resets_at": NOW + HOUR + 20, "observed_a
      "no_reset": {"utilization": 0.8, "resets_at": NOW - 60, "observed_at": NOW - 20}}
 EXPECTED_NAMES = {"five_hour": C, "opus_week": B, "no_reset": A}
 
+# In each case the last source is the winner, regardless of arrival order.
+OBSERVATION_CASES = (
+    ("newer observation with an earlier reset", (
+        {"seven_day": {"utilization": 0.9, "resets_at": NOW + 5 * DAY, "observed_at": NOW - 4 * DAY}},
+        {"seven_day": {"utilization": 0.2, "resets_at": NOW + 3 * DAY, "observed_at": NOW - 60}},
+    )),
+    ("same reset minute, newer observation then higher utilization", (
+        {"five_hour": {"utilization": 0.9, "resets_at": NOW + HOUR + 25, "observed_at": NOW - 300}},
+        {"five_hour": {"utilization": 0.2, "resets_at": NOW + HOUR + 20, "observed_at": NOW - 60}},
+        {"five_hour": {"utilization": 0.3, "resets_at": NOW + HOUR + 5, "observed_at": NOW - 60}},
+    )),
+    ("open beats expired even with an older observation", (
+        {"five_hour": {"utilization": 0.9, "resets_at": NOW - 1, "observed_at": NOW}},
+        {"five_hour": {"utilization": 0.2, "resets_at": NOW + HOUR, "observed_at": NOW - 4 * DAY}},
+    )),
+    ("equal observations compare reset minute before utilization", (
+        {"five_hour": {"utilization": 0.9, "resets_at": NOW + HOUR, "observed_at": NOW - 60}},
+        {"five_hour": {"utilization": 0.2, "resets_at": NOW + 2 * HOUR, "observed_at": NOW - 60}},
+    )),
+)
 
-class ClaudeWindowTests(TempHome):
+
+class ClaudeWindowTests(ClaudeLiveFixture):
     def setUp(self):
         super().setUp()
         clock = patch("time.time", return_value=NOW)
@@ -155,6 +176,56 @@ class ClaudeWindowTests(TempHome):
             self.assertEqual(result, results[0])
             self.assertEqual({name: result.get(name) for name in expected}, expected)
             self.assertIn(result.get("seven_day"), tied)
+
+    def test_d_observation_first_merge_in_every_order(self):
+        for label, sources in OBSERVATION_CASES:
+            for order in itertools.permutations(sources):
+                with self.subTest(case=label, order=order):
+                    self.assertEqual(window_order.merge_windows(*order, now=NOW), sources[-1])
+                    merged = {}
+                    for source in order:
+                        merged = window_order.merge_windows(merged, source, now=NOW)
+                    self.assertEqual(merged, sources[-1])
+
+    def test_d_observation_first_job_updates_in_every_order(self):
+        for label, sources in OBSERVATION_CASES:
+            for order in itertools.permutations(sources):
+                with self.subTest(case=label, order=order):
+                    self.write_usage({})
+                    for source in order:
+                        accounts.update_usage("claude", "primary", windows=json.loads(json.dumps(source)))
+                    self.assertEqual(self.stored()["windows"], sources[-1])
+
+    def test_d_observation_first_live_fold_in_every_order(self):
+        login = self.login_hash("uuid-order")
+        runtime = RuntimeConfig("claude", self.root / "claude", _found=[])
+        runtime.accounts = [Account("one", self.primary, login=login),
+                            Account("two", self.root / "two", login=login)]
+        for account in runtime.accounts:
+            self.claude_json(account, "uuid-order")
+        for label, sources in OBSERVATION_CASES:
+            for order in itertools.permutations(sources):
+                with self.subTest(case=label, order=order):
+                    # Permute both the job/live roles and the live folders' order.
+                    for account in runtime.accounts:
+                        accounts._live_path(account.home).unlink(missing_ok=True)
+                    for account, source in zip(runtime.accounts, order[1:]):
+                        self.live(account, source, login)
+                    usage = {"one": {"login": login, "windows": order[0]}}
+                    # A live winner keeps its marker; a job winner never gains one.
+                    expected = {name: {**window, **({"observed_at_source": usage_tap.OBSERVED_AT_SOURCE}
+                                                  if sources[-1] is not order[0] else {})}
+                                for name, window in sources[-1].items()}
+                    for account in runtime.accounts:
+                        record = accounts.account_record(runtime, account, usage, now=NOW)
+                        self.assertEqual(record["windows"], expected)
+
+    def test_d_missing_observation_sorts_lowest_among_open_windows(self):
+        unknown = {"seven_day": {"utilization": 0.9, "resets_at": NOW + 5 * DAY}}
+        known = {"seven_day": {"utilization": 0.2, "resets_at": NOW + 3 * DAY, "observed_at": NOW - 60}}
+        for order in itertools.permutations((unknown, known)):
+            with self.subTest(order=order):
+                self.assertEqual(window_order.merge_windows(*order, now=NOW), known)
 
     def test_d_one_login_across_folders_uses_the_same_order(self):
         runtime = RuntimeConfig("claude", self.root / "claude", _found=[])

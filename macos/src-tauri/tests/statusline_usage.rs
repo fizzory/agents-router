@@ -66,3 +66,31 @@ fn older_usage_without_statusline_usage_still_decodes_for_the_page() {
     assert_eq!(account["name"], "claude-ntb");
     assert!(account.get("statusline_usage").is_none_or(Value::is_null));
 }
+
+#[test]
+fn window_source_survives_producer_to_page_snapshot_including_future_values() {
+    let mut account = json!({
+        "name": "claude-ntb", "enabled": true, "availability": "ok",
+        "reason": null, "until": null, "running_jobs": 0, "busy_slots": 0,
+        "capacity": null, "unhealthy_models": [], "problem": null,
+        "windows": [{"name": "five_hour", "label": "5h", "used_percent": 17,
+            "resets_at": 1800003600.0, "observed_at": 1799999940.0,
+            "stale": false, "reset": false}]
+    });
+    for source in [Some("terminal"), Some("job"), Some("future-source"), None] {
+        account["windows"][0]["source"] = json!(source);
+        let page = page_snapshot(&account.to_string());
+        let window = &page["usage"]["providers"][0]["accounts"][0]["windows"][0];
+        assert_eq!(window["observed_at"], 1799999940.0);
+        if let Some(source) = source {
+            assert_eq!(window["source"], source);
+        } else {
+            assert!(window.get("source").is_none_or(Value::is_null));
+        }
+    }
+    account["windows"][0].as_object_mut().unwrap().remove("source");
+    let page = page_snapshot(&account.to_string());
+    let window = &page["usage"]["providers"][0]["accounts"][0]["windows"][0];
+    assert_eq!(window["used_percent"], 17.0);
+    assert!(window.get("source").is_none_or(Value::is_null));
+}

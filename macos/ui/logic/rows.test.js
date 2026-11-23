@@ -19,7 +19,7 @@ test('S1: canonical name, fixed status text, and both windows with resets in the
   assert.equal(shown.state, '');
   assert.equal(shown.meters[0].dominant, false);
   assert.equal(shown.meters[1].dominant, true);
-  assert.match(shown.accessibleLabel, /Claude claude-work\. Available\. 5h 17%, resets 20:00\. week 86%, resets Wed/);
+  assert.match(shown.accessibleLabel, /Claude claude-work\. Available\. 5h 17%, as of your last terminal Claude Code reply, 1m ago, resets 20:00\. Week 86%, last recorded usage, 1m ago, resets Wed 19:00/);
   assert.equal(shown.tabStops, 1);
 });
 
@@ -50,9 +50,9 @@ test('S2: each generated availability state has its decided row text and accessi
 test('S1/S2 stale and unknown dimming belongs to each window, with its own age', () => {
   const data = fixture();
   const stale = row('stale', data);
-  assert.equal(stale.slot, '86% 2h ago');
+  assert.equal(stale.slot, '86% Wed');
   assert.equal(stale.dimmed, true);
-  assert.match(stale.accessibleLabel, /5h 70%, resets 20:00, 1h ago\. week 86%, resets Wed, 2h ago/);
+  assert.match(stale.accessibleLabel, /5h 70%, stale, last recorded usage, 1h ago, resets 20:00\. Week 86%, stale, last recorded usage, 2h ago, resets Wed 19:00/);
   const expired = row('stale', data, data.generated_at + 3600);
   assert.equal(expired.meters[0].percent, 0);
   assert.equal(expired.meters[0].dimmed, true);
@@ -69,7 +69,7 @@ test('S2 reset means unknown: dim empty bar, with its age and known other window
   assert.equal(shown.meters[0].percent, 0);
   assert.equal(shown.meters[0].reset, true);
   assert.equal(shown.meters[0].dimmed, true);
-  assert.match(shown.accessibleLabel, /5h unknown since reset, last seen .* ago\. week 50%, resets Wed/);
+  assert.match(shown.accessibleLabel, /5h unknown since reset, last seen .* ago\. Week 50%, last recorded usage, 1m ago, resets Wed 19:00/);
 });
 
 test('S1/S2 no figure for Kiro and Antigravity; healthy means a dot only', () => {
@@ -103,7 +103,7 @@ test('S1d/S6: generated native envelopes preserve the last snapshot, first read,
     return [key, popoverModel({ ...state, usage, update }, data.generated_at, options)];
   }));
   assert.equal(models.reading.reading, true);
-  assert.equal(models.reading.rows[0].slot, 'wk 86% 1d');
+  assert.equal(models.reading.rows[0].slot, 'wk 86% 1m ago');
   assert.equal(models.first.first, true);
   assert.equal(models.empty.empty, true);
   assert.equal(models.unreadable.footer.text, "Can't read agt");
@@ -171,14 +171,14 @@ test('S1: summary counts solid marks and breath follows capacity in every runnin
   assert.equal(readiness({ ...template, problem: 'bad data' }).shape, 'hollow');
 });
 
-test('S1/S3: popover tags, countdowns, warning bars, ready words and detail include reset clocks', () => {
+test('S1/S3: popover tags, observation ages, warning bars, ready words and detail include reset clocks', () => {
   const data = fixture();
   const model = popoverModel({ usage: data }, data.generated_at, options);
   const work = model.rows[0];
   assert.equal(model.header, '6 ready');
-  assert.equal(work.slot, 'wk 86% 1d');
-  assert.deepEqual(work.detailLines, ['5 hours  17%  Resets 20:00', 'Week  86%  Resets Wed 19:00']);
-  assert.equal(work.detailContext, "Usage updates only from agt's jobs · Updated 1m ago");
+  assert.equal(work.slot, 'wk 86% 1m ago');
+  assert.deepEqual(work.detailLines, ['5 hours  17%  Resets 20:00 · 1m ago', 'Week  86%  Resets Wed 19:00 · 1m ago']);
+  assert.equal(work.detailContext, 'Last recorded usage, 1m ago · Terminal updates not set up');
   assert.equal(model.rows.find(row => row.runtime === 'kiro').slot, 'Ready');
   assert.equal(model.rows.find(row => row.runtime === 'antigravity').detailContext, 'No usage reported · Updated 0m ago');
   assert.equal(model.rows.find(row => row.name === 'claude-unknown').action, null);
@@ -187,13 +187,13 @@ test('S1/S3: popover tags, countdowns, warning bars, ready words and detail incl
   assert.equal(cooling.meters[0].warn, true);
 });
 
-test('S4/S10: trouble dims retained rows and replaces countdowns with ageText, including 2h ago', () => {
+test('S4/S10: trouble dims retained rows and keeps each Claude window observation age', () => {
   const data = fixture(), observed = data.generated_at - 7200;
   const model = popoverModel({ usage: data, error: 'Timed out.', fetched_at: observed }, data.generated_at, options);
   assert.equal(model.header, "Can't read agt");
   assert.equal(model.footer.detail, 'Timed out. The numbers below are from 2 hours ago.');
   assert.ok(model.rows.every(row => row.dimmed));
-  assert.equal(model.rows[0].slot, 'wk 86% 2h ago');
+  assert.equal(model.rows[0].slot, 'wk 86% 1m ago');
   assert.ok(model.rows[0].meters.every(meter => meter.dimmed));
   assert.equal(model.rows[1].slot, 'Back 21:40');
   assert.equal(ageText(observed, data.generated_at), '2h ago');
@@ -249,4 +249,127 @@ test('S6: a completed indeterminate check with unknown usage never offers Check 
   const provider = decodeUsage(data).providers[0];
   const account = provider.accounts.find(account => account.name === snapshot.account);
   assert.equal(accountRow(provider, account, data.generated_at, options).button, 'Check');
+});
+
+const claudeNow = Date.parse('2026-11-10T13:20:00Z') / 1000;
+const claudeRow = (window = {}, account = {}, view = { popover: true }) => {
+  const data = fixture();
+  data.providers = [{ runtime: 'claude', label: 'Claude', accounts: [{ ...data.providers[0].accounts[0],
+    name: 'claude-work', statusline_usage: 'live', windows: [{ name: 'five_hour', label: '5h', used_percent: 34,
+      resets_at: claudeNow + 3600, observed_at: claudeNow - 60, reset: false, stale: false, source: 'terminal', ...window }], ...account }] }];
+  const provider = decodeUsage(data, claudeNow).providers[0];
+  return accountRow(provider, provider.accounts[0], claudeNow, { ...options, ...view });
+};
+
+test('Claude fresh and stale figures always carry their own age, detail clock and exact spoken source', () => {
+  const fresh = claudeRow();
+  assert.equal(fresh.slot, '5h 34% 1m ago');
+  assert.equal(fresh.stale, false);
+  assert.equal(fresh.meters[0].dimmed, false);
+  assert.deepEqual(fresh.detailLines, ['5 hours  34%  Resets 14:20 · 1m ago']);
+  assert.equal(fresh.detailContext, 'As of your last terminal Claude Code reply, 1m ago');
+  assert.equal(fresh.linkLabel, 'Claude claude-work. Available. 5h 34%, as of your last terminal Claude Code reply, 1m ago, resets 14:20. Show account detail.');
+  const stale = claudeRow({ observed_at: claudeNow - 7200 });
+  assert.equal(stale.slot, '5h 34% 2h ago');
+  assert.equal(stale.stale, true);
+  assert.equal(stale.meters[0].dimmed, true);
+  assert.deepEqual(stale.detailLines, ['5 hours  34%  Resets 14:20 · 2h ago']);
+  assert.equal(stale.detailContext, 'As of your last terminal Claude Code reply, 2h ago');
+  assert.equal(stale.linkLabel, 'Claude claude-work. Available. 5h 34%, stale, as of your last terminal Claude Code reply, 2h ago, resets 14:20. Show account detail.');
+  const settings = claudeRow({ observed_at: claudeNow - 7200 }, {}, {});
+  assert.equal(settings.slot, '34% 14:20', 'Settings retains its reset clock');
+  assert.equal(settings.tooltip, 'Claude claude-work. Available. 5h 34%, stale, as of your last terminal Claude Code reply, 2h ago, resets 14:20');
+});
+
+for (const source of ['job', null, undefined, 'future-source']) {
+  test(`Claude ${source ?? 'missing/null'} source uses recorded wording in both views`, () => {
+    for (const view of [{ popover: true }, {}]) {
+      const shown = claudeRow({ source }, {}, view);
+      assert.equal(shown.detailContext, 'Last recorded usage, 1m ago');
+      assert.equal(shown.tooltip, 'Claude claude-work. Available. 5h 34%, last recorded usage, 1m ago, resets 14:20');
+      assert.doesNotMatch(shown.tooltip, /last terminal/);
+    }
+  });
+}
+
+test('Claude missing observation time reads age unknown, stays stale and never borrows the fetch time', () => {
+  for (const observed_at of [null, undefined]) {
+    const shown = claudeRow({ observed_at }, {}, { popover: true, trouble: true, observed: claudeNow });
+    assert.equal(shown.slot, '5h 34% age unknown');
+    assert.equal(shown.stale, true);
+    assert.equal(shown.meters[0].dimmed, true);
+    assert.equal(shown.detailContext, 'As of your last terminal Claude Code reply, age unknown');
+    assert.equal(shown.linkLabel, 'Claude claude-work. Available. 5h 34%, stale, as of your last terminal Claude Code reply, age unknown, resets 14:20. Show account detail.');
+  }
+  const shown = claudeRow({ observed_at: claudeNow - 7200 }, {}, { popover: true, trouble: true, observed: claudeNow });
+  assert.equal(shown.slot, '5h 34% 2h ago');
+  assert.equal(shown.detailContext, 'As of your last terminal Claude Code reply, 2h ago');
+});
+
+const terminalStates = [
+  ['live', ''], [undefined, ''], ['future-state', ''], ['constructor', ''], ['__proto__', ''],
+  ['missing', ' · Terminal updates need repair'], ['replaced', ' · Terminal updates need repair'],
+  ['off', ' · Terminal updates off'], ['unset', ' · Terminal updates not set up'],
+  ['unsupported', ' · Terminal updates unavailable on Windows'],
+];
+for (const [statusline_usage, suffix] of terminalStates) {
+  test(`Claude ${statusline_usage ?? 'absent'} context suffix follows terminal, recorded and no-observation wording`, () => {
+    for (const view of [{ popover: true }, {}]) {
+      assert.equal(claudeRow({}, { statusline_usage }, view).detailContext, `As of your last terminal Claude Code reply, 1m ago${suffix}`);
+      assert.equal(claudeRow({ source: 'job' }, { statusline_usage }, view).detailContext, `Last recorded usage, 1m ago${suffix}`);
+      const empty = claudeRow({}, { statusline_usage, windows: [], availability: 'ok' }, view);
+      assert.equal(empty.detailContext, `No terminal usage received yet${suffix}`);
+      assert.equal(empty.figure, '');
+      assert.equal(empty.usageSetupCommand, !view.popover && ['missing', 'replaced'].includes(statusline_usage) ? 'agt setup' : '');
+    }
+  });
+}
+
+test('Claude unavailable usage has no source or repair line for any terminal-update state in either view', () => {
+  for (const [statusline_usage] of [...terminalStates, ['no_limits']]) {
+    for (const popover of [false, true]) {
+      const shown = claudeRow({}, { statusline_usage, windows: [] }, { popover, usageAvailable: false });
+      assert.equal(shown.detailContext, '', `${statusline_usage}/${popover}`);
+      assert.equal(shown.usageSetupCommand, '');
+      assert.equal(shown.figure, '');
+    }
+  }
+});
+
+test('Claude no-limits keeps a displayed terminal or job figure source and age in both views', () => {
+  for (const view of [{ popover: true }, {}]) {
+    for (const source of ['terminal', 'job']) {
+      const shown = claudeRow({ source, observed_at: claudeNow - 7200 }, { statusline_usage: 'no_limits' }, view);
+      assert.equal(shown.figure, '34%');
+      assert.equal(shown.detailContext, `${source === 'terminal' ? 'As of your last terminal Claude Code reply' : 'Last recorded usage'}, 2h ago · No usage limits on this login`);
+      const reset = claudeRow({ source, resets_at: claudeNow - 1 }, { statusline_usage: 'no_limits' }, view);
+      assert.equal(reset.figure, '–');
+      assert.equal(reset.detailContext, `${source === 'terminal' ? 'Last terminal Claude Code usage seen' : 'Last recorded usage,'} 1m ago · No usage limits on this login`);
+      for (const availability of ['busy', 'cooling', 'logged_out', 'off', 'unknown']) {
+        const hidden = claudeRow({ source }, { statusline_usage: 'no_limits', availability }, view);
+        assert.equal(hidden.figure, '');
+        assert.equal(hidden.detailContext.split(' · ')[0], 'No usage limits on this login');
+      }
+    }
+    const empty = claudeRow({}, { statusline_usage: 'no_limits', windows: [] }, view);
+    assert.equal(empty.figure, '');
+    assert.equal(empty.detailContext, 'No usage limits on this login');
+  }
+});
+
+test('Claude job/problem context follows the source once', () => {
+  const shown = claudeRow({}, { running_jobs: 2, capacity: 4, reason: 'Waiting for capacity' });
+  assert.equal(shown.detailContext, 'As of your last terminal Claude Code reply, 1m ago · 2 of 4 jobs · Waiting for capacity');
+  assert.equal(claudeRow({}, { problem: 'Read failed' }).detailContext, 'As of your last terminal Claude Code reply, 1m ago · Read failed');
+});
+
+test('real producer fixture keeps mixed terminal/job origins and an age beside every Claude figure', () => {
+  const data = fixture();
+  const rows = popoverModel({ usage: data }, data.generated_at, options).rows.filter(row => row.runtime === 'claude');
+  assert.equal(rows[0].tooltip, 'Claude claude-work. Available. 5h 17%, as of your last terminal Claude Code reply, 1m ago, resets 20:00. Week 86%, last recorded usage, 1m ago, resets Wed 19:00');
+  assert.equal(rows[0].detailContext, 'Last recorded usage, 1m ago · Terminal updates not set up');
+  for (const row of rows.filter(row => row.figure)) {
+    assert.match(row.slot, /(?:\d+[mhd] ago|age unknown)$/);
+    assert.ok(row.reset, `${row.name} must show the observation age`);
+  }
 });

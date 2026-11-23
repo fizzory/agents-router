@@ -84,6 +84,11 @@ export function AccountRow({ model, index, animate, entering = false, active, re
   };
 
   const split = Math.ceil(model.name.length / 2);
+  const claudeUsage = !!onOpen && model.runtime === 'claude' && !!model.figure;
+  const figure = <>
+    {onOpen && <span className="window-tag" aria-hidden="true">{model.windowTag}</span>}
+    <RollingFigure className={model.threshold ? 'figure is-warn' : 'figure'} value={model.figure} animate={animate && !reduced} active={active} />
+  </>;
   const style = { '--i': Math.min(index, STAGGER_ROWS - 1) } as CSSProperties;
   const classes = ['account-row', onOpen ? 'popover-account' : '', entering ? 'row-enter' : '', className ?? ''].filter(Boolean).join(' ');
   const main = <>
@@ -98,7 +103,8 @@ export function AccountRow({ model, index, animate, entering = false, active, re
         <span className="name-end">{model.name.slice(split)}</span>
       </span>
       <UsageGauge meters={model.meters} hidden={!model.hasWindows} fresh={animate && active && !reduced} />
-      <span key={model.action || model.state || (model.stale ? 'stale-usage' : 'usage')} className={model.stale ? 'row-slot is-stale' : 'row-slot'}>
+      <span key={model.action || model.state || (model.stale ? 'stale-usage' : 'usage')}
+        className={['row-slot', model.stale ? 'is-stale' : '', claudeUsage ? 'is-claude-usage' : ''].filter(Boolean).join(' ')}>
         {model.action === 'login' && loginCommand && <CopyButton variant="icon" className="row-copy"
           value={loginCommand.get} copy={loginCommand.copy} failureFeedback tooltip="Copy login command"
           accessibleName={`Copy login command for ${model.name}`} tabIndex={tabIndex(ROW_COPY)} ref={register(ROW_COPY)}
@@ -115,9 +121,8 @@ export function AccountRow({ model, index, animate, entering = false, active, re
           </Button>
         ) : model.figure ? (
           <>
-            {onOpen && <span className="window-tag" aria-hidden="true">{model.windowTag}</span>}
-            <RollingFigure className={model.threshold ? 'figure is-warn' : 'figure'} value={model.figure} animate={animate && !reduced} active={active} />
-            <span className="reset-time" aria-hidden="true">{model.reset}</span>
+            {claudeUsage ? <span className="usage-figure-line">{figure}</span> : figure}
+            <span className={claudeUsage ? 'reset-time observation-age' : 'reset-time'} aria-hidden="true">{model.reset}</span>
           </>
         ) : model.state ? <span className="state-word" aria-hidden="true">{model.state}</span> : null}
       </span>

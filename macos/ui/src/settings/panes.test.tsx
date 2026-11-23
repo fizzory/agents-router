@@ -141,7 +141,7 @@ describe('Accounts', () => {
   const sliding = () => !!work().querySelector('.usage-gauge')?.classList.contains('is-fresh');
   const rolling = () => !!work().querySelector('.figure-strip, .figure-before');
 
-  it('shared ageText renders 2h ago in Settings while its Check button and slot layout stay unchanged', async () => {
+  it('Settings keeps its reset clock and shows 2h ago below the row while retaining its Check button', async () => {
     const { api, emit } = await open('accounts');
     const next = usageFor(2, 86), data = next.usage as typeof fixtures.usage;
     data.providers[0]!.accounts[0]!.windows = data.providers[0]!.accounts[0]!.windows.map(window => ({
@@ -149,7 +149,9 @@ describe('Accounts', () => {
     }));
     data.providers[0]!.accounts.find(account => account.name === 'claude-unknown')!.name = 'claude-lab';
     await emit('onSettingsStatus', next);
-    expect(work().querySelector('.reset-time')?.textContent).toBe('2h ago');
+    const resetClock = new Date((NOW / 1000 + 3600) * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+    expect(work().querySelector('.reset-time')?.textContent).toBe(resetClock);
+    expect(work().querySelector('.account-usage-context')?.textContent).toBe('Last recorded usage, 2h ago · Terminal updates not set up');
     expect(work().getAttribute('data-tooltip')).toContain('2h ago');
     expect(work().querySelector('.window-tag, .row-link')).toBeNull();
     const unknown = document.querySelector('.settings-account[data-key="claude:claude-lab"]')!;
