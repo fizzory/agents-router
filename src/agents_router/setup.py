@@ -17,7 +17,7 @@ are never read.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from importlib.resources import files
 import itertools
 import json
@@ -76,6 +76,7 @@ class Report:
     reinstalled: str = ""  # set when this process reinstalled agt: its own files are now another version's
     # Claude Code profiles setup could install into: {"name", "folder", "this", "selected"}
     claude: list[dict[str, Any]] = field(default_factory=list)
+    statusline_skipped: list[Path] = field(default_factory=list)  # a plugin install refused this profile
 
     def add_todo(self, text: str) -> None:
         if text not in self.todo:
@@ -465,7 +466,10 @@ def _install_claude(config: Config, report: Report, route: str, selector: str | 
             _declare_in_settings(account.home, report, why=None if command else "the claude command wasn't found",
                                  label=label, reload=None if is_this else account.home)
             continue
+        failures = len(report.failed)
         _install_claude_profile(config, account, report, route, command, label, is_this)
+        if len(report.failed) > failures:
+            report.statusline_skipped.append(account.home)
 
 
 def _install_claude_profile(config: Config, account: Account, report: Report, route: str, command: list[str],
@@ -848,6 +852,9 @@ def run_setup(config: Config, hosts: list[str], accounts: list[str], dry_run: bo
     for host in hosts:
         install_plugin(config, host, report, claude_route, claude_profiles)
         _check_primary_login(config, host, report)
+    if "claude" in hosts:
+        refresh_statuslines(config, report, [folder for folder in selected_folders(report)
+                                            if folder not in report.statusline_skipped])
     _check_kiro_login(config, report)
     _check_agt_on_path(report)
     if "antigravity" in hosts:
@@ -855,6 +862,50 @@ def run_setup(config: Config, hosts: list[str], accounts: list[str], dry_run: bo
     if role_agents:
         sync_role_agents(config, report, claude_folders=selected_folders(report), hosts=named)
     return (1 if report.failed else 0), report
+
+
+def refresh_statuslines(config: Config, report: Report, profiles: list[Path] | None = None) -> None:
+    """Apply the saved consent; an unanswered setting never wraps a profile."""
+
+    from agents_router import statusline
+
+    if config.usage.statusline is None or statusline._windows():
+        return
+    if report.dry_run:
+        if config.usage.statusline:
+            for item in profiles if profiles is not None else statusline.managed_profiles(config):
+                folder = item if isinstance(item, Path) else item.home
+                account = next((a for a in config.runtime("claude").all_accounts()
+                                if same_path(a.home, folder)), Account("primary", folder))
+                report.done.append(f"{profile_name(account)}  status line: record usage for agt, then run yours")
+        return
+    refreshed = statusline.refresh(config, config.usage.statusline, profiles=profiles)
+    report.done.extend(line for line in refreshed.lines if line not in refreshed.problems)
+    report.failed.extend(refreshed.problems)
+
+
+def write_statusline_choice(enabled: bool) -> None:
+    """Save setup's approved answer in the user file, keeping its comments and a backup."""
+
+    from agents_router import levels, settings_write, synclog
+    from agents_router.config import user_settings_path
+
+    with settings_write.locked():
+        path = user_settings_path()
+        text = settings_write.read_text(path)
+        old = levels.read_value(text, "usage", "statusline")
+        if old is enabled:
+            return
+        synclog.notice_file(path, "user", None)
+        settings_write.backup(path, "user")
+        written = levels.set_line(text, "usage", "statusline", "true" if enabled else "false", path)
+        levels.write(path, written)
+        synclog.saved(path)
+        synclog.append({"type": "setting", "file": str(path), "level": "user", "key": "usage.statusline",
+                       "old": None if old is levels.MISSING else old, "new": enabled,
+                       "old_present": old is not levels.MISSING, "new_present": True,
+                       "revision": levels.revision(written.encode("utf-8")), "command": "agt setup",
+                       **settings_write.who(None)})
 
 
 # Roles ------------------------------------------------------------------------
@@ -1524,4 +1575,14 @@ def run_update(config: Config, hosts: list[str], dry_run: bool = False, package:
     if not found:
         report.checked.append(("Plugin", "no host has it yet; `agt setup` installs it"))
     sync_role_agents(config, report, hosts=named_hosts(hosts))  # a profile added since, or a changed template, catches up
+    if dry_run:
+        refresh_statuslines(config, report)
+    else:
+        from agents_router import settings_write
+        from agents_router.config import load_config
+
+        # Settings before the statusline lock, as in config set: consent may change during plugin updates.
+        with settings_write.locked():
+            current = replace(config, usage=load_config(cached_only=True).usage)
+            refresh_statuslines(current, report)
     return (1 if report.failed else 0), report

@@ -48,7 +48,7 @@ ROOT = {
             ("share", ["Keep them the same across Claude Code, Codex, Antigravity and Kiro ", ui.muted("(agt share --help)")]),
         ]),
         ("Accounts and settings", [
-            ("usage", "Show cached usage windows and account availability; --refresh rescans Codex"),
+            ("usage", "Show cached usage windows and account availability; --refresh rescans Codex, --probe-codex reads live limits"),
             ("accounts", "List, check, add, log in, enable, disable, sync, reset or remove accounts; list --cached-only reads stored login and usage (Codex reset checks live usage)"),
             ("config", "See and change agt's settings (show, set, unset, revert)"),
             ("roles", "See and change roles: which providers each role uses (show, propose, config)"),
@@ -64,6 +64,7 @@ ROOT = {
     ],
     "examples": [
         ("agt setup --dry-run", "See what setup would do; writes nothing"),
+        ("agt setup --statusline off", "Set up agt with Claude usage from jobs only"),
         ('agt run "fix the failing test"', "Run it in Claude Code and print the result"),
         ('agt start --runtime codex "review the diff"', "Start it in Codex and keep working"),
         ("agt share status", "What's in sync, and what waits for you"),

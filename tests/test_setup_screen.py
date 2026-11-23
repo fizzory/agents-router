@@ -30,7 +30,8 @@ class SetupScreenTests(ItemBase):
         self.assertEqual(set(proposal["plugin"]), {"planned", "already", "failed", "notes"})
         self.assertIn("dana", [item["name"] for item in proposal["share"]["items"]])
         self.assertEqual(proposal["needs_answer"], [])
-        self.assertEqual(set(proposal["switches"]), {"worktrees", "auto_copy", "widen", "rules", "codex_session", "mcp", "plugins"})
+        self.assertEqual(set(proposal["switches"]), {"worktrees", "auto_copy", "widen", "rules", "codex_session", "mcp", "plugins"}
+                         | ({"statusline"} if os.name != "nt" else set()))
         self.assertFalse(proposal["switches"]["rules"]["on"])
         self.assertFalse(proposal["switches"]["mcp"]["on"])  # MCP servers share only when you say
         self.assertFalse(proposal["switches"]["plugins"]["on"])  # and plugins too
@@ -38,8 +39,8 @@ class SetupScreenTests(ItemBase):
         self.assertTrue(command.startswith(f"agt setup --yes --if-plan {proposal['plan']} --host claude"), command)
         self.assertIn("--resolve gamma-apikey=skip", command)
         out = self.setup(*command.split()[2:])
-        self.assertIn("agt setup  ✓ done\n\n  +  Claude Code  installed the agents-router plugin\n"
-                      "  +  Sharing      9 copies in 4 folders\n      + agents/dana ", out)  # one headline, one list
+        self.assertIn("agt setup  ✓ done\n\n  +  Claude Code  installed the agents-router plugin\n", out)
+        self.assertIn("  +  Sharing      9 copies in 4 folders\n      + agents/dana ", out)  # one headline, one list
         self.assertIn("\n  agt keeps them the same from now on: every minute, and at each session start in Claude Code.\n", out)
         self.assertNotIn("Saved your answers", out)
         self.assertNotIn("Next:", out)

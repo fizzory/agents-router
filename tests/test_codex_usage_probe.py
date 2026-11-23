@@ -611,7 +611,7 @@ print('refreshed')
         self.reply()
 
         def interleaved_read(_path):
-            usage_view.probe_codex(self.runtime, self.account, force=True)
+            usage_view.probe_codex(self.runtime, self.account, due=lambda *_: True)
             return ({"primary": {"used_percent": 95, "window_minutes": 10080,
                                  "resets_at": self.now + 86400}}, self.now - 60)
 

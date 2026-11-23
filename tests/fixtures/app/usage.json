@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "agt_version": "0.20.0",
+  "agt_version": "0.21.0",
   "generated_at": 1800000000.0,
   "install": {
     "source": "app",
-    "version": "0.20.0"
+    "version": "0.21.0"
   },
   "providers": [
     {
@@ -47,7 +47,8 @@
               "stale": false,
               "reset": false
             }
-          ]
+          ],
+          "statusline_usage": "unset"
         },
         {
           "name": "claude-cooling",
@@ -59,7 +60,8 @@
           "busy_slots": 0,
           "capacity": 2,
           "unhealthy_models": [],
-          "windows": []
+          "windows": [],
+          "statusline_usage": "unset"
         },
         {
           "name": "claude-logged-out",
@@ -71,7 +73,8 @@
           "busy_slots": 0,
           "capacity": 2,
           "unhealthy_models": [],
-          "windows": []
+          "windows": [],
+          "statusline_usage": "unset"
         },
         {
           "name": "claude-unknown",
@@ -83,7 +86,8 @@
           "busy_slots": 0,
           "capacity": 2,
           "unhealthy_models": [],
-          "windows": []
+          "windows": [],
+          "statusline_usage": "unset"
         },
         {
           "name": "claude-busy",
@@ -95,7 +99,8 @@
           "busy_slots": 2,
           "capacity": 2,
           "unhealthy_models": [],
-          "windows": []
+          "windows": [],
+          "statusline_usage": "unset"
         },
         {
           "name": "claude-off",
@@ -107,7 +112,8 @@
           "busy_slots": 0,
           "capacity": 2,
           "unhealthy_models": [],
-          "windows": []
+          "windows": [],
+          "statusline_usage": "unset"
         },
         {
           "name": "claude-stale",
@@ -129,7 +135,8 @@
               "stale": true,
               "reset": false
             }
-          ]
+          ],
+          "statusline_usage": "unset"
         },
         {
           "name": "claude-reset",
@@ -151,7 +158,8 @@
               "stale": true,
               "reset": true
             }
-          ]
+          ],
+          "statusline_usage": "unset"
         },
         {
           "name": "claude-unhealthy",
@@ -163,7 +171,8 @@
           "busy_slots": 0,
           "capacity": 2,
           "unhealthy_models": [],
-          "windows": []
+          "windows": [],
+          "statusline_usage": "unset"
         },
         {
           "name": "claude-recovering",
@@ -175,7 +184,8 @@
           "busy_slots": 0,
           "capacity": 2,
           "unhealthy_models": [],
-          "windows": []
+          "windows": [],
+          "statusline_usage": "unset"
         }
       ]
     },

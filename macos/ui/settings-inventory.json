@@ -6,6 +6,7 @@
     "max_depth": "control:int",
     "job_retention_days": "control:int",
     "subagents.prefer_roles": "control:bool",
+    "usage.statusline": "control:bool",
     "claude.primary": "control:text",
     "claude.binary": "control:text",
     "claude.accounts": "control:names",

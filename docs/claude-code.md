@@ -179,7 +179,25 @@ Two things stay per account because they belong to the account on Anthropic's si
 
 ## Choosing accounts and failover
 
-With no `account` given, a job goes to the account with the lowest recent usage that has a free slot. It skips accounts in cooldown, unhealthy accounts and recovering accounts whose trial is taken. Usage comes from the `rate_limit_event` messages Claude Code reports during each run (5-hour and weekly utilization, plus reset times).
+With no `account` given, a job goes to the account with the lowest recent usage that has a free slot. It skips accounts in cooldown, unhealthy accounts and recovering accounts whose trial is taken. Usage comes from the `rate_limit_event` messages Claude Code reports during each run (5-hour and weekly utilization, plus reset times), and from the live status line tap when you turn it on.
+
+Setup includes live Claude usage in its one combined question (recommended on).
+`agt config set usage.statusline true` turns it on for your Claude profiles on
+macOS and Linux. The tap records usage in the background, then your own status
+line keeps running with the same input, output and exit code. The menu bar and
+job routing pick up figures after each message in Claude Code's terminal UI
+here. Other devices' use appears at the next message here. Project and managed
+status lines can override the user line and stop the tap in that project.
+
+`agt doctor` shows `✓ live usage`, or how to repair a missing or replaced tap.
+`agt setup`, `agt update` and `agt doctor --fix` re-apply your saved choice;
+when another tool replaced the line, its new command is kept after the tap.
+If the line still holds agt's marker but its wrapper was edited beyond agt's
+template, agt leaves it alone and doctor names `settings.json` for manual repair.
+An unanswered choice and Windows leave usage to jobs and print a neutral note.
+`agt config set usage.statusline false` restores every recorded status line;
+do this first when uninstalling. See [live Claude usage](configuration.md#live-claude-usage)
+for the seven `statusline_usage` values in usage and doctor JSON.
 
 When an account reaches its limit, it cools down and later jobs skip it. The cooldown ends at the first of these that is available: a `Retry-After` value in the error, the reset time Claude Code reported, or `cooldown_minutes` (default 60). It is never longer than 7 days. `agt accounts reset <name>` clears cooldowns and health early.
 

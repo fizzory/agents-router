@@ -54,6 +54,7 @@ export interface RowModel {
   label: string;
   detailLines: string[];
   detailContext: string;
+  usageSetupCommand: string;
   state: string;
   slot: string;
   tooltip: string;

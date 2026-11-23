@@ -113,7 +113,8 @@ def fixture_texts() -> dict[str, str]:
                 # values. Capture the producer rather than editing golden JSON.
                 user = agt / "settings.toml"
                 original = user.read_text()
-                user.write_text(original + '\n[kiro]\nmax_jobs_by_room = [[0, 2]]\n', encoding="utf-8")
+                user.write_text(original + '\n[kiro]\nmax_jobs_by_room = [[0, 2]]\n'
+                                '[usage]\nstatusline = false\n', encoding="utf-8")
                 workspace_file = project / ".agt" / "settings.toml"
                 original_workspace = workspace_file.read_text()
                 workspace_file.write_text(original_workspace + '[codex]\nmax_jobs_by_room = [[0, 1]]\n', encoding="utf-8")
@@ -215,6 +216,7 @@ def fixture_texts() -> dict[str, str]:
                 capture("share-status-waiting", ["share", "status"])
                 # Relative home paths keep config's content revision deterministic.
                 user.write_text(user.read_text().replace(str(home), "~"), encoding="utf-8")
+                user.write_text(user.read_text() + '\n[usage]\nstatusline = true\n', encoding="utf-8")
                 capture("config-show-sharing", ["config", "show", "--all"])
                 # Log producers supply the event shapes. Synthetic failure input never runs a tool.
                 from types import SimpleNamespace

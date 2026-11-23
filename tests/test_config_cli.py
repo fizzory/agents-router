@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from helpers import TempHome
 
-from agents_router import cli, jobs, synclog, ui
+from agents_router import cli, jobs, statusline, synclog, ui
 from agents_router.config import load_config
 
 AGENT = {"CLAUDECODE": "1"}
@@ -114,6 +114,103 @@ class ShowTests(ConfigBase):
         code, out, _ = self.agt("config", "show")
         self.assertEqual(out.splitlines()[:4], ["agt config  settings in effect, outside any workspace", "", "Settings files",
                                                 f"  user   {ui.short_path(self.user_file)}   not there yet"])
+
+
+class UsageStatuslineTests(ConfigBase):
+    def test_show_keeps_unanswered_distinct_from_false_and_describes_user_scope(self):
+        code, shown = self.json("config", "show", "--all")
+        row = next(row for row in shown["settings"] if row["key"] == "usage.statusline")
+        self.assertEqual((code, row["value"], row["shown"], row["source"]), (0, None, "unset", "default"))
+        self.assertEqual((row["kind"], row["editable"], row["user_only"], row["accepted_levels"]),
+                         ("bool", True, True, ["user"]))
+        self.assertFalse(row["levels"]["user"]["present"])
+        self.assertEqual(row["description"], "agt's tap in each Claude Code profile's status line: live usage for the menu bar "
+                         "and job routing. Your status line still runs.")
+
+    @unittest.skipIf(os.name == "nt", "POSIX status line wrapper")
+    def test_true_wraps_and_false_or_unset_restores_every_profile_in_the_same_call(self):
+        spare = self.root / "spare-profile"
+        spare.mkdir()
+        self.user_file.write_text('[claude]\n[[claude.accounts]]\nname = "spare"\n'
+                                  f'home = {json.dumps(str(spare))}\nsetup = "own"\n', encoding="utf-8")
+        original = '{\n  "statusLine": {"type": "command", "command": "echo yours", "padding": 2},\n  "theme": "dark"\n}\n'
+        paths = [folder / "settings.json" for folder in (self.primary, spare)]
+        for path in paths:
+            path.write_text(original, encoding="utf-8")
+        for operation in (("set", "usage.statusline", "false"), ("unset", "usage.statusline")):
+            with self.subTest(operation=operation):
+                code, report = self.json("config", "set", "usage.statusline", "true")
+                self.assertEqual((code, report["level"], report["new"]), (0, "user", True))
+                self.assertTrue(load_config().usage.statusline)
+                self.assertTrue(report["triggers"])
+                for path in paths:
+                    wrapped = statusline.parse(json.loads(path.read_text())["statusLine"]["command"])
+                    self.assertIsNotNone(wrapped)
+                    self.assertEqual(wrapped[0], "echo yours")
+                code, report = self.json("config", *operation)
+                expected = False if operation[0] == "set" else None
+                self.assertEqual((code, report["old"], report["new"]), (0, True, expected))
+                self.assertEqual(report["previous"], {"level": "user", "present": True, "value": True})
+                self.assertIs(load_config().usage.statusline, expected)
+                for path in paths:
+                    self.assertEqual(path.read_bytes(), original.encode())
+                code, shown = self.json("config", "show")
+                row = next(row for row in shown["settings"] if row["key"] == "usage.statusline")
+                self.assertEqual((code, row["value"], row["source"]),
+                                 (0, expected, "user" if expected is False else "default"))
+        self.assertFalse(self.team_file.exists())
+        self.assertFalse(self.local_file.exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX status line wrapper")
+    def test_unset_already_absent_consent_also_unwraps(self):
+        original = '{"statusLine":{"type":"command","command":"echo yours"}}\n'
+        path = self.primary / "settings.json"
+        path.write_text(original, encoding="utf-8")
+        self.assertTrue(statusline.refresh(load_config(), True, profiles=[self.primary]).changed)
+        code, report = self.json("config", "unset", "usage.statusline")
+        self.assertEqual((code, report["changed"], report["previous"]["present"]), (0, False, False))
+        self.assertTrue(report["triggers"])
+        self.assertEqual(path.read_bytes(), original.encode())
+        self.assertFalse(self.user_file.exists())
+
+    def test_workspace_and_local_writes_are_refused_without_refreshing(self):
+        with patch.object(statusline, "refresh") as refresh:
+            for level in ("--workspace", "--local"):
+                for operation in (("set", "usage.statusline", "true"), ("unset", "usage.statusline")):
+                    with self.subTest(level=level, operation=operation):
+                        code, _, err = self.agt("config", *operation, level)
+                        self.assertEqual(code, 2)
+                        self.assertIn("goes in your user settings only", err)
+            refresh.assert_not_called()
+        self.assertFalse(self.user_file.exists())
+        self.assertFalse(self.team_file.exists())
+        self.assertFalse(self.local_file.exists())
+
+    def test_invalid_value_is_refused_without_writing_or_refreshing(self):
+        with patch.object(statusline, "refresh") as refresh:
+            code, _, err = self.agt("config", "set", "usage.statusline", "maybe")
+            self.assertEqual(code, 2)
+            self.assertIn("takes true or false", err)
+            refresh.assert_not_called()
+        self.assertFalse(self.user_file.exists())
+
+    def test_windows_stores_consent_without_wrapping_and_reports_unsupported(self):
+        with patch.object(statusline, "_windows", return_value=True):
+            code, report = self.json("config", "set", "usage.statusline", "true")
+        self.assertEqual((code, report["new"]), (0, True))
+        self.assertTrue(load_config().usage.statusline)
+        self.assertIn("needs macOS or Linux", report["triggers"][0])
+        self.assertFalse((self.primary / "settings.json").exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX status line wrapper")
+    def test_profile_problem_is_reported_and_consent_is_saved(self):
+        path = self.primary / "settings.json"
+        path.write_text("{not json", encoding="utf-8")
+        code, report = self.json("config", "set", "usage.statusline", "true")
+        self.assertEqual(code, 0)
+        self.assertTrue(load_config().usage.statusline)
+        self.assertTrue(any("JSON" in line for line in report["triggers"]))
+        self.assertEqual(path.read_text(), "{not json")
 
 
 class ExcludedHomeTests(ConfigBase):

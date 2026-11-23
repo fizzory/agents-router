@@ -3,6 +3,7 @@ use crate::{
     account_checks::{AccountChecks, CheckSnapshot},
     app_paths::{self, AppPaths},
     client::{AgtClient, ClientError, CommandOutcome, ReadReply, Request},
+    codex_probe::CodexProbe,
     diag_log,
     install_app::{self, InstallController},
     models::{CommandKind, ConfigShow, Level, Snapshot, Usage},
@@ -81,6 +82,7 @@ fn launcher(paths: &AppPaths) -> Result<PathBuf, String> {
 }
 pub struct AppState {
     client: AgtClient,
+    codex_probe: CodexProbe,
     checks: AccountChecks,
     terminal: TerminalLauncher,
     snapshot: Mutex<PopoverSnapshot>,
@@ -243,6 +245,21 @@ pub fn request_account_checks(app: &tauri::AppHandle) {
         }
     });
 }
+/// Starts a separate mutation, never a usage-read waiter or publisher.
+pub fn request_codex_probe(app: &tauri::AppHandle, reason: &'static str) {
+    let state = app.state::<AppState>();
+    if state.quitting.load(Ordering::Relaxed) {
+        return;
+    }
+    if let Some(probe) = state.codex_probe.start(state.client.clone(), reason) {
+        tauri::async_runtime::spawn(async move {
+            match probe.await {
+                Ok(_) => trace("Codex probe completed; state watcher owns usage refresh"),
+                Err(error) => log(&format!("Codex probe failed: {}", error.kind())),
+            }
+        });
+    }
+}
 #[tauri::command]
 fn get_account_checks(state: State<'_, AppState>) -> Vec<CheckSnapshot> {
     state.checks.snapshots()
@@ -254,6 +271,7 @@ fn get_snapshot(state: State<'_, AppState>) -> PopoverSnapshot {
 #[tauri::command]
 fn refresh_usage(app: tauri::AppHandle) {
     request_usage(&app, true, "manual");
+    request_codex_probe(&app, "manual");
 }
 #[tauri::command]
 fn hide_popover(app: tauri::AppHandle) {
@@ -748,6 +766,7 @@ mod account_command_tests {
             serde_json::from_slice(include_bytes!("../../../tests/fixtures/app/usage.json"))
                 .unwrap();
         let state = AppState {
+            codex_probe: CodexProbe::default(),
             checks: AccountChecks::new(client.clone(), scratch.0.clone()),
             client,
             terminal: TerminalLauncher::new(launcher, scratch.0.join("handoffs")).unwrap(),
@@ -1063,6 +1082,7 @@ pub fn run() {
         terminal
     };
     let state = AppState {
+        codex_probe: CodexProbe::default(),
         checks: settings.account_checks.clone(),
         client,
         terminal,

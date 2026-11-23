@@ -57,6 +57,7 @@
 .gauge-bar.is-main .gauge-fill { background: var(--gauge-main); }
 .gauge-bar.is-warn .gauge-fill { background: var(--signal-warn); }
 .gauge-bar.is-stale { opacity: .5; }
+.gauge-bar.is-reset { border: 1px dashed; border-color: var(--ink-muted); background: transparent; }
 .gauge-bar.is-changing .gauge-fill { transition: transform var(--t-base) var(--spring-settle); }
 
 /* Rolling figure */
@@ -86,6 +87,7 @@
 .account-row .usage-gauge { margin-right: var(--space-4); }
 .row-slot { display: flex; flex: 0 0 84px; align-items: center; justify-content: flex-end; gap: var(--space-2); width: 84px; font: var(--type-small); }
 .row-slot .figure { flex: 0 0 32px; width: 32px; height: 14px; text-align: right; }
+.row-slot.is-stale .figure { opacity: .5; }
 .row-slot .figure.is-warn { font-weight: 600; color: var(--signal-warn); }
 .reset-time { flex: 0 0 48px; width: 48px; overflow: hidden; color: var(--ink-muted); text-overflow: ellipsis; }
 .state-word { overflow: hidden; color: var(--ink-muted); text-overflow: ellipsis; }

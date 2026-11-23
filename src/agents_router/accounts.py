@@ -8,10 +8,11 @@ import os
 from pathlib import Path
 import re
 import secrets
+import stat
 import time
 from typing import Any, BinaryIO
 
-from agents_router import health
+from agents_router import health, profiles, usage_tap, window_order
 from agents_router.config import Account, QuotaPool, RuntimeConfig, state_dir
 from agents_router.plans import account_cap, account_limits, model_allowed
 from agents_router.fsutil import file_lock, read_json, same_process, try_lock, unlock, write_json
@@ -61,6 +62,19 @@ def update_usage(runtime: str, account: str, *, clear_cooldown_if: str | None = 
                     fields.pop("observed_at", None)
             else:
                 fields.pop("observed_at", None)  # only a window observation can advance its timestamp
+        elif runtime == "claude":
+            _stamp_legacy(record)
+            login = fields.get("login")
+            if login is not None and record.get("login") not in (None, login):
+                record.pop("windows", None)  # another login's figures are replaced, never merged
+            incoming = fields.pop("windows", None)
+            stamp = _number(fields.pop("observed_at", None))
+            if isinstance(incoming, dict) and incoming:
+                stamp = time.time() if stamp is None else stamp
+                incoming = {name: window if window_order.observed_at(window) is not None
+                            else {**window, "observed_at": stamp}
+                            for name, window in incoming.items() if isinstance(window, dict)}
+                record["windows"] = window_order.merge_windows(record.get("windows"), incoming, now=time.time())
         if fields.get("cooldown_until") is not None:
             fields["cooldown_revision"] = secrets.token_hex(16)
         record.update({key: value for key, value in fields.items() if value is not None})
@@ -75,6 +89,20 @@ def update_usage(runtime: str, account: str, *, clear_cooldown_if: str | None = 
     return record
 
 
+def _stamp_legacy(record: dict[str, Any]) -> None:
+    """Give Claude windows from before 0.21, which carry no `observed_at`, the latest moment they could have
+    been seen (the record's `observed_at`, else `updated`), once and before `updated` moves, so no later write
+    makes them look fresh."""
+
+    windows = record.get("windows")
+    seen = window_order.observed_at({}, record)
+    if not isinstance(windows, dict) or seen is None:
+        return
+    record["windows"] = {name: {**window, "observed_at": seen}
+                         if isinstance(window, dict) and window_order.observed_at(window) is None else window
+                         for name, window in windows.items()}
+
+
 def _number(value: Any) -> float | None:
     try:
         return float(value) if value is not None else None
@@ -83,8 +111,9 @@ def _number(value: Any) -> float | None:
 
 
 def record_rate_limit_event(runtime: str, account: str, info: dict[str, Any], login: str | None = None) -> None:
-    """Store the windows reported by a `rate_limit_event` (Claude) or equivalent."""
+    """Store the windows reported by a `rate_limit_event` (Claude) or equivalent, each stamped with when it was seen."""
 
+    now = time.time()
     windows: dict[str, Any] = {}
     unified = info.get("unifiedWindows")
     if isinstance(unified, dict):
@@ -93,11 +122,13 @@ def record_rate_limit_event(runtime: str, account: str, info: dict[str, Any], lo
                 windows[str(name)] = {
                     "utilization": _number(window.get("utilization")),
                     "resets_at": _number(window.get("resetsAt")),
+                    "observed_at": now,
                 }
     elif info.get("rateLimitType"):
         windows[str(info["rateLimitType"])] = {
             "utilization": _number(info.get("utilization")),
             "resets_at": _number(info.get("resetsAt")),
+            "observed_at": now,
         }
     # Only usage figures are stored here. A cooldown comes from the runner, and only
     # when an attempt actually ended with a usage limit.
@@ -147,6 +178,8 @@ def set_pool_cooldown(runtime: str, account: str, pool: str, until: float, reaso
         data = load_usage(runtime)
         record = data.setdefault(account, {})
         record.setdefault("pools", {}).setdefault(pool, {}).update(cooldown_until=until, cooldown_reason=reason)
+        if runtime == "claude":
+            _stamp_legacy(record)
         record["updated"] = time.time()
         write_json(path, data)
 
@@ -167,29 +200,62 @@ def clear_cooldown(runtime: str, account: str, *, reason: str | None = None, kee
         record.pop("cooldown_revision", None)
         if not keep_pools:
             record.pop("pools", None)
+        if runtime == "claude":
+            _stamp_legacy(record)
         record["updated"] = time.time()
         write_json(path, data)
     return True
 
 
-def max_utilization(record: dict[str, Any] | None) -> float | None:
-    if not record:
-        return None
-    values = [
-        float(window["utilization"])
-        for window in (record.get("windows") or {}).values()
-        if isinstance(window, dict) and isinstance(window.get("utilization"), (int, float))
-    ]
-    return max(values) if values else None
+def max_utilization(record: dict[str, Any] | None, now: float | None = None) -> float | None:
+    """The highest share used across windows still open. Records keep expired windows for display, so skip them."""
+
+    from agents_router.limits import utilization
+
+    return utilization(record, time.time() if now is None else now)
 
 
 def account_record(runtime: RuntimeConfig, account: Account, usage: dict[str, Any], *,
-                   now: float | None = None) -> dict[str, Any] | None:
+                   now: float | None = None, live_sources: LiveSources | None = None,
+                   live_identity: tuple[RuntimeConfig, Account] | None = None) -> dict[str, Any] | None:
     """The account's usage record, merged with every folder that has the same login.
 
-    Folders logged in to one account share its limits, so the busiest window and the
-    latest cooldown of any of them hold for all.
+    Folders logged in to one account share its limits, so each window's newest observation
+    (`window_order.window_key`) and the latest cooldown of any of them hold for all. Merged
+    windows carry their own `observed_at`, since the merged record has no `updated`.
+
+    Claude Code's status line figures (`usage_tap`) fold in the same way, from the live file of
+    every folder in the login group that names the account's login. Reading never writes, and
+    never changes `usage` or a record in it.
+    `live_identity` keeps the snapshot's historical job grouping separate from the current login that trusts live files.
     """
+
+    now = time.time() if now is None else now
+    record = _stored_record(runtime, account, usage, now)
+    live = _live_windows(*(live_identity or (runtime, account)), sources=live_sources)
+    if not live:
+        return record
+    base = record or {}
+    return {**base, "windows": window_order.merge_windows(_seen_windows(base), *live, now=now)}
+
+
+def _seen_windows(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The record's windows, each carrying the observation time readers would give it (`window_order.observed_at`)."""
+
+    windows = record.get("windows")
+    if not isinstance(windows, dict):
+        return {}
+    result = {}
+    for name, window in windows.items():
+        if isinstance(window, dict):
+            observed = window_order.observed_at(window, record)
+            result[name] = window if observed is None else {**window, "observed_at": observed}
+    return result
+
+
+def _stored_record(runtime: RuntimeConfig, account: Account, usage: dict[str, Any],
+                   now: float) -> dict[str, Any] | None:
+    """`account_record` from the usage store alone (job-reported figures, cooldowns)."""
 
     def current(name: str) -> dict[str, Any] | None:
         record = usage.get(name)
@@ -205,22 +271,8 @@ def account_record(runtime: RuntimeConfig, account: Account, usage: dict[str, An
         own = current(account.name)
         return own if own is not None else (records[0] if records else None)
     merged: dict[str, Any] = {"windows": {}, "pools": {}}
-    now = time.time() if now is None else now
-
-    def used(window: dict[str, Any]) -> float:
-        # A window that has reset since it was recorded counts for nothing, so it never hides a current one.
-        resets = window.get("resets_at")
-        if isinstance(resets, (int, float)) and resets <= now:
-            return -1.0
-        return float(window["utilization"]) if isinstance(window.get("utilization"), (int, float)) else -1.0
-
     for record in records:
-        for name, window in (record.get("windows") or {}).items():
-            if not isinstance(window, dict):
-                continue
-            current = merged["windows"].get(name)
-            if current is None or used(window) > used(current):
-                merged["windows"][name] = window
+        merged["windows"] = window_order.merge_windows(merged["windows"], _seen_windows(record), now=now)
         for key in ("cooldown_until", "last_used"):
             value = record.get(key)
             if isinstance(value, (int, float)) and value > float(merged.get(key) or 0):
@@ -232,6 +284,161 @@ def account_record(runtime: RuntimeConfig, account: Account, usage: dict[str, An
             if isinstance(until, (int, float)) and until > float((merged["pools"].get(pool) or {}).get("cooldown_until") or 0):
                 merged["pools"][pool] = entry
     return merged
+
+
+# Live Claude figures: the status line tap's files, read only ------------------------------------------------------
+
+@dataclass(frozen=True)
+class LiveUsage:
+    login: str | None = None
+    windows: dict[str, dict[str, Any]] = field(default_factory=dict)
+    limits: bool | None = None
+
+
+LIVE_MAX_BYTES = usage_tap.MAX_BYTES
+# A live file's path -> ((inode, mtime_ns, size), validated figures): unchanged files don't re-parse.
+_LIVE_CACHE: dict[str, tuple[tuple[int, int, int], LiveUsage]] = {}
+
+
+def _live_path(home: Path) -> Path:
+    return state_dir() / "claude-live" / f"{_home_key(home)}.json"
+
+
+def _live_window(window: Any) -> dict[str, float] | None:
+    """A live window rebuilt from its checked numbers, or None when any is missing or bad."""
+
+    if not isinstance(window, dict):
+        return None
+    used, resets, observed = (window_order._finite(window.get(key)) for key in ("utilization", "resets_at", "observed_at"))
+    if used is None or used < 0 or resets is None or observed is None:
+        return None
+    return {"utilization": used, "resets_at": resets, "observed_at": observed}
+
+
+def _parse_live(data: dict[str, Any]) -> LiveUsage:
+    """The login a live file names and its valid windows; no login means no trusted figures."""
+
+    login = data.get("login")
+    if not isinstance(login, str) or not login:
+        return LiveUsage()  # no login, no trust (a file from before the tap tagged logins)
+    windows = data.get("windows")
+    valid = {}
+    for name, window in (windows.items() if isinstance(windows, dict) else ()):
+        checked = _live_window(window)
+        if checked is not None:
+            valid[str(name)] = checked
+    limits = data.get("limits")
+    return LiveUsage(login, valid, limits if type(limits) is bool else None)
+
+
+def _live_file(home: Path) -> LiveUsage:
+    """The tap's login and valid windows for a profile folder, empty when there's no usable file.
+
+    Only a regular file counts; it's opened without following links or blocking (a FIFO never hangs a read).
+    Never writes, and never creates `claude-live/`.
+    """
+
+    path = _live_path(home)
+    try:
+        info = os.lstat(path)
+    except (OSError, ValueError):
+        return LiveUsage()
+    if not stat.S_ISREG(info.st_mode):
+        return LiveUsage()
+    cached = _LIVE_CACHE.get(str(path))
+    if cached is not None and cached[0] == (info.st_ino, info.st_mtime_ns, info.st_size):
+        return cached[1]
+    metadata: list[os.stat_result] = []
+    try:
+        live = _parse_live(usage_tap.read_live(path, metadata=metadata))
+    except Exception:  # noqa: BLE001 - a corrupt file is ignored (and cached as such); RecursionError too
+        live = LiveUsage()
+    if metadata:
+        info = metadata[0]
+        _LIVE_CACHE[str(path)] = ((info.st_ino, info.st_mtime_ns, info.st_size), live)
+    return live
+
+
+# The `.claude.json` paths `profiles.account_info` reads -> (their (inode, mtime_ns, size) or None, the login hash).
+_LOGIN_CACHE: dict[tuple[str, ...], tuple[tuple[tuple[int, int, int] | None, ...], str | None]] = {}
+
+
+def _folder_login(home: Path) -> str | None:
+    """The folder's login as `profiles.account_info` reads it (as `agt usage --json` does), read again only when one
+    of its `.claude.json` files changes. Never writes; a `.claude.json` that isn't a regular file means no login."""
+
+    folder = Path(home).expanduser()
+    files = ([Path.home() / ".claude.json"] if profiles.is_default(folder) else []) + [folder / ".claude.json"]
+    stamps: list[tuple[int, int, int] | None] = []
+    for path in files:
+        try:
+            info = os.stat(path)
+        except (OSError, ValueError):
+            stamps.append(None)
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            return None
+        stamps.append((info.st_ino, info.st_mtime_ns, info.st_size))
+    key = tuple(str(path) for path in files)
+    cached = _LOGIN_CACHE.get(key)
+    if cached is not None and cached[0] == tuple(stamps):
+        return cached[1]
+    login = profiles.account_info(folder)["login"]
+    _LOGIN_CACHE[key] = (tuple(stamps), login)
+    return login
+
+
+def _login(account: Account) -> str | None:
+    """The account's login: as configured or found, else its folder's own (settings-listed accounts, `primary`)."""
+
+    return account.login or _folder_login(account.home)
+
+
+@dataclass
+class LiveSources:
+    """Reads shared by one snapshot's diagnostics and window folds; each folder is read once per pass."""
+
+    logins: dict[str, str | None] = field(default_factory=dict)
+    files: dict[str, LiveUsage] = field(default_factory=dict)
+
+    def folder_login(self, home: Path) -> str | None:
+        key = _home_key(home)
+        if key not in self.logins:
+            self.logins[key] = _folder_login(home)
+        return self.logins[key]
+
+    def login(self, account: Account) -> str | None:
+        return account.login or self.folder_login(account.home)
+
+    def file(self, home: Path) -> LiveUsage:
+        key = _home_key(home)
+        if key not in self.files:
+            self.files[key] = _live_file(home)
+        return self.files[key]
+
+
+def _live_windows(runtime: RuntimeConfig, account: Account, *,
+                  sources: LiveSources | None = None) -> list[dict[str, dict[str, Any]]]:
+    """The live windows of every folder with the account's login whose file names that login.
+
+    Claude only. An account whose login can't be known trusts no live file."""
+
+    if runtime.runtime != "claude":
+        return []
+    sources = sources if sources is not None else LiveSources()
+    wanted = sources.login(account)
+    if not wanted:
+        return []
+    homes = {_home_key(account.home): account.home}
+    for other in runtime.all_accounts():
+        if sources.login(other) == wanted:
+            homes.setdefault(_home_key(other.home), other.home)
+    found = []
+    for home in homes.values():
+        live = sources.file(home)
+        if live.login == wanted and live.windows:
+            found.append({name: dict(window) for name, window in live.windows.items()})  # the cache stays unshared
+    return found
 
 
 def cooldown_until(record: dict[str, Any] | None, now: float | None = None) -> float | None:

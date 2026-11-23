@@ -288,6 +288,7 @@ colour alone.
 | Figure | `42%`; 32px column, `--type-figure`, rounded tabular digits |
 | Countdown | 40px column, muted 11px; `42m`, `2h 10m`, `3d 4h`, `<1m` |
 | Stale age | Replace the countdown with `4m ago` or `2h ago`; dim figure and bars |
+| Unknown since reset | – plus age; dim figure and bars |
 
 For example, show `wk 86% 2d 22h` or `5h 42% 2h 10m`. Countdowns express
 time remaining. Use clock times in detail and return states. Age units have

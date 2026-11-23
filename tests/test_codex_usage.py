@@ -50,7 +50,8 @@ class RolloutTests(TempHome):
         self.assertEqual(parser.finish(0, "").outcome, "success")
         record = accounts.load_usage("codex")["c1"]
         self.assertEqual(record["windows"]["five_hour"]["utilization"], 0.92)
-        self.assertEqual(accounts.max_utilization(record), 0.92)
+        # Pinned before the fixture's resets: an expired window never counts for ranking.
+        self.assertEqual(accounts.max_utilization(record, now=1792100000), 0.92)
 
     def test_snapshot_uses_its_event_timestamp(self):
         path = self.rollout(limits(95, 0))

@@ -52,7 +52,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -99,7 +99,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": true,
@@ -146,7 +146,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -193,7 +193,52 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
+        },
+        "workspace": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.toml",
+          "line": null,
+          "revision": "45bc4e1bb28c406c04c35cde0e2c7145b71264aa9f30fa7423ceceb56ac3b550"
+        },
+        "local": {
+          "present": false,
+          "value": null,
+          "file": "<ROOT>/project/.agt/settings.local.toml",
+          "line": null,
+          "revision": "ff7b1c9a01d3942270ceaa649ef42bc59bb8eb7662a4d3a46629f3c9f31b7615"
+        }
+      }
+    },
+    {
+      "key": "usage.statusline",
+      "value": true,
+      "shown": "true",
+      "source": "user",
+      "file": "<ROOT>/agt/settings.toml",
+      "line": 34,
+      "description": "agt's tap in each Claude Code profile's status line: live usage for the menu bar and job routing. Your status line still runs.",
+      "needs_user_words": false,
+      "user_only": true,
+      "changed_by": null,
+      "applies": "once (agt updates each Claude Code profile's status line now)",
+      "kind": "bool",
+      "choices": [],
+      "minimum": null,
+      "cap": false,
+      "editable": true,
+      "accepted_levels": [
+        "user"
+      ],
+      "still_limited_by": [],
+      "levels": {
+        "user": {
+          "present": true,
+          "value": true,
+          "file": "<ROOT>/agt/settings.toml",
+          "line": 34,
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -238,7 +283,7 @@
           "value": "~/.claude",
           "file": "<ROOT>/agt/settings.toml",
           "line": 2,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -283,7 +328,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -334,7 +379,7 @@
           ],
           "file": "<ROOT>/agt/settings.toml",
           "line": 4,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -381,7 +426,7 @@
           "value": true,
           "file": "<ROOT>/agt/settings.toml",
           "line": 3,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -431,7 +476,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -478,7 +523,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -525,7 +570,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -572,7 +617,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -622,7 +667,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -669,7 +714,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -716,7 +761,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -770,7 +815,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -817,7 +862,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -864,7 +909,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -911,7 +956,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -958,7 +1003,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1008,7 +1053,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1055,7 +1100,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1102,7 +1147,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1149,7 +1194,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1194,7 +1239,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1239,7 +1284,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1284,7 +1329,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1329,7 +1374,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1374,7 +1419,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1421,7 +1466,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1466,7 +1511,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1511,7 +1556,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1556,7 +1601,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1602,7 +1647,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1649,7 +1694,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1699,7 +1744,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1746,7 +1791,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1793,7 +1838,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1840,7 +1885,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1890,7 +1935,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1937,7 +1982,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -1984,7 +2029,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2038,7 +2083,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2085,7 +2130,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2132,7 +2177,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2179,7 +2224,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2226,7 +2271,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2276,7 +2321,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2323,7 +2368,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2370,7 +2415,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2417,7 +2462,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2462,7 +2507,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2507,7 +2552,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2552,7 +2597,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2597,7 +2642,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2642,7 +2687,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2689,7 +2734,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2736,7 +2781,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2788,7 +2833,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2839,7 +2884,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2892,7 +2937,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2937,7 +2982,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -2982,7 +3027,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3028,7 +3073,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3075,7 +3120,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3125,7 +3170,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3172,7 +3217,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3219,7 +3264,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3266,7 +3311,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3316,7 +3361,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3363,7 +3408,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3410,7 +3455,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3464,7 +3509,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3511,7 +3556,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3558,7 +3603,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3605,7 +3650,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3652,7 +3697,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3702,7 +3747,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3749,7 +3794,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3796,7 +3841,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3843,7 +3888,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3888,7 +3933,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3933,7 +3978,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -3978,7 +4023,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4023,7 +4068,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4068,7 +4113,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4115,7 +4160,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4166,7 +4211,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4213,7 +4258,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4260,7 +4305,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4307,7 +4352,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4352,7 +4397,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4397,7 +4442,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4443,7 +4488,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4490,7 +4535,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4540,7 +4585,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4587,7 +4632,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4634,7 +4679,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4681,7 +4726,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4731,7 +4776,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4778,7 +4823,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4825,7 +4870,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4879,7 +4924,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4926,7 +4971,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -4973,7 +5018,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5020,7 +5065,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5067,7 +5112,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5117,7 +5162,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5164,7 +5209,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5211,7 +5256,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5258,7 +5303,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5303,7 +5348,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5348,7 +5393,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5393,7 +5438,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5438,7 +5483,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5483,7 +5528,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5534,7 +5579,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5581,7 +5626,7 @@
           "value": true,
           "file": "<ROOT>/agt/settings.toml",
           "line": 12,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5634,7 +5679,7 @@
           ],
           "file": "<ROOT>/agt/settings.toml",
           "line": 13,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5679,7 +5724,7 @@
           "value": false,
           "file": "<ROOT>/agt/settings.toml",
           "line": 15,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5727,7 +5772,7 @@
           "value": "allow-if-shell",
           "file": "<ROOT>/agt/settings.toml",
           "line": 14,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5776,7 +5821,7 @@
           "value": "block",
           "file": "<ROOT>/agt/settings.toml",
           "line": 18,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5824,7 +5869,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5869,7 +5914,7 @@
           "value": true,
           "file": "<ROOT>/agt/settings.toml",
           "line": 19,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5914,7 +5959,7 @@
           "value": true,
           "file": "<ROOT>/agt/settings.toml",
           "line": 20,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -5961,7 +6006,7 @@
           "value": true,
           "file": "<ROOT>/agt/settings.toml",
           "line": 21,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -6008,7 +6053,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -6053,7 +6098,7 @@
           "value": false,
           "file": "<ROOT>/agt/settings.toml",
           "line": 16,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -6098,7 +6143,7 @@
           "value": false,
           "file": "<ROOT>/agt/settings.toml",
           "line": 17,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -6143,7 +6188,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
@@ -6188,7 +6233,7 @@
           "value": null,
           "file": "<ROOT>/agt/settings.toml",
           "line": null,
-          "revision": "bb8caabf7224c424dd51d404c542289a59cc807c6c8914c04fa2cdff42ac6ff1"
+          "revision": "8bd05e81a921b23af58221489d05aa418530179d826ec8d72cb9b1bb654a1d5d"
         },
         "workspace": {
           "present": false,
