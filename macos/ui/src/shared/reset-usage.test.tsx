@@ -8,6 +8,14 @@ import settingsStyles from '../settings/settings.css?raw';
 import { UsageGauge } from './UsageGauge';
 import type { Meter } from './types';
 
+function expectPlainResetBar(bar: Element) {
+  const style = getComputedStyle(bar);
+  expect(style.borderTopStyle).toBe('none');
+  expect(style.opacity).toBe('0.5');
+  expect(bar.querySelector('.gauge-fill')).toBeNull();
+  return style;
+}
+
 const usage = (now: number, name = 'claude-ntb', statusline_usage?: string) => ({
   schema_version: 1, generated_at: now,
   providers: [{ runtime: 'claude', label: 'Claude', accounts: [{
@@ -50,16 +58,18 @@ describe('S3 unknown since reset', () => {
     expect(zeroRow.querySelector('.figure')?.textContent).toBe('0%');
     const zeroBars = [...zeroRow.querySelectorAll('.gauge-bar:not(.is-reset)')];
     expect(zeroBars).toHaveLength(2);
-    const plainStyle = getComputedStyle(zeroBars[0]!);
-    for (const bar of zeroBars) expect(getComputedStyle(bar).opacity).toBe('1');
+    const zeroStyles = zeroBars.map(bar => {
+      const style = getComputedStyle(bar);
+      expect(style.opacity).toBe('1');
+      return style;
+    });
+    const plainStyle = zeroStyles[0]!;
     const bars = [...target.querySelectorAll('.gauge-bar')];
     expect(bars).toHaveLength(2);
     for (const bar of bars) {
-      expect(getComputedStyle(bar).borderTopStyle).toBe('none');
-      expect(getComputedStyle(bar).backgroundColor).toBe(plainStyle.backgroundColor);
-      expect(getComputedStyle(bar).backgroundImage).toBe(plainStyle.backgroundImage);
-      expect(getComputedStyle(bar).opacity).toBe('0.5');
-      expect(bar.querySelector('.gauge-fill')).toBeNull();
+      const style = expectPlainResetBar(bar);
+      expect(style.backgroundColor).toBe(plainStyle.backgroundColor);
+      expect(style.backgroundImage).toBe(plainStyle.backgroundImage);
     }
     const link = target.querySelector<HTMLButtonElement>('.row-link')!;
     expect(link.getAttribute('aria-label')).toBe('Claude claude-ntb. Available. 5h unknown since reset, last seen 20d ago. Week unknown since reset, last seen 20d ago. Show account detail.');
@@ -81,11 +91,7 @@ describe('S3 unknown since reset', () => {
       expect(target.querySelector('.row-slot')?.classList.contains('is-stale')).toBe(true);
       const bars = [...target.querySelectorAll('.gauge-bar.is-reset.is-stale')];
       expect(bars).toHaveLength(2);
-      for (const bar of bars) {
-        expect(getComputedStyle(bar).borderTopStyle).toBe('none');
-        expect(getComputedStyle(bar).opacity).toBe('0.5');
-        expect(bar.querySelector('.gauge-fill')).toBeNull();
-      }
+      for (const bar of bars) expectPlainResetBar(bar);
       if (state === 'missing' || state === 'replaced') {
         expect(target.querySelector('code')?.textContent).toBe('agt setup');
         expect(target.querySelector('.account-usage-context')?.textContent).toBe('Last terminal Claude Code usage seen 20d ago · Terminal updates need repair · agt setup');
