@@ -542,7 +542,7 @@ unknown sources all use `Last recorded usage, <age>`.
 
 A window with `reset: true`, including one whose reset time passes before
 render, is unknown since reset. Its slot shows `– <age>` with no window tag,
-the figure is dimmed, and its meter is a dimmed empty dashed track. The row
+the figure is dimmed, and its meter is the dimmed plain empty track. The row
 prefers a known window when one remains. Claude detail says
 `5 hours  –  Unknown since reset · Last seen <age>`. With only reset windows,
 its context is `Last terminal Claude Code usage seen <age>` for a terminal

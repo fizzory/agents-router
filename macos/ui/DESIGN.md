@@ -295,7 +295,7 @@ colour alone.
 | Claude observation age | Second line, muted `--type-small`; `12m ago`, `2h ago`, or `age unknown` |
 | Codex countdown | 40px column, muted 11px; `42m`, `2h 10m`, `3d 4h`, `<1m` |
 | Stale | Dim figure and bars; Claude keeps its observation age; Codex replaces its countdown with age |
-| Unknown since reset | – plus age; dim figure and bars |
+| Unknown since reset | – plus age; dim figure and bars; plain empty track, no fill |
 
 Claude usage slots occupy two 14px lines within the existing 96px × 28px
 area: window tag and figure above, observation age below. Show age for fresh

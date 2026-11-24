@@ -57,7 +57,6 @@
 .gauge-bar.is-main .gauge-fill { background: var(--gauge-main); }
 .gauge-bar.is-warn .gauge-fill { background: var(--signal-warn); }
 .gauge-bar.is-stale { opacity: .5; }
-.gauge-bar.is-reset { border: 1px dashed; border-color: var(--ink-muted); background: transparent; }
 .gauge-bar.is-changing .gauge-fill { transition: transform var(--t-base) var(--spring-settle); }
 
 /* Rolling figure */
