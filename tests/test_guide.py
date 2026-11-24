@@ -109,9 +109,11 @@ class GuideTests(unittest.TestCase):
             self.assertEqual(link.resolve(), MAINTAINER.resolve())
         else:  # a checkout without symlinks (Windows, core.symlinks off) holds the link's target as text
             self.assertEqual(link.read_text(encoding="utf-8").strip(), "../../.claude/skills/agt-maintainer")
+        maintainer = (MAINTAINER / "SKILL.md").read_text(encoding="utf-8")
         for reference in ("live-check.md", "release.md"):
             self.assertTrue((MAINTAINER / "references" / reference).is_file(), reference)
-            self.assertIn(f"references/{reference}", (MAINTAINER / "SKILL.md").read_text(encoding="utf-8"))
+            self.assertIn(f"references/{reference}", maintainer)
+        self.assertIn("Before pushing it, run `python3 -m unittest test_guide`", maintainer)
 
     def test_the_three_versions_match(self):
         plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
