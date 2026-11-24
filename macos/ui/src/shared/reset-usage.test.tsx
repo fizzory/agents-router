@@ -8,6 +8,14 @@ import settingsStyles from '../settings/settings.css?raw';
 import { UsageGauge } from './UsageGauge';
 import type { Meter } from './types';
 
+function expectPlainResetBar(bar: Element) {
+  const style = getComputedStyle(bar);
+  expect(style.borderTopStyle).toBe('none');
+  expect(style.opacity).toBe('0.5');
+  expect(bar.querySelector('.gauge-fill')).toBeNull();
+  return style;
+}
+
 const usage = (now: number, name = 'claude-ntb', statusline_usage?: string) => ({
   schema_version: 1, generated_at: now,
   providers: [{ runtime: 'claude', label: 'Claude', accounts: [{
@@ -20,20 +28,48 @@ const usage = (now: number, name = 'claude-ntb', statusline_usage?: string) => (
 });
 
 describe('S3 unknown since reset', () => {
-  it('shows a dim dash and two dashed empty tracks, and explains each unknown window in detail', async () => {
+  it('keeps reset selectors free of track background and border overrides', () => {
+    // jsdom cannot resolve the track's custom property, so compare declarations too.
+    const rules = sharedStyles.replace(/\/\*[\s\S]*?\*\//g, '').split('}');
+    for (const rule of rules) {
+      const declarationsStart = rule.lastIndexOf('{');
+      const selector = rule.slice(0, declarationsStart);
+      if (selector.includes('.is-reset')) {
+        expect(rule.slice(declarationsStart + 1), selector.trim())
+          .not.toMatch(/(^|[;{\s])(background|border)[\w-]*\s*:/i);
+      }
+    }
+  });
+
+  it('shows a dim dash and two plain empty tracks, and explains each unknown window in detail', async () => {
     render(<style>{sharedStyles}</style>);
-    await renderPopover({ ...envelope(null), usage: usage(NOW) });
+    const data = usage(NOW);
+    const zero = usage(NOW, 'claude-zero').providers[0]!.accounts[0]!;
+    zero.windows = zero.windows.map(window => ({ ...window, used_percent: 0, reset: false,
+      observed_at: NOW - 60, resets_at: NOW + 3600 }));
+    data.providers[0]!.accounts.push(zero);
+    await renderPopover({ ...envelope(null), usage: data });
     const target = row('claude:claude-ntb')!;
     expect(target.querySelector('.figure')?.textContent).toBe('–');
     expect(target.querySelector('.reset-time')?.textContent).toBe('20d ago');
     expect(target.querySelector('.window-tag')?.textContent).toBe('');
     expect(getComputedStyle(target.querySelector('.figure')!).opacity).toBe('0.5');
+    const zeroRow = row('claude:claude-zero')!;
+    expect(zeroRow.querySelector('.figure')?.textContent).toBe('0%');
+    const zeroBars = [...zeroRow.querySelectorAll('.gauge-bar:not(.is-reset)')];
+    expect(zeroBars).toHaveLength(2);
+    const zeroStyles = zeroBars.map(bar => {
+      const style = getComputedStyle(bar);
+      expect(style.opacity).toBe('1');
+      return style;
+    });
+    const plainStyle = zeroStyles[0]!;
     const bars = [...target.querySelectorAll('.gauge-bar')];
     expect(bars).toHaveLength(2);
     for (const bar of bars) {
-      expect(getComputedStyle(bar).borderTopStyle).toBe('dashed');
-      expect(getComputedStyle(bar).opacity).toBe('0.5');
-      expect(bar.querySelector('.gauge-fill')).toBeNull();
+      const style = expectPlainResetBar(bar);
+      expect(style.backgroundColor).toBe(plainStyle.backgroundColor);
+      expect(style.backgroundImage).toBe(plainStyle.backgroundImage);
     }
     const link = target.querySelector<HTMLButtonElement>('.row-link')!;
     expect(link.getAttribute('aria-label')).toBe('Claude claude-ntb. Available. 5h unknown since reset, last seen 20d ago. Week unknown since reset, last seen 20d ago. Show account detail.');
@@ -45,6 +81,7 @@ describe('S3 unknown since reset', () => {
   });
 
   it('uses the same unknown slot in Settings and offers agt setup only for missing or replaced taps', async () => {
+    render(<style>{sharedStyles}</style>);
     const view = await renderSettings({ target: { pane: 'accounts' } });
     for (const state of ['missing', 'replaced', 'off', 'future-state', 'live']) {
       await view.emit('onSettingsStatus', { ...settingsEnvelope(2), usage: usage(SETTINGS_NOW / 1000, 'work', state) });
@@ -52,7 +89,9 @@ describe('S3 unknown since reset', () => {
       expect(target.querySelector('.figure')?.textContent).toBe('–');
       expect(target.querySelector('.reset-time')?.textContent).toBe('20d ago');
       expect(target.querySelector('.row-slot')?.classList.contains('is-stale')).toBe(true);
-      expect(target.querySelectorAll('.gauge-bar.is-reset.is-stale')).toHaveLength(2);
+      const bars = [...target.querySelectorAll('.gauge-bar.is-reset.is-stale')];
+      expect(bars).toHaveLength(2);
+      for (const bar of bars) expectPlainResetBar(bar);
       if (state === 'missing' || state === 'replaced') {
         expect(target.querySelector('code')?.textContent).toBe('agt setup');
         expect(target.querySelector('.account-usage-context')?.textContent).toBe('Last terminal Claude Code usage seen 20d ago · Terminal updates need repair · agt setup');
