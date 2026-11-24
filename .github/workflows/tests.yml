@@ -1,25 +1,21 @@
 name: tests
 
-# Skip only when every changed path is one no test reads: GitHub runs the
-# workflow when any changed path is outside paths-ignore. test_guide reads
-# the agt-maintainer skill's SKILL.md, live-check.md and release.md, and the
-# .codex link to it, so those still run.
+# Skip when every changed path is in an agent-primitive folder. The
+# maintainer skill names the local checks for changes only to these folders.
 on:
   push:
     branches: [main]
     paths-ignore:
+      - '.claude/**'
+      - '.codex/**'
       - '.mentor/**'
       - '.kiro/**'
-      - '.claude/skills/agt-await-role-job/**'
-      - '.claude/skills/agt-maintainer/references/hands-on-check.md'
-      - '.codex/skills/agt-await-role-job'
   pull_request:
     paths-ignore:
+      - '.claude/**'
+      - '.codex/**'
       - '.mentor/**'
       - '.kiro/**'
-      - '.claude/skills/agt-await-role-job/**'
-      - '.claude/skills/agt-maintainer/references/hands-on-check.md'
-      - '.codex/skills/agt-await-role-job'
 
 jobs:
   core:
