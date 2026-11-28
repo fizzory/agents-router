@@ -20,6 +20,7 @@
   "settings": [
     "allow-get-snapshot", "allow-get-account-checks",
     "allow-get-settings-target",
+    "allow-settings-visible",
     "allow-show-setting-menu",
     "allow-show-pane-menu",
     "allow-copy-text",

@@ -101,6 +101,7 @@ Per host details: [docs/hosts.md](docs/hosts.md).
 | See what sharing would do | `agt share enable --dry-run` | [Sharing](docs/share.md#turning-it-on) |
 | Turn sharing on | `agt share enable`, then Enter | [Sharing](docs/share.md#turning-it-on) |
 | Check what's in sync | `agt share status` | [Sharing](docs/share.md#everyday-use) |
+| Check only your user folders, as the macOS app does | `agt share status --user-only` | [Sharing](docs/share.md#everyday-use) |
 | Read sharing cells for an app | `agt share list --json` | [Sharing](docs/share.md#everyday-use) |
 | Bring your plugins' skills and commands to Kiro | `agt share kinds add plugin-parts` | [Sharing](docs/share.md#sharing-plugin-parts) |
 | Read role choices for an app | `agt roles show --json [--discover-models]` | [Roles](docs/roles.md) |

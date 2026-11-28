@@ -5,35 +5,17 @@ import io
 import json
 import os
 from pathlib import Path
-import shutil
-import subprocess
 import unittest
 from unittest.mock import patch
 
 from test_share_items import ItemBase
-from test_share_sync import age
+from test_share_sync import ProjectFixture, age
 
 from agents_router import cli
 from agents_router.share import scope, settings, watch
 
 
-@unittest.skipIf(shutil.which("git") is None, "needs git")
-class ProjectTests(ItemBase):
-    def setUp(self):
-        super().setUp()
-        self.repo = self.root / "work" / "app"
-        self.repo.mkdir(parents=True)
-        self.git("init", "-q")
-        self.agent(self.repo / ".claude", "builder", body="Builds the app.", tools="Bash, Read")
-        self.skill(self.repo / ".claude", "release-notes", body="Write the notes.")
-        age(*(self.repo / ".claude").rglob("*"))
-        self.git("add", ".")
-        self.git("commit", "-qm", "project agents")
-
-    def git(self, *args, cwd=None):
-        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args], cwd=cwd or self.repo,
-                              check=True, capture_output=True, text=True).stdout.strip()
-
+class ProjectTests(ProjectFixture, ItemBase):
     def in_repo(self, *args, code=0, cwd=None):
         before = os.getcwd()
         os.chdir(cwd or self.repo)

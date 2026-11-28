@@ -856,7 +856,7 @@ mod tests {
         core.share_list().await.unwrap();
         arguments(&scratch, &["share", "list", "--json"]);
         core.share_status().await.unwrap();
-        arguments(&scratch, &["share", "status", "--json"]);
+        arguments(&scratch, &["share", "status", "--user-only", "--json"]);
         for included in [true, false] {
             core.share_pick("agents/example".into(), "codex".into(), included)
                 .await

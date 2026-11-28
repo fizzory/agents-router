@@ -45,7 +45,8 @@ def update_usage(runtime: str, account: str, *, clear_cooldown_if: str | None = 
         if deadline is not None and time.monotonic() >= deadline:
             raise TimeoutError("usage update deadline passed")
         data = load_usage(runtime)
-        record = dict(data.get(account) or {})
+        stored = data.get(account)
+        record = dict(stored or {})
         fresh_windows = False
         if runtime == "codex":
             observed = _number(record.get("observed_at") or (record.get("updated") if record.get("windows") else None)) or 0
@@ -77,12 +78,14 @@ def update_usage(runtime: str, account: str, *, clear_cooldown_if: str | None = 
                 record["windows"] = window_order.merge_windows(record.get("windows"), incoming, now=time.time())
         if fields.get("cooldown_until") is not None:
             fields["cooldown_revision"] = secrets.token_hex(16)
-        record.update({key: value for key, value in fields.items() if value is not None})
+        record.update({key: value for key, value in fields.items() if value is not None and key != "updated"})
         if (fresh_windows and clear_cooldown_if is not None
                 and record.get("cooldown_revision") == clear_cooldown_if):
             record.pop("cooldown_until", None)
             record.pop("cooldown_reason", None)
             record.pop("cooldown_revision", None)
+        if record == stored:
+            return stored
         record["updated"] = time.time()
         data[account] = record
         write_json(path, data)

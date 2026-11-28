@@ -636,7 +636,12 @@ impl AppPaths {
     /// The environment every agt child gets. The release passes AGT_HOME only
     /// when the person set it, as before; a test build passes every folder.
     pub fn child_env(&self) -> ChildEnv {
-        let mut env: ChildEnv = vec![("PYTHONPATH", None), ("PYTHONHOME", None)];
+        let mut env: ChildEnv = vec![
+            ("PYTHONPATH", None),
+            ("PYTHONHOME", None),
+            ("AGT_JOB_ID", None),
+            ("AGT_DEPTH", None),
+        ];
         if !self.test {
             env.push((
                 "AGT_HOME",
@@ -1375,6 +1380,8 @@ mod tests {
             vec![
                 ("PYTHONPATH", None),
                 ("PYTHONHOME", None),
+                ("AGT_JOB_ID", None),
+                ("AGT_DEPTH", None),
                 ("AGT_HOME", None)
             ]
         );
@@ -1389,7 +1396,10 @@ mod tests {
         assert_eq!(p.settings_file(), home.join(".agents-router/settings.toml"));
         assert_eq!(p.support.path, PathBuf::from("/somewhere/support"));
         assert_eq!(
-            p.child_env()[2],
+            *p.child_env()
+                .iter()
+                .find(|(key, _)| *key == "AGT_HOME")
+                .unwrap(),
             ("AGT_HOME", Some(home.join(".agents-router").into()))
         );
         w.set("AGT_CONFIG_DIR", "/cfg");
@@ -1419,10 +1429,40 @@ mod tests {
     }
 
     #[test]
+    fn the_app_client_spawns_agt_without_an_agt_worker_s_variables() {
+        let w = World::new("paths-client-env");
+        for p in [
+            w.resolve(RELEASE_IDENTIFIER, &[]).unwrap(),
+            w.test(&[]).unwrap(),
+        ] {
+            // As app.rs builds its client.
+            let client = crate::client::AgtClient::with_env(
+                p.launcher(),
+                p.child_env(),
+                p.test.then(|| p.child_home()),
+            )
+            .unwrap();
+            let request = crate::client::Request::new(crate::models::CommandKind::Usage, None);
+            let command = client.command(&request);
+            for key in ["AGT_JOB_ID", "AGT_DEPTH"] {
+                assert!(
+                    command
+                        .as_std()
+                        .get_envs()
+                        .any(|(name, value)| name == key && value.is_none()),
+                    "{key} is not removed from the child (test build: {})",
+                    p.test
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_children_get_every_folder_and_a_private_home() {
         let w = World::new("paths-child");
         let p = w.test(&[]).unwrap();
         let env: HashMap<_, _> = p.child_env().into_iter().collect();
+        assert!(env.get("AGT_JOB_ID") == Some(&None) && env.get("AGT_DEPTH") == Some(&None));
         let support = &p.support.path;
         assert_eq!(env["AGT_APP_SUPPORT"], Some(support.clone().into()));
         assert_eq!(env["AGT_BIN_DIR"], Some(support.join("cli-bin").into()));

@@ -85,8 +85,21 @@ def main():
                   callback_json("self-test settings-retained") == {"pane":"general", "retained":"yes"},
                   "self-test complete; quitting" in text]
         requests = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
-        checks += [bool(requests), requests.count(["usage", "--json"]) == 1,
-                   all(argv in (["usage", "--json"], ["usage", "--json", "--refresh"], ["config", "show", "--all", "--json"], ["accounts", "list", "--json"], ["share", "status", "--json"]) for argv in requests)]
+        allowed_requests = [["usage", "--json"], ["usage", "--json", "--refresh"],
+                            ["usage", "--probe-codex", "--json"],
+                            ["config", "show", "--all", "--json"],
+                            ["accounts", "list", "--cached-only", "--json"],
+                            ["share", "status", "--user-only", "--json"]]
+        # Opening the popover checks enabled fixture accounts with no cached login check.
+        allowed_requests.extend(["accounts", "check", account["name"], "--runtime", runtime["runtime"], "--json"]
+                                for runtime in locked["runtimes"] for account in runtime["accounts"]
+                                if account["enabled"] and account["login_check"] is None)
+        # The client runs one usage read at a time. The reads asked for meanwhile share the next one,
+        # which is a refresh when any of them was, so the plain `usage --json` children number at most
+        # the plain reads logged. The wake's own debounced read is the log line counted above.
+        plain_usage_reads = len(re.findall(r"\busage read reason=\S+ refresh=false$", text, re.MULTILINE))
+        checks += [bool(requests), 1 <= requests.count(["usage", "--json"]) <= plain_usage_reads,
+                   all(argv in allowed_requests for argv in requests)]
         for line in text.splitlines():
             if any(key in line for key in ("class=AgtPopoverPanel", "posted NSWorkspace", "reason=debounced", "hidden reason=blur", "hidden reason=Esc", "popover resized-to-content", "self-test complete")):
                 print(line)

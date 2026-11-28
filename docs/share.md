@@ -351,6 +351,8 @@ agt share sync  ✓ wrote 3 changes in 3 folders
 
 `status` writes nothing. It exits 1 while there's a conflict, an item waiting to be deleted, or a frozen folder (below). A file saved less than 3 seconds ago waits for the next sync.
 
+`agt share status --user-only` checks only your user folders. It skips listed repos and their worktrees, so their conflicts and pending deletions do not affect the exit code. The macOS app uses `--user-only --json`, which returns an empty `repos` list when sharing is on.
+
 - **The same edit in two places** writes nothing more. **Different edits** make a conflict: nothing is written for that item until you pick the winner.
 - **A new item** goes to every CLI at the next sync. With `auto_copy` off, it waits until you pick its targets.
 - **A copy you delete** that agt made stops that CLI from getting the item. When you delete an original, its other copies wait for `agt share rm`.

@@ -13,7 +13,7 @@ import shareList from '../../../../tests/fixtures/app/share-list-kinds.json';
 import shareStatus from '../../../../tests/fixtures/app/share-status-waiting.json';
 import usage from '../../../../tests/fixtures/app/usage-popover.json';
 import type { Envelope, InstallStatus, SettingsApi, SettingsTarget, UpdateStatus } from '../settings/api';
-import { SettingsApp } from '../settings/SettingsApp';
+import { SETTINGS_REFRESH_DELAY_MS, SettingsApp } from '../settings/SettingsApp';
 import { resetDisclosures } from '../shared';
 
 export const fixtures = { accountsList, activity, configSet, configShow, configUnset, roles, rolesConfig, shareList, shareStatus, usage };
@@ -22,11 +22,12 @@ const copy = <T,>(value: T): T => structuredClone(value);
 export const envelope = (generation = 1): Envelope => ({ usage: copy(usage), error: null, reading: false, generation, update_version: null });
 
 type Handler = (payload: never) => void;
-const EVENTS = ['onAccountChecksStatus', 'onUsageUpdated', 'onSettingsStatus', 'onSettingsTarget', 'onSettingsHistory', 'onSettingsEdit', 'onPaneMenu', 'onInstallStatus', 'onUpdateStatus'] as const;
+const EVENTS = ['onAccountChecksStatus', 'onUsageUpdated', 'onSettingsStatus', 'onSettingsRefresh', 'onSettingsTarget', 'onSettingsHistory', 'onSettingsEdit', 'onPaneMenu', 'onInstallStatus', 'onUpdateStatus'] as const;
 type EventName = typeof EVENTS[number];
 
 export interface FakeOptions {
   target?: SettingsTarget;
+  visible?: boolean;
   install?: InstallStatus;
   update?: UpdateStatus;
   config?: unknown;
@@ -66,6 +67,7 @@ export function fakeSettingsApi(options: FakeOptions = {}) {
     chooseWorkspace: vi.fn(() => Promise.resolve(null as string | null)),
     getOpenAtLogin: vi.fn(() => Promise.resolve(false)),
     setOpenAtLogin: vi.fn((enabled: boolean) => Promise.resolve(enabled)),
+    settingsVisible: vi.fn(() => Promise.resolve(options.visible ?? true)),
     getSettingsTarget: vi.fn(() => Promise.resolve(options.target ?? { pane: 'general' })),
     showSettingMenu: vi.fn(done),
     showPaneMenu: vi.fn((_token: string, _actions: string[]) => done()),
@@ -79,22 +81,48 @@ export function fakeSettingsApi(options: FakeOptions = {}) {
     testBuildPaths: vi.fn(() => Promise.resolve((options.testPaths ?? null) as never)),
     ...Object.fromEntries(EVENTS.map((name) => [name, listen(name)])),
   } as unknown as SettingsApi & Record<EventName, ReturnType<typeof listen>>;
+  const dispatch = (name: EventName, payload: unknown) => {
+    for (const handler of handlers.get(name) ?? []) handler(payload as never);
+  };
   const emit = async (name: EventName, payload: unknown) => {
-    await act(async () => { for (const handler of handlers.get(name) ?? []) handler(payload as never); });
+    if (name === 'onSettingsTarget' || name === 'onSettingsRefresh') await throughRefresh(() => dispatch(name, payload));
+    else await act(async () => dispatch(name, payload));
     await settle();
   };
-  return { api: api as SettingsApi & { [K in keyof SettingsApi]: ReturnType<typeof vi.fn> }, emit, unlistened, handlers };
+  return { api: api as SettingsApi & { [K in keyof SettingsApi]: ReturnType<typeof vi.fn> }, dispatch, emit, unlistened, handlers };
+}
+
+/**
+ * Runs `work`, which makes Settings collect a refresh batch, and lets the batch
+ * delay pass on a fake clock: no test waits real time for it. The reads the
+ * batch starts are fake adapter calls that resolve in microtasks, so `settle`
+ * finishes them; a test that holds one open awaits its own promise.
+ */
+export async function throughRefresh(work: () => void) {
+  // A test that already runs on fake timers keeps them.
+  const own = !vi.isFakeTimers();
+  if (own) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    await act(async () => work());
+    await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(SETTINGS_REFRESH_DELAY_MS); });
+  } finally {
+    if (own) vi.useRealTimers();
+  }
+  await settle();
 }
 
 export async function settle(rounds = 6) {
   for (let index = 0; index < rounds; index += 1) await act(async () => { await Promise.resolve(); });
 }
 
-export async function renderSettings(options: FakeOptions = {}) {
+/** `prepare` changes the fake adapter before the window mounts. */
+export async function renderSettings(options: FakeOptions = {}, prepare?: (fake: ReturnType<typeof fakeSettingsApi>) => void) {
   resetDisclosures();
   const fake = fakeSettingsApi(options);
-  const view = render(<SettingsApp api={fake.api} now={() => NOW} timeZone="UTC" />);
-  await settle();
+  prepare?.(fake);
+  let view!: ReturnType<typeof render>;
+  await throughRefresh(() => { view = render(<SettingsApp api={fake.api} now={() => NOW} timeZone="UTC" />); });
   return { ...fake, ...view };
 }
 

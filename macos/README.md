@@ -457,8 +457,20 @@ The macOS app workflow runs `cargo fetch --locked` first and sets
 `REQUIRE_CRATE_SOURCES=1`, so there it fails instead. The tray redraws only when
 its mark, title or label changes.
 
-`watcher.rs` reads usage again, after the debounce, when settings or `state/`
-change, or when something `agt usage` reads in a job folder changes:
+The watcher debounces filesystem events for one second. User settings and the
+following paths under `$AGT_HOME/state` trigger a usage read.
+
+| State path | Events that count |
+| --- | --- |
+| `<runtime>-usage.json`, `<runtime>-health.json` | Any runtime, at the top level |
+| `claude-profiles.json`, `account-checks.json`, `statusline.json` | A change to one of these files |
+| `claude-live/` | The folder itself and its immediate JSON files |
+| `leases/` | The folder, nested lease folders, and any decimal slot's `.lock` or `.owner.json` file |
+| `state/` and its ancestors | A folder event can cover several files |
+
+Other state files, including Sharing heartbeats, activity logs and atomic-write
+temp files, leave the usage snapshot alone. Settings has its own refresh events
+for Sharing and Activity, described below. Job events follow these rules:
 
 | Counts | Doesn't count |
 | --- | --- |
@@ -679,7 +691,7 @@ row, and focus stays on the pressed control.
 Automatic checks call Rust's `set_pending_update` to update both slots without
 an alert. Manual checks open a Settings sheet immediately. `open_settings`
 sends a `settings-target` event to Settings with
-`{ pane, runtime, account }`; the page and account navigation are step 5/6.
+`{ pane, runtime, account, open_id }`. Each open has a new ID.
 Settings activation is Regular while visible and Accessory after hiding.
 
 The popover window is an `NSPanel` (`AgtPopoverPanel`, made from the tao
@@ -871,7 +883,8 @@ Only the Settings capability grants the following fixed-purpose commands;
 | `openSettingsFile(file, line = 1)` | Only paths returned by a config read are accepted; default editor with VS Code's URL or the native `kpos` line parameter; unsupported editors may ignore position; failed open reveals in Finder |
 | `chooseWorkspace()` | Native folder dialog; canonical absolute path or null on cancel |
 | `getOpenAtLogin()` / `setOpenAtLogin(enabled)` | Boolean state; actual autostart plugin LaunchAgent, default off; label `<bundle identifier>.app` (release: `io.github.watcharagorn.agents-router.app`), distinct from `.share` |
-| `getSettingsTarget()` | Retained `{pane,runtime?,account?}` target so subscription/startup cannot lose navigation |
+| `getSettingsTarget()` | Retained navigation target with the same `open_id` as its event |
+| `settingsVisible()` | `settings_visible` reads the native Settings window’s current visibility |
 | `testBuildPaths()` | `test_build_paths`: a test build's `[{key,path,display,source,origin}]`, `null` in the release ([Test build folders](#test-build-folders)) |
 
 Levels are `user`, `workspace`, `local`. Workspace/local writes require a folder
@@ -881,11 +894,90 @@ are neither retried nor coalesced. Success is agt's structured write result
 (`previous`, `revision`); refusals return `{ok:false,exit_code:2|3,error:{message,…}}`.
 Transport/decoder errors reject the IPC promise. No human undo command is run.
 
-`settings-target` carries new navigation, including General/User on every open.
-Settings can use `getSnapshot()` for install state and uninstall blockers;
-`onUsageUpdated()` carries successful fresh reads and `onSettingsStatus()`
-carries loading/error/update changes. PART B adds scope/navigation, controls,
-search, chips, error rows, file-only rows and the serialized undo stack.
+The retained Settings webview subscribes before it checks native visibility.
+A hidden launch reads the cached usage snapshot and app state. Opening Settings
+sends `settings-target` and refreshes the selected workspace config, current pane
+and Sharing badge. Every other loaded pane (Roles, Accounts, Sharing, Activity)
+reloads when next selected. The Sharing pane supplies its own badge. The open ID
+makes startup delivery and the retained lookup count as one navigation.
+
+`usage-updated` delivers every fresh usage snapshot to Settings. While Settings
+is visible, `settings-status` also delivers loading, error and update snapshots.
+Both events update the displayed snapshot without starting CLI reads.
+
+`settings-refresh` reaches visible Settings with a `kinds` array. While
+Settings isn't visible (closed, minimized, or the app hidden), the app sends
+none and keeps the kinds that came. The next `settings-refresh` that goes out
+carries them too, each once; Settings' next focus sends one. Restoring a
+minimized window or unhiding the app sends no `settings-target`, so that focus
+is what reloads a showing Sharing or Activity pane after a sync. On an open,
+the 50 ms batch merges it with the catch-up.
+
+| Kind | Source | Reads |
+| --- | --- | --- |
+| `timer` | The 60-second timer | Selected workspace config, visible Roles, Sharing; marks other loaded Roles |
+| `focus` | Settings gains focus | Selected workspace config, visible Roles or Accounts |
+| `config` | A watched user settings file | Selected workspace config, visible Roles or Accounts, Sharing |
+| `share` | A top-level entry in `state/share` | Sharing |
+| `activity` | `state/log`, or a `*.jsonl` file in it | Visible Activity |
+
+"Sharing" is the visible Sharing pane (`share list` and `share status`), or
+only its badge (`share status`) while another pane shows. No event names a
+changed `share.*` setting, so `config` and `timer` refresh Sharing too.
+With a workspace selected, `timer`, `focus` and `config` also reread the User
+config while Sharing is showing or loaded: Sharing edits the User file.
+
+A loaded pane that isn't showing is not read. It reloads when next selected.
+
+| Pane | Marked to reload by |
+| --- | --- |
+| Roles | `timer`, `config`, `focus`, an open |
+| Accounts | `config`, `focus`, an open |
+| Sharing | `timer`, `config`, `share`, an open |
+| Activity | `activity`, an open |
+
+Sharing ignores the `state/share` folder's own event, project scopes,
+temporary writes, `heartbeat.json`, `signature.json`, `sessions.json`,
+`settings.good.toml`, `launchd.log`, `launcher.log`, `notified.json`,
+`shown.json` and `hinted.json`. The watcher's heartbeat makes that folder and
+rewrites those files every minute. The pane and the badge share one
+`agt share status --user-only --json` read and its result.
+
+The watcher sends more kinds when one event can stand for many files.
+
+| Event | Kinds |
+| --- | --- |
+| Lost events (a watcher error), a watched folder replaced, a symlinked `AGT_HOME` pointed elsewhere | `config`, `share`, `activity` |
+| The state folder itself, or a folder above it | `share`, `activity` |
+
+Each of these also starts a usage read.
+
+Settings collects refresh events for 50 ms so opening and focusing the window
+can share one read even when WebKit pauses animation frames. Each workspace
+config, each pane and the share status is one slot: one read running and one
+more pass reserved behind it. A read that fails still lets that pass run.
+
+| Pass | Starts |
+| --- | --- |
+| Asked for by a refresh event | While Settings is visible and no write is running |
+| Asked for by a click (Retry, a selection, a write's own reload) with no read running in its slot | At once |
+| Asked for by a click behind a running read | While Settings is visible |
+
+Each check of native visibility is made for the pass about to start. A pass
+found hidden is dropped, and its pane reloads when next selected or opened. The
+showing pane also reloads on the next refresh event of any kind, a focus
+included: the app sent the kind behind that pass already, so it kept none. A
+pass found behind a write waits and starts when the write ends. Unmounting the
+window drops every reserved and waiting pass.
+
+After Settings closes, no refresh event reaches it. Each slot (the selected
+workspace config, the User config under a selected workspace, the showing pane
+and the share status) runs at most one more read: the one already running, or,
+in an idle slot, the reload of a write that ends after the close. A person
+started that write, so its reload doesn't wait for visibility. A pass reserved
+behind a running read checks visibility and is dropped. That is up to four
+`agt` processes. Nothing more runs until the next open, or the next focus after
+a minimize.
 
 `PYTHONPATH=src:tests python3 tests/generate_settings_inventory.py` regenerates
 `ui/settings-inventory.json` from real `config show --all --json` in a scratch
@@ -1133,7 +1225,7 @@ operations; no new command is granted to the popover:
 | `accountsToggle(runtime,account,enabled)` | Enable/disable a listed, togglable account at User |
 | `accountsLogin(runtime,account)` | Login for a listed account through the private `TerminalLauncher` handoff; shares the popover's structured login result and copy fallback |
 | `accountsAdd(runtime,account)` | Rechecks the name immediately, then hands Add account to Terminal |
-| `shareList()` / `shareStatus()` | Read-only listing and status (exit 1 with attention remains data) |
+| `shareList()` / `shareStatus()` | User listing and user-only status (exit 1 with attention remains data) |
 | `shareKind(kind,enabled)` | `kinds add/remove` for `mcp` or `hooks`; preserves the result report, including partial failures |
 | `sharePick(item,label,included)` | `--in` or `--not-in` for an editable cell from the last listing |
 | `activityLog()` | `log --all --limit 200 --json`; newest first across workspaces, with event fields intact |
@@ -1161,8 +1253,8 @@ with the entry's `id` and owning workspace (null for User). agt checks that the
 file and current value still match that log entry. Files reported by roles or
 Activity are also eligible for `openSettingsFile`. Search stays in the UI.
 
-Opening Terminal is not success. On reactivation, refresh Accounts and usage
-via the existing Settings status events. The debug fake serves the new pane
+When Settings regains focus after a Terminal handoff, it reads usage again.
+The `focus` refresh updates the visible Accounts pane. The debug fake serves the new pane
 fixtures; its responses are static. The real-agt isolated `--roundtrip` now
 also reorders builder providers, reads them back and applies structured undo.
 
@@ -1212,6 +1304,10 @@ They verify this Mac's WebKit; the macOS 14.0 baseline and native captures stay
 in the plan's later release checks.
 
 ## Runtime installation (step 8)
+
+The app and installer remove `AGT_JOB_ID` and `AGT_DEPTH` from the environment
+of their private CLI children. A Settings action starts at the top level even
+when a worker launched the app.
 
 First launch stages `Contents/Resources/runtime` in
 `$AGT_APP_SUPPORT/runtimes/.staging-*`, validates the manifest, plugin and

@@ -149,6 +149,7 @@ def add_parser(subparsers) -> None:
     shown = actions.add_parser("settings", help="Every share setting, where it comes from and the command that changes it.")
     shown.add_argument("--json", action="store_true")
     status = actions.add_parser("status", help="What's in sync, what differs and what waits for you; writes nothing.")
+    status.add_argument("--user-only", action="store_true", help="Check only your user folders. Skip listed repos and worktrees.")
     status.add_argument("--diff", action="store_true", help="Show how the copies of each conflict differ.")
     status.add_argument("-v", "--verbose", action="store_true", help="Name the plugin skills and commands left out of Kiro.")
     status.add_argument("--json", action="store_true")
@@ -1308,7 +1309,7 @@ def _home(args: argparse.Namespace) -> int:
     """`agt share` on its own: the status, then what people come here to do. It's a screen you open to look
     around, so it exits 0 even when something waits; `agt share status` exits 1 then."""
 
-    _status(argparse.Namespace(**{**vars(args), "diff": False, "json": False}))
+    _status(argparse.Namespace(**{**vars(args), "diff": False, "json": False, "user_only": False}))
     if settings.load().enabled:
         ui.out("", *ui.columns([
             [ui.muted("What goes where"), ui.cmd("agt share pick")],
@@ -1345,7 +1346,7 @@ def _status(args: argparse.Namespace) -> int:
     if plan.plugin_parts is not None:
         # Your skill coming first, and what the mirrors leave out: notes, so they don't make status exit 1.
         plan.notices += plan.plugin_parts.notes() + plan.plugin_parts.left_out(named=args.json or _verbose)
-    repos = [] if scope.current().project else [_repo_status(target) for target in _repo_scopes(saved)]
+    repos = [] if args.user_only or scope.current().project else [_repo_status(target) for target in _repo_scopes(saved)]
     if any(entry.get("conflicts") or entry.get("pending") for entry in repos):
         code = 1
     if args.json:
