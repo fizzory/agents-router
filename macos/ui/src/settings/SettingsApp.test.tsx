@@ -118,6 +118,18 @@ describe('Settings refresh', () => {
     expect(counts(api)).toEqual({ ...empty, configShow: 2 });
   });
 
+  it.each([[null], ['/project']])('a share refresh rereads a showing Sharing pane and no settings document (workspace %j)', async (workspace) => {
+    const { api, emit } = await renderSettings({ target: { pane: 'sharing', workspace } });
+    clear(api);
+    // A sync changes no settings file: the watched User file sends `config` for that.
+    await emit('onSettingsRefresh', { kinds: ['share'] });
+    expect(counts(api)).toEqual({ ...empty, shareList: 1, shareStatus: 1 });
+    // The User file is still reread when a refresh asks for config.
+    await emit('onSettingsRefresh', { kinds: ['share', 'config'] });
+    expect(counts(api)).toEqual({ ...empty, configShow: workspace ? 2 : 1, shareList: 2, shareStatus: 2 });
+    expect(api.configShow).toHaveBeenCalledWith(null);
+  });
+
   it('refreshes the badge once and reloads dirty Sharing on selection', async () => {
     const { api, emit } = await renderSettings({ target: { pane: 'sharing' } });
     fireEvent.click(nav('general')!);

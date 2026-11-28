@@ -338,6 +338,13 @@ def check_sources(root, *, release=False):
     if not re.search(r"Ok\(0\)\s*=>\s*\(\)", open_checks) or not re.search(
             r"Ok\(_\)\s*=>\s*request_usage\(", open_checks):
         fail("account-checks", "automatic checks must refresh usage only when a check ran")
+    # An open rereads everything. Kinds kept while Settings was closed would go
+    # out with the open's focus and read the same things a second time.
+    opened = body(native_rs, "pub fn open_settings(")
+    cleared = re.search(r"\bapp::clear_missed_refresh\s*\(\s*app\s*\)\s*;", opened)
+    if (not cleared or not 0 <= cleared.start() < opened.find('"settings-target"')
+            or ".clear();" not in body(app_rs, "pub(crate) fn clear_missed_refresh(")):
+        fail("settings-refresh", "native open_settings must clear the missed refresh kinds before it sends settings-target")
     if "diag_log::write(message);" not in body(app_rs, "pub fn log(message: &str) {"):
         fail("diag-log", "app::log must write the diagnostic log as well as stderr")
     trace = body(app_rs, "pub fn trace(message: &str) {")
@@ -817,6 +824,16 @@ class AppSourceTests(unittest.TestCase):
                     self.assertIn(old, text)
                     self.write(root, path, text.replace(old, new, 1))
                 self.reject("account-checks", mutate)
+
+    def test_rejects_a_settings_open_that_keeps_the_missed_refresh_kinds(self):
+        native, app = TAURI / "src/native.rs", TAURI / "src/app.rs"
+        clear = "        app::clear_missed_refresh(app);\n"
+        target = '        let _ = app.emit_to("settings", "settings-target", target);\n'
+        self.reject_changes("settings-refresh", [
+            (native, clear, ""),
+            (native, clear + target, target + clear),
+            (app, '        .expect("missed refresh")\n        .clear();\n}', '        .expect("missed refresh");\n}'),
+        ])
 
     def test_rejects_popover_body_or_root_corner_clipping(self):
         for selector, declaration in [

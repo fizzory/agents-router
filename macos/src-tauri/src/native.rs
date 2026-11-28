@@ -748,6 +748,9 @@ pub fn open_settings(app: &tauri::AppHandle, mtm: MainThreadMarker, mut target: 
         let _ = window.unminimize();
         let _ = window.set_focus();
         let _ = app.show();
+        // The target's catch-up rereads everything: the focus this open causes
+        // must not bring the kinds kept while Settings was closed as well.
+        app::clear_missed_refresh(app);
         let _ = app.emit_to("settings", "settings-target", target);
     }
     app::trace("Settings shown activation=Regular; webview retained; target delivered");

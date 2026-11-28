@@ -130,7 +130,8 @@ fn settings_visible(app: tauri::AppHandle) -> bool {
 /// The `settings-refresh` kinds that came while Settings wasn't visible. tao's
 /// `is_visible` is NO for a closed or minimized window and while the app is
 /// hidden. Opening sends `settings-target`, whose catch-up rereads everything,
-/// but restoring a minimized window or unhiding the app only focuses it.
+/// so an open clears the set. Restoring a minimized window or unhiding the app
+/// only focuses it: that focus carries the kept kinds.
 #[derive(Debug, Default)]
 struct MissedRefresh(Vec<String>);
 impl MissedRefresh {
@@ -153,6 +154,21 @@ impl MissedRefresh {
             .for_each(|kind| add(&mut send, kind));
         Some(send)
     }
+    /// Keeps none and sends none: an open rereads everything itself.
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
+/// An open's catch-up covers every kind kept while Settings wasn't visible.
+/// Left in the set, they would go out with the open's focus and, when that
+/// focus lands after the catch-up's batch, read the same things a second time.
+pub(crate) fn clear_missed_refresh(app: &tauri::AppHandle) {
+    app.state::<AppState>()
+        .missed_refresh
+        .lock()
+        .expect("missed refresh")
+        .clear();
 }
 
 /// Never holds the lock across `settings_is_visible`: off the main thread it
@@ -841,6 +857,21 @@ mod missed_refresh_tests {
         let mut missed = MissedRefresh::default();
         assert_eq!(missed.route(true, &["focus"]).unwrap(), ["focus"]);
         assert_eq!(missed.route(true, &["config"]).unwrap(), ["config"]);
+    }
+
+    #[test]
+    fn an_open_clears_the_kept_kinds_so_its_focus_carries_only_itself() {
+        let mut missed = MissedRefresh::default();
+        assert_eq!(missed.route(false, &["timer"]), None);
+        assert_eq!(missed.route(false, &["share", "activity"]), None);
+        missed.clear();
+        assert_eq!(missed.route(true, &["focus"]).unwrap(), ["focus"]);
+        // Cleared, not switched off: what comes while hidden again is kept again.
+        assert_eq!(missed.route(false, &["share"]), None);
+        assert_eq!(
+            missed.route(true, &["focus"]).unwrap(),
+            ["focus", "share"]
+        );
     }
 }
 

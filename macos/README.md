@@ -910,8 +910,11 @@ Settings isn't visible (closed, minimized, or the app hidden), the app sends
 none and keeps the kinds that came. The next `settings-refresh` that goes out
 carries them too, each once; Settings' next focus sends one. Restoring a
 minimized window or unhiding the app sends no `settings-target`, so that focus
-is what reloads a showing Sharing or Activity pane after a sync. On an open,
-the 50 ms batch merges it with the catch-up.
+is what reloads a showing Sharing or Activity pane after a sync. An open drops
+the kept kinds before it sends `settings-target`: its catch-up rereads
+everything, so its focus carries only `focus`. The 50 ms batch merges that
+focus with the catch-up. A focus that lands after the batch reads only what
+`focus` reads.
 
 | Kind | Source | Reads |
 | --- | --- | --- |
@@ -926,6 +929,8 @@ only its badge (`share status`) while another pane shows. No event names a
 changed `share.*` setting, so `config` and `timer` refresh Sharing too.
 With a workspace selected, `timer`, `focus` and `config` also reread the User
 config while Sharing is showing or loaded: Sharing edits the User file.
+`share` and `activity` read no config: a changed user settings file sends
+`config`.
 
 A loaded pane that isn't showing is not read. It reloads when next selected.
 

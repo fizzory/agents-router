@@ -337,8 +337,10 @@ function Settings({ api, now = () => Date.now(), timeZone }: SettingsAppProps) {
     // any refresh, its focus included, reloads the pane.
     const dropped = DATA_PANES.includes(current) && reads.dirty.has(paneKey(current, workspace));
     if (showing || dropped) {
-      loadPane(current, { force: true, automatic: true, workspace,
-        configRequested: readConfig && (workspace === null || userConfig) }).catch(report);
+      // The config reads above are the only ones a refresh makes: with
+      // readConfig they cover the User file Sharing shows. A share event alone
+      // doesn't change that file (config events do), so it rereads none.
+      loadPane(current, { force: true, automatic: true, workspace, configRequested: true }).catch(report);
     }
     if (sharing && current !== 'sharing') badge().catch(report);
   };
