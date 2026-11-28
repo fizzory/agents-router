@@ -111,6 +111,7 @@ SHARE = {
     ],
     "examples": [
         ("agt share enable --dry-run", "See the plan; nothing is written"),
+        ("agt share status --user-only", "Check only your user folders, as the macOS app does"),
         ("agt share pick dana --not-in kiro", "Take one agent out of one CLI"),
         ("agt share undo dana --in kiro", "Bring that copy back"),
         ("agt share kinds add plugins", "Install plugins between Claude Code and Codex"),

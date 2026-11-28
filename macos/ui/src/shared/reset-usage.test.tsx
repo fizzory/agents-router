@@ -1,8 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { envelope, NOW, renderPopover, row } from '../test/popover';
-import { envelope as settingsEnvelope, fakeSettingsApi, NOW as SETTINGS_NOW, renderSettings, settle } from '../test/settings';
-import { SettingsApp } from '../settings/SettingsApp';
+import { envelope as settingsEnvelope, NOW as SETTINGS_NOW, renderSettings } from '../test/settings';
 import sharedStyles from './shared.css?raw';
 import settingsStyles from '../settings/settings.css?raw';
 import { UsageGauge } from './UsageGauge';
@@ -154,10 +153,9 @@ describe('Settings Claude source and age', () => {
   });
 
   it('shows no source line before a snapshot arrives, while its first read is pending, or after a failed read', async () => {
-    const view = fakeSettingsApi({ target: { pane: 'accounts' } });
-    view.api.getSnapshot.mockReturnValue(new Promise(() => {}));
-    render(<SettingsApp api={view.api} now={() => SETTINGS_NOW} timeZone="UTC" />);
-    await settle();
+    const view = await renderSettings({ target: { pane: 'accounts' } }, ({ api }) => {
+      api.getSnapshot.mockReturnValue(new Promise(() => {}));
+    });
     const expectUnavailable = () => {
       const rows = [...document.querySelectorAll('.settings-account[data-key^="claude:"]')];
       expect(rows.length).toBeGreaterThan(0);

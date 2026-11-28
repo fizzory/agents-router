@@ -518,7 +518,7 @@ impl CommandKind {
             Self::RolesShow => &["roles", "show"],
             Self::RolesConfig => &["roles", "config"],
             Self::ShareList => &["share", "list"],
-            Self::ShareStatus => &["share", "status"],
+            Self::ShareStatus => &["share", "status", "--user-only"],
             Self::SharePick => &["share", "pick"],
             Self::ShareUndo => &["share", "undo"],
             Self::ShareKindsAdd => &["share", "kinds", "add"],

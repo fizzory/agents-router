@@ -175,7 +175,7 @@ def fixture_texts() -> dict[str, str]:
                     '---\nname: example\ndescription: Example agent\n---\nHelp with examples.\n', encoding="utf-8")
                 os.utime(home / ".claude" / "agents" / "example.md", (NOW - 60, NOW - 60))
                 from agents_router.share import settings
-                capture("share-status-off", ["share", "status"])
+                capture("share-status-off", ["share", "status", "--user-only"])
                 saved = settings.Settings(enabled=True, watcher=False, push_on_save=False,
                                           folders=[settings.Folder("claude", home / ".claude", "claude"),
                                                    settings.Folder("codex", home / ".codex", "codex")])
@@ -185,7 +185,7 @@ def fixture_texts() -> dict[str, str]:
                 conflict.write_text('name = "example"\ndescription = "Example agent"\n'
                                     'developer_instructions = "A different example agent."\n', encoding="utf-8")
                 os.utime(conflict, (NOW - 60, NOW - 60))
-                capture("share-status", ["share", "status"], 1)
+                capture("share-status", ["share", "status", "--user-only"], 1)
                 conflict.unlink()
                 capture("share-pick-needs-choice", ["share", "pick"], 3)
                 share_inputs(home)
@@ -213,7 +213,7 @@ def fixture_texts() -> dict[str, str]:
                 waiting = home / ".claude/agents/waiting.md"
                 waiting.write_text('---\nname: waiting\ndescription: Waiting agent\n---\nWait for a pick.\n', encoding="utf-8")
                 os.utime(waiting, (NOW - 60, NOW - 60))
-                capture("share-status-waiting", ["share", "status"])
+                capture("share-status-waiting", ["share", "status", "--user-only"])
                 # Relative home paths keep config's content revision deterministic.
                 user.write_text(user.read_text().replace(str(home), "~"), encoding="utf-8")
                 user.write_text(user.read_text() + '\n[usage]\nstatusline = true\n', encoding="utf-8")

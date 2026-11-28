@@ -3,10 +3,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 import time
 import unittest
+from unittest.mock import patch
 
 from helpers import TempHome
 
-from agents_router import accounts
+from agents_router import accounts, fsutil
 from agents_router.runtimes.codex import CodexParser, find_rollout, last_rate_limits, usage_windows
 
 THREAD = "01a141dd-7dbd-73d2-bc93-bd302ca72586"
@@ -78,6 +79,49 @@ class RolloutTests(TempHome):
         parser.feed({"type": "turn.completed", "usage": {}})
         self.assertEqual(parser.finish(0, "").outcome, "success")
         self.assertNotIn("c1", accounts.load_usage("codex"))
+
+
+class UsageWriteTests(TempHome):
+    def test_repeated_observations_leave_the_usage_file_untouched(self):
+        windows = usage_windows(limits(45, 21))
+        stored = accounts.update_usage("codex", "c1", windows=windows, observed_at=100)
+        path = accounts._usage_path("codex")
+        before = fsutil.stat_signature(path), path.read_bytes()
+        for stamp in (100, 99):
+            with self.subTest(stamp=stamp):
+                returned = accounts.update_usage("codex", "c1", windows=windows, observed_at=stamp)
+                self.assertEqual((fsutil.stat_signature(path), path.read_bytes()), before)
+                self.assertEqual(returned, stored)
+
+        with patch.object(accounts, "write_json", wraps=fsutil.write_json) as write:
+            newer = accounts.update_usage("codex", "c1", windows=windows, observed_at=101)
+            self.assertEqual(newer["observed_at"], 101)
+            self.assertEqual(accounts.load_usage("codex")["c1"], newer)
+            write.assert_called_once()
+            write.reset_mock()
+            reserved = accounts.update_usage("codex", "c1", probed_at=102)
+            self.assertEqual(reserved["probed_at"], 102)
+            self.assertEqual(accounts.load_usage("codex")["c1"], reserved)
+            write.assert_called_once()
+            first = accounts.update_usage("codex", "c1", cooldown_until=130)
+            second = accounts.update_usage("codex", "c1", cooldown_until=130)
+            self.assertNotEqual(first["cooldown_revision"], second["cooldown_revision"])
+            self.assertEqual(accounts.load_usage("codex")["c1"], second)
+
+    def test_legacy_observation_timestamps_are_written_once(self):
+        for runtime in ("codex", "claude"):
+            with self.subTest(runtime=runtime):
+                path = accounts._usage_path(runtime)
+                fsutil.write_json(path, {"c1": {"windows": usage_windows(limits(45, 21)), "updated": 100}})
+                with patch.object(accounts, "write_json", wraps=fsutil.write_json) as write:
+                    record = accounts.update_usage(runtime, "c1")
+                    if runtime == "codex":
+                        self.assertEqual(record["observed_at"], 100)
+                    else:
+                        self.assertEqual({win["observed_at"] for win in record["windows"].values()}, {100})
+                    self.assertEqual(accounts.load_usage(runtime)["c1"], record)
+                    self.assertEqual(accounts.update_usage(runtime, "c1"), record)
+                    write.assert_called_once()
 
 
 if __name__ == "__main__":

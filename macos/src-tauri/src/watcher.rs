@@ -2,7 +2,7 @@
 use notify_debouncer_mini::{
     new_debouncer,
     notify::{RecommendedWatcher, RecursiveMode},
-    DebounceEventResult, Debouncer,
+    DebounceEventResult, DebouncedEvent, Debouncer,
 };
 use serde_json::Value;
 use std::{
@@ -38,6 +38,8 @@ const STATUS_FIELDS: [&str; 7] = [
     "account",
     "assigned_account",
 ];
+/// Every `settings-refresh` kind the watcher sends, in the order it lists them.
+const SETTINGS_KINDS: [&str; 3] = ["config", "share", "activity"];
 #[derive(Debug, Clone)]
 pub struct WatchPaths {
     pub state: PathBuf,
@@ -46,16 +48,34 @@ pub struct WatchPaths {
 }
 
 impl WatchPaths {
+    fn state_entry<'a>(&self, event: &'a Path) -> Option<&'a Path> {
+        event
+            .strip_prefix(&self.state)
+            .ok()
+            .or_else(|| event.strip_prefix(self.state.canonicalize().ok()?).ok())
+    }
+
+    /// The state folder or a folder above it. An event there can stand for any
+    /// file under it: FSEvents reports the events it dropped as one on a folder.
+    fn covers_state(&self, event: &Path) -> bool {
+        self.state.starts_with(event)
+            || self
+                .state
+                .canonicalize()
+                .is_ok_and(|root| root.starts_with(event))
+    }
+
     fn relevant(&self, event: &Path) -> bool {
-        if [&self.state, &self.jobs].iter().any(|root| {
-            let resolved = root.canonicalize().unwrap_or_else(|_| (*root).clone());
-            event.starts_with(root)
-                || root.starts_with(event)
-                || event.starts_with(&resolved)
-                || resolved.starts_with(event)
-        }) {
+        if self.covers_state(event) {
             return true;
         }
+        if let Some(entry) = self.state_entry(event) {
+            return usage_state(entry, event);
+        }
+        self.settings_event(event)
+    }
+
+    fn settings_event(&self, event: &Path) -> bool {
         self.settings.iter().any(|file| {
             let target = file.canonicalize().unwrap_or_else(|_| file.clone());
             event == file || event == target || file.starts_with(event) || target.starts_with(event)
@@ -95,6 +115,86 @@ impl WatchPaths {
             }
         }
         result
+    }
+}
+/// notify-debouncer-mini reports paths, including folder events folded by FSEvents.
+fn usage_state(entry: &Path, event: &Path) -> bool {
+    if entry.as_os_str().is_empty()
+        || entry == Path::new("claude-live")
+        || entry == Path::new("leases")
+    {
+        return true;
+    }
+    let name = entry
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    if entry.starts_with("leases") {
+        if let Some(slot) = name
+            .strip_suffix(".lock")
+            .or_else(|| name.strip_suffix(".owner.json"))
+        {
+            if !slot.is_empty() && slot.bytes().all(|b| b.is_ascii_digit()) {
+                return true;
+            }
+        }
+        // Removed lease folders have no metadata. Runtime and account folder names
+        // usually have no extension; keep an ambiguous removal in that case.
+        return event.is_dir() || (!event.exists() && entry.extension().is_none());
+    }
+    match entry.parent() {
+        Some(parent) if parent == Path::new("claude-live") => name.ends_with(".json"),
+        Some(parent) if parent.as_os_str().is_empty() => {
+            matches!(
+                name,
+                "claude-profiles.json" | "account-checks.json" | "statusline.json"
+            ) || ["-usage.json", "-health.json"].iter().any(|suffix| {
+                name.strip_suffix(suffix)
+                    .is_some_and(|runtime| !runtime.is_empty())
+            })
+        }
+        _ => false,
+    }
+}
+
+/// The Settings refresh kind of an entry under the state folder. An event on
+/// `share` itself is none: the watcher's heartbeat makes that folder, each file
+/// in it has its own event, and a visible Settings rereads Sharing on its
+/// timer. Activity has no timer, so an event FSEvents folded onto `log` counts.
+fn settings_state(entry: &Path) -> Option<&'static str> {
+    if entry == Path::new("log") {
+        return Some("activity");
+    }
+    let name = entry.file_name()?.to_str()?;
+    match entry.parent()? {
+        parent if parent == Path::new("share") => {
+            // Atomic writes announce a temp file and then the destination.
+            let temp = name
+                .strip_prefix('.')
+                .and_then(|s| s.strip_suffix(".tmp"))
+                .and_then(|s| s.rsplit_once('.'))
+                .is_some_and(|(destination, nonce)| {
+                    !destination.is_empty()
+                        && nonce.len() == 12
+                        && nonce.bytes().all(|b| b.is_ascii_hexdigit())
+                });
+            let bookkeeping = matches!(
+                name,
+                "heartbeat.json"
+                    | "signature.json"
+                    | "sessions.json"
+                    | "settings.good.toml"
+                    | "launchd.log"
+                    | "launcher.log"
+                    | "notified.json"
+                    | "shown.json"
+                    | "hinted.json"
+                    | "projects"
+            );
+            (!temp && !bookkeeping).then_some("share")
+        }
+        parent if parent == Path::new("log") && name.ends_with(".jsonl") => Some("activity"),
+        _ => None,
     }
 }
 /// Which events change what `agt usage` reports. Unsure means yes: a path seen
@@ -202,6 +302,7 @@ struct Reads {
     settings: HashSet<PathBuf>,
     /// Since when a read is due; it starts once DEBOUNCE has passed.
     dirty: Option<Instant>,
+    settings_kinds: Vec<&'static str>,
 }
 impl Reads {
     fn new(paths: WatchPaths) -> Self {
@@ -209,6 +310,7 @@ impl Reads {
             settings: resolved(&paths.settings),
             relevance: Relevance::new(paths),
             dirty: None,
+            settings_kinds: Vec::new(),
         }
     }
     /// A debounced batch of event paths; true when any of them counts.
@@ -217,7 +319,22 @@ impl Reads {
         // Every event, not just up to the first relevant one, so each
         // status.json's last-seen fields stay current.
         for path in paths {
-            relevant |= self.relevance.relevant(path) || self.settings.contains(path);
+            let config = self.settings.contains(path) || self.relevance.paths.settings_event(path);
+            relevant |= self.relevance.relevant(path) || config;
+            if config {
+                self.kind("config");
+            }
+            if self.relevance.paths.covers_state(path) {
+                self.kind("share");
+                self.kind("activity");
+            } else if let Some(kind) = self
+                .relevance
+                .paths
+                .state_entry(path)
+                .and_then(settings_state)
+            {
+                self.kind(kind);
+            }
         }
         if relevant {
             // notify-debouncer-mini already debounced these events by one second.
@@ -225,16 +342,25 @@ impl Reads {
         }
         relevant
     }
+    fn kind(&mut self, kind: &'static str) {
+        if !self.settings_kinds.contains(&kind) {
+            self.settings_kinds.push(kind);
+        }
+    }
     /// A wake: the read waits DEBOUNCE after the latest one.
     fn wake(&mut self, now: Instant) {
         self.dirty = Some(now);
     }
     /// Events may have gone unseen: the watcher reported an error, or a watched
     /// folder came, went or was replaced, perhaps the jobs folder, whose jobs'
-    /// statuses may be another folder's now.
+    /// statuses may be another folder's now. Any settings, Sharing or Activity
+    /// file may have changed too, so Settings gets every refresh kind.
     fn missed(&mut self, now: Instant) {
         self.relevance.forget();
         self.dirty.get_or_insert(now);
+        for kind in SETTINGS_KINDS {
+            self.kind(kind);
+        }
     }
     /// Ends a turn: notes the settings targets, then takes the read if one is
     /// due.
@@ -303,14 +429,19 @@ impl SettingsWatcher {
     pub fn wake_trigger(&self) -> WakeTrigger {
         WakeTrigger(self.sender.clone())
     }
-    pub fn start(paths: WatchPaths, on_change: impl Fn() + Send + 'static) -> Result<Self, String> {
-        Self::start_observed(paths, on_change, |_| ())
+    pub fn start(
+        paths: WatchPaths,
+        on_change: impl Fn() + Send + 'static,
+        on_settings: impl Fn(&[&str]) + Send + 'static,
+    ) -> Result<Self, String> {
+        Self::start_observed(paths, on_change, on_settings, |_| ())
     }
     /// `start`, with `on_turn` told what each eventful turn of the watch loop
     /// did. Tests wait on it; the app passes a no-op.
     fn start_observed(
         paths: WatchPaths,
         on_change: impl Fn() + Send + 'static,
+        on_settings: impl Fn(&[&str]) + Send + 'static,
         on_turn: impl FnMut(&Turn) + Send + 'static,
     ) -> Result<Self, String> {
         if [&paths.state, &paths.jobs]
@@ -328,7 +459,15 @@ impl SettingsWatcher {
         .map_err(|e| e.to_string())?;
         let (ready_tx, ready_rx) = mpsc::channel();
         let worker = thread::spawn(move || {
-            watch_loop(paths, debouncer, receiver, ready_tx, on_change, on_turn)
+            watch_loop(
+                paths,
+                debouncer,
+                receiver,
+                ready_tx,
+                on_change,
+                on_settings,
+                on_turn,
+            )
         });
         match ready_rx.recv().map_err(|e| e.to_string())? {
             Ok(()) => Ok(Self {
@@ -406,6 +545,8 @@ struct Turn<'a> {
     pending: bool,
     /// The watches in place after this turn.
     watched: &'a HashMap<PathBuf, Identity>,
+    /// The debounced events this turn handled.
+    events: &'a [DebouncedEvent],
 }
 
 fn watch_loop(
@@ -414,6 +555,7 @@ fn watch_loop(
     receiver: mpsc::Receiver<Message>,
     ready: mpsc::Sender<Result<(), String>>,
     on_change: impl Fn(),
+    on_settings: impl Fn(&[&str]),
     mut on_turn: impl FnMut(&Turn),
 ) {
     let mut registered = HashMap::new();
@@ -450,12 +592,20 @@ fn watch_loop(
         if read {
             on_change();
         }
+        if !reads.settings_kinds.is_empty() {
+            on_settings(&reads.settings_kinds);
+            reads.settings_kinds.clear();
+        }
         if message.is_ok() || rewatched || read {
             on_turn(&Turn {
                 woke: matches!(message, Ok(Message::Wake)),
                 read,
                 pending: reads.dirty.is_some(),
                 watched: &registered,
+                events: match &message {
+                    Ok(Message::Events(Ok(events))) => events,
+                    _ => &[],
+                },
             });
         }
     }
@@ -702,6 +852,127 @@ mod tests {
         });
         (temp, jobs, reads)
     }
+    #[test]
+    fn usage_state_paths_match_what_usage_reads() {
+        let (temp, _, mut reads) = reads_for("state-inputs");
+        let state = temp.0.join("state");
+        fs::create_dir_all(state.join("leases/provider/team.name")).unwrap();
+        fs::write(state.join("leases/unrelated"), "").unwrap();
+        for name in [
+            "",
+            "new-runtime-usage.json",
+            "another-health.json",
+            "claude-profiles.json",
+            "account-checks.json",
+            "statusline.json",
+            "claude-live",
+            "claude-live/home.json",
+            "leases",
+            "leases/provider",
+            "leases/provider/team.name",
+            "leases/123.lock",
+            "leases/provider/work/0.owner.json",
+            "leases/provider/work/04.lock",
+        ] {
+            assert!(reads.relevance.relevant(&state.join(name)), "{name}");
+        }
+        assert!(reads.relevance.relevant(&temp.0));
+        for name in [
+            "share/manifest.json",
+            "log/changes.jsonl",
+            "groups/g",
+            "sessions/s.json",
+            "sync/user.json",
+            "backups/copy",
+            "statusline-backups/s.json",
+            "codex-probes/a.json",
+            "locks/2.lock",
+            "3.lock",
+            "leases/unrelated",
+            "leases/x.lock",
+            "leases/1.json",
+            "leases/3.owner.json.bak",
+            "leases/٢.lock",
+            "unknown.json",
+            "-usage.json",
+            "claude-live/home.txt",
+            "claude-live/other/deeper.json",
+            "other/codex-usage.json",
+            ".codex-usage.json.0123456789ab.tmp",
+            "leases/.3.lock.0123456789ab.tmp",
+        ] {
+            assert!(!reads.relevance.relevant(&state.join(name)), "{name}");
+        }
+    }
+
+    #[test]
+    fn share_heartbeat_and_its_atomic_write_start_no_reads() {
+        let (temp, _, mut reads) = reads_for("share-heartbeat");
+        let share = temp.0.join("state/share");
+        let events = [
+            share.join(".heartbeat.json.0123456789ab.tmp"),
+            share.join("heartbeat.json"),
+        ];
+        assert_eq!(batch(&mut reads, &events, Instant::now()), (false, false));
+        assert!(reads.settings_kinds.is_empty());
+    }
+
+    #[test]
+    fn settings_refresh_kinds_follow_only_user_config_share_and_activity() {
+        let (temp, _, mut reads) = reads_for("settings-kinds");
+        let config = temp.0.join("config/settings.toml");
+        let state = temp.0.join("state");
+        reads.relevance.paths.settings.push(config.clone());
+        let now = Instant::now();
+        let (share, activity, none): (&[&str], &[&str], &[&str]) = (&["share"], &["activity"], &[]);
+        for (name, expected) in [
+            ("share", none),
+            ("share/user.json", share),
+            ("share/.unrelated.tmp", share),
+            ("log", activity),
+            ("log/settings.jsonl", activity),
+            ("log/nested/a.jsonl", none),
+            ("log/a.log", none),
+            ("share/projects", none),
+            ("share/projects/user.json", none),
+            ("share/heartbeat.json", none),
+            ("share/signature.json", none),
+            ("share/sessions.json", none),
+            ("share/settings.good.toml", none),
+            ("share/launchd.log", none),
+            ("share/launcher.log", none),
+            ("share/notified.json", none),
+            ("share/shown.json", none),
+            ("share/hinted.json", none),
+            ("share/.manifest.json.0123456789ab.tmp", none),
+            ("claude-live/a.json", none),
+            // The state folder: its event can stand for any file under it.
+            ("", &["share", "activity"]),
+        ] {
+            let path = state.join(name);
+            reads.events([path.as_path()], now);
+            assert_eq!(
+                std::mem::take(&mut reads.settings_kinds),
+                expected,
+                "{name}"
+            );
+        }
+        // A folder above both the state folder and the settings file.
+        reads.events([temp.0.as_path()], now);
+        assert_eq!(
+            std::mem::take(&mut reads.settings_kinds),
+            SETTINGS_KINDS,
+            "above"
+        );
+        let mixed = [
+            config,
+            state.join("share/user.json"),
+            state.join("log/a.jsonl"),
+            state.join("share/other.json"),
+        ];
+        reads.events(mixed.iter().map(PathBuf::as_path), now);
+        assert_eq!(reads.settings_kinds, ["config", "share", "activity"]);
+    }
     /// One watch loop turn that handles a debounced batch of `paths` at `now`:
     /// whether the batch counted, and whether a read started.
     fn batch(reads: &mut Reads, paths: &[PathBuf], now: Instant) -> (bool, bool) {
@@ -813,6 +1084,8 @@ mod tests {
         assert_eq!(batch(&mut reads, &[status.clone()], start), (false, false));
         reads.missed(start);
         assert!(reads.relevance.statuses.is_empty());
+        // Settings, Sharing and Activity files may have changed unseen too.
+        assert_eq!(reads.settings_kinds, SETTINGS_KINDS);
         assert!(!reads.end_turn(start));
         // The same fields count again, and the read stays due from the miss.
         let half = start + DEBOUNCE / 2;
@@ -873,21 +1146,28 @@ mod tests {
         read: bool,
         pending: bool,
         watched: HashMap<PathBuf, Identity>,
+        events: Vec<PathBuf>,
     }
-    /// A running watcher, what each read it started saw, and its turns.
+    /// A running watcher, what each read it started saw, the kinds of each
+    /// Settings refresh it sent, and its turns.
     struct Watched {
         reads: mpsc::Receiver<String>,
+        kinds: mpsc::Receiver<Vec<String>>,
         turns: mpsc::Receiver<Ack>,
         watcher: SettingsWatcher,
     }
     /// `observe` runs in each read, as a usage read would look at the files.
     fn watch(paths: WatchPaths, observe: impl Fn() -> String + Send + 'static) -> Watched {
         let (read_tx, reads) = mpsc::channel();
+        let (kind_tx, kinds) = mpsc::channel();
         let (turn_tx, turns) = mpsc::channel();
         let watcher = SettingsWatcher::start_observed(
             paths,
             move || {
                 let _ = read_tx.send(observe());
+            },
+            move |kinds: &[&str]| {
+                let _ = kind_tx.send(kinds.iter().map(|kind| (*kind).to_owned()).collect());
             },
             move |turn: &Turn| {
                 let _ = turn_tx.send(Ack {
@@ -895,12 +1175,14 @@ mod tests {
                     read: turn.read,
                     pending: turn.pending,
                     watched: turn.watched.clone(),
+                    events: turn.events.iter().map(|event| event.path.clone()).collect(),
                 });
             },
         )
         .unwrap();
         Watched {
             reads,
+            kinds,
             turns,
             watcher,
         }
@@ -938,6 +1220,47 @@ mod tests {
                     break;
                 }
             }
+        }
+        /// Waits for a Settings refresh of exactly these kinds, in any order.
+        fn refreshed(&self, expected: &[&str], what: &str) {
+            let mut expected = expected.to_vec();
+            expected.sort_unstable();
+            let deadline = Instant::now() + WATCHDOG;
+            let mut seen = Vec::new();
+            loop {
+                let left = deadline.saturating_duration_since(Instant::now());
+                match self.kinds.recv_timeout(left) {
+                    Ok(mut kinds) => {
+                        kinds.sort_unstable();
+                        if kinds == expected {
+                            return;
+                        }
+                        seen.push(kinds);
+                    }
+                    Err(error) => panic!("{what}: {error}; refreshes were {seen:?}"),
+                }
+            }
+        }
+        /// Waits for the turn that handled an event on `path`, which exists.
+        /// FSEvents reports changes in order and the debouncer holds each path
+        /// for the same time, so every earlier change has been handled by
+        /// then. A turn makes its callbacks before it is reported.
+        fn handled(&self, path: &Path) {
+            let resolved = path.canonicalize().unwrap();
+            while !self
+                .turn()
+                .events
+                .iter()
+                .any(|event| event == path || *event == resolved)
+            {}
+        }
+        /// Takes the callbacks made so far: what each read saw, and the kinds
+        /// of each Settings refresh.
+        fn callbacks(&self) -> (Vec<String>, Vec<Vec<String>>) {
+            (
+                self.reads.try_iter().collect(),
+                self.kinds.try_iter().collect(),
+            )
         }
         /// Holds the watch loop at this point in its queue until the returned
         /// sender sends or is dropped. Declare it after `self`, so a failing
@@ -1001,7 +1324,90 @@ mod tests {
         fs::rename(&jobs, temp.0.join("old-jobs")).unwrap();
         fs::rename(&staged, &jobs).unwrap();
         watched.read("running/home", "the new jobs folder is read");
+        watched.refreshed(&SETTINGS_KINDS, "a replaced folder refreshes Settings");
         watched.watching(&jobs, true);
+    }
+    #[test]
+    fn a_retargeted_agt_home_is_read_and_refreshes_settings() {
+        let temp = Scratch::new("watch-home");
+        for home in ["one", "two"] {
+            let home = temp.0.join(home);
+            fs::create_dir_all(home.join("state")).unwrap();
+            fs::create_dir(home.join("jobs")).unwrap();
+            let name = home.file_name().unwrap().to_str().unwrap();
+            fs::write(home.join("state/codex-usage.json"), name).unwrap();
+        }
+        // AGT_HOME is a link, as a dotfiles setup makes it.
+        let link = temp.0.join("home");
+        std::os::unix::fs::symlink(temp.0.join("one"), &link).unwrap();
+        let seen = link.join("state/codex-usage.json");
+        let watched = watch(
+            WatchPaths {
+                state: link.join("state"),
+                jobs: link.join("jobs"),
+                settings: vec![],
+            },
+            move || fs::read_to_string(&seen).unwrap_or_default(),
+        );
+        fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(temp.0.join("two"), &link).unwrap();
+        watched.read("two", "the new home is read");
+        watched.refreshed(&SETTINGS_KINDS, "the new home refreshes Settings");
+        watched.watching(&link.join("state"), true);
+    }
+    /// agt's fsutil.write_private, as `write_json` calls it: the folder made
+    /// owner-only when it's missing, a `.<name>.<12 hex>.tmp` beside the file,
+    /// renamed over it.
+    fn write_private(path: &Path, nonce: &str, text: &str) {
+        use std::os::unix::fs::DirBuilderExt;
+        let folder = path.parent().unwrap();
+        if !folder.exists() {
+            fs::DirBuilder::new().mode(0o700).create(folder).unwrap();
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let temp = folder.join(format!(".{name}.{nonce}.tmp"));
+        fs::write(&temp, text).unwrap();
+        fs::rename(temp, path).unwrap();
+    }
+    #[test]
+    fn a_share_heartbeat_starts_no_usage_read_and_no_sharing_refresh() {
+        let temp = Scratch::new("watch-heartbeat");
+        let (state, jobs) = (temp.0.join("state"), temp.0.join("jobs"));
+        fs::create_dir(&state).unwrap();
+        fs::create_dir(&jobs).unwrap();
+        let usage = state.join("codex-usage.json");
+        let seen = usage.clone();
+        let watched = watch(
+            WatchPaths {
+                state: state.clone(),
+                jobs,
+                settings: vec![],
+            },
+            move || fs::read_to_string(&seen).unwrap_or_default(),
+        );
+        // Making the scratch folders can reach the watcher late and start a
+        // read. A file written now is handled after them.
+        let log = state.join("log");
+        fs::create_dir(&log).unwrap();
+        let ready = log.join("2026-10.jsonl");
+        append(&ready, "{}");
+        watched.handled(&ready);
+        watched.callbacks();
+        let heartbeat = state.join("share/heartbeat.json");
+        let month = log.join("2026-11.jsonl");
+        // The watcher's first tick makes state/share; the second finds it there.
+        for (tick, nonce) in ["0123456789ab", "ba9876543210"].into_iter().enumerate() {
+            write_private(&heartbeat, nonce, r#"{"result": "nothing moved"}"#);
+            // Written after the heartbeat, so handled no earlier than it.
+            append(&month, r#"{"type":"setting"}"#);
+            watched.handled(&month);
+            let (reads, kinds) = watched.callbacks();
+            assert_eq!(kinds, [["activity"]], "tick {tick}");
+            assert!(reads.is_empty(), "tick {tick}: reads saw {reads:?}");
+        }
+        write_private(&usage, "00112233aabb", "after");
+        watched.handled(&usage);
+        assert_eq!(watched.callbacks(), (vec!["after".to_owned()], vec![]));
     }
     /// How many reads a burst makes depends on the loop's timing: a stall
     /// longer than the debounce splits it. The exact coalescing, on injected
@@ -1049,6 +1455,7 @@ mod tests {
             .send(Message::Events(Err(lost)))
             .unwrap();
         watched.read("", "lost events are read");
+        watched.refreshed(&SETTINGS_KINDS, "lost events refresh Settings");
     }
     /// An editor's atomic save: a temp file renamed over the settings file.
     fn save(file: &Path, text: &str) {
@@ -1106,6 +1513,7 @@ mod tests {
             move || {
                 let _ = tx.send(fs::read_to_string(&seen).unwrap_or_default());
             },
+            |_| (),
         )
         .unwrap();
         save(&target, "max_jobs=2");

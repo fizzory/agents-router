@@ -90,6 +90,7 @@ pub struct AppState {
     quitting: AtomicBool,
     popover_menu: Mutex<MenuSession>,
     pub settings_target: Mutex<serde_json::Value>,
+    missed_refresh: Mutex<MissedRefresh>,
 }
 
 fn usage_error(error: ClientError) -> String {
@@ -117,6 +118,82 @@ pub(crate) fn main_thread(
         log(&format!("main-thread dispatch failed: {error}"));
     }
 }
+fn settings_is_visible(app: &tauri::AppHandle) -> bool {
+    app.get_webview_window("settings")
+        .is_some_and(|w| w.is_visible().unwrap_or(false))
+}
+#[tauri::command]
+fn settings_visible(app: tauri::AppHandle) -> bool {
+    settings_is_visible(&app)
+}
+
+/// The `settings-refresh` kinds that came while Settings wasn't visible. tao's
+/// `is_visible` is NO for a closed or minimized window and while the app is
+/// hidden. Opening sends `settings-target`, whose catch-up rereads everything,
+/// so an open clears the set. Restoring a minimized window or unhiding the app
+/// only focuses it: that focus carries the kept kinds.
+#[derive(Debug, Default)]
+struct MissedRefresh(Vec<String>);
+impl MissedRefresh {
+    /// Hidden: keeps `kinds` and sends nothing. Visible: `kinds`, then every
+    /// kept kind, each once, and keeps none.
+    fn route(&mut self, visible: bool, kinds: &[&str]) -> Option<Vec<String>> {
+        fn add(list: &mut Vec<String>, kind: &str) {
+            if !list.iter().any(|known| known == kind) {
+                list.push(kind.to_owned());
+            }
+        }
+        if !visible {
+            kinds.iter().for_each(|kind| add(&mut self.0, kind));
+            return None;
+        }
+        let mut send = Vec::new();
+        kinds.iter().for_each(|kind| add(&mut send, kind));
+        std::mem::take(&mut self.0)
+            .iter()
+            .for_each(|kind| add(&mut send, kind));
+        Some(send)
+    }
+    /// Keeps none and sends none: an open rereads everything itself.
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
+/// An open's catch-up covers every kind kept while Settings wasn't visible.
+/// Left in the set, they would go out with the open's focus and, when that
+/// focus lands after the catch-up's batch, read the same things a second time.
+pub(crate) fn clear_missed_refresh(app: &tauri::AppHandle) {
+    app.state::<AppState>()
+        .missed_refresh
+        .lock()
+        .expect("missed refresh")
+        .clear();
+}
+
+/// Never holds the lock across `settings_is_visible`: off the main thread it
+/// waits for the main thread, where the focus handler takes the same lock.
+/// The bound: visibility is read before the lock, so a kind read as hidden can
+/// be kept just after a restore's focus drained the set. It then waits for the
+/// next visible refresh that goes out (the timer, at most 60 s, a focus or an
+/// event). It is never lost or sent twice: the lock makes each kept kind go
+/// out with exactly one drain.
+fn refresh_settings(app: &tauri::AppHandle, kinds: &[&str]) {
+    let visible = settings_is_visible(app);
+    let send = app
+        .state::<AppState>()
+        .missed_refresh
+        .lock()
+        .expect("missed refresh")
+        .route(visible, kinds);
+    if let Some(kinds) = send {
+        let _ = app.emit_to(
+            "settings",
+            "settings-refresh",
+            serde_json::json!({ "kinds": kinds }),
+        );
+    }
+}
 fn publish_status(app: &tauri::AppHandle, snapshot: PopoverSnapshot, fresh: bool) {
     // The status event can carry a retained old snapshot. Only usage-updated animates data.
     let _ = app.emit_to(
@@ -128,15 +205,11 @@ fn publish_status(app: &tauri::AppHandle, snapshot: PopoverSnapshot, fresh: bool
         },
         &snapshot,
     );
-    let _ = app.emit_to(
-        "settings",
-        if fresh {
-            "usage-updated"
-        } else {
-            "settings-status"
-        },
-        &snapshot,
-    );
+    if fresh {
+        let _ = app.emit_to("settings", "usage-updated", &snapshot);
+    } else if settings_is_visible(app) {
+        let _ = app.emit_to("settings", "settings-status", &snapshot);
+    }
     main_thread(app, move |app, mtm| {
         // Another read can finish between publication and main-thread dispatch.
         let latest = app
@@ -752,6 +825,57 @@ fn known_account(state: &AppState, runtime: &str, account: &str) -> Result<(), S
 }
 
 #[cfg(test)]
+mod missed_refresh_tests {
+    use super::MissedRefresh;
+
+    #[test]
+    fn kinds_dropped_while_hidden_go_out_once_with_the_next_focus() {
+        let mut missed = MissedRefresh::default();
+        assert_eq!(missed.route(false, &["share"]), None);
+        assert_eq!(missed.route(false, &["activity", "share"]), None);
+        assert_eq!(
+            missed.route(true, &["focus"]).unwrap(),
+            ["focus", "share", "activity"]
+        );
+        // Drained: the next focus carries only itself.
+        assert_eq!(missed.route(true, &["focus"]).unwrap(), ["focus"]);
+    }
+
+    #[test]
+    fn a_kept_kind_is_not_sent_twice() {
+        let mut missed = MissedRefresh::default();
+        assert_eq!(missed.route(false, &["timer", "focus", "timer"]), None);
+        assert_eq!(missed.route(false, &["focus"]), None);
+        assert_eq!(
+            missed.route(true, &["focus", "timer"]).unwrap(),
+            ["focus", "timer"]
+        );
+    }
+
+    #[test]
+    fn nothing_dropped_sends_only_the_event_itself() {
+        let mut missed = MissedRefresh::default();
+        assert_eq!(missed.route(true, &["focus"]).unwrap(), ["focus"]);
+        assert_eq!(missed.route(true, &["config"]).unwrap(), ["config"]);
+    }
+
+    #[test]
+    fn an_open_clears_the_kept_kinds_so_its_focus_carries_only_itself() {
+        let mut missed = MissedRefresh::default();
+        assert_eq!(missed.route(false, &["timer"]), None);
+        assert_eq!(missed.route(false, &["share", "activity"]), None);
+        missed.clear();
+        assert_eq!(missed.route(true, &["focus"]).unwrap(), ["focus"]);
+        // Cleared, not switched off: what comes while hidden again is kept again.
+        assert_eq!(missed.route(false, &["share"]), None);
+        assert_eq!(
+            missed.route(true, &["focus"]).unwrap(),
+            ["focus", "share"]
+        );
+    }
+}
+
+#[cfg(test)]
 mod account_command_tests {
     use super::*;
     use crate::terminal::tests::Scratch;
@@ -778,6 +902,7 @@ mod account_command_tests {
             quitting: AtomicBool::new(false),
             popover_menu: Mutex::new(MenuSession::default()),
             settings_target: Mutex::new(serde_json::json!({})),
+            missed_refresh: Mutex::default(),
         };
         let app = tauri::test::mock_builder()
             .manage(state)
@@ -1094,6 +1219,7 @@ pub fn run() {
         quitting: AtomicBool::new(false),
         popover_menu: Mutex::new(MenuSession::default()),
         settings_target: Mutex::new(serde_json::json!({"pane":"general"})),
+        missed_refresh: Mutex::default(),
     };
     // The login item follows the bundle identifier, so a test build never replaces
     // the release's, and it reopens a test build with its chosen folders.
@@ -1134,6 +1260,7 @@ pub fn run() {
             set_popover_height,
             open_settings,
             get_settings_target,
+            settings_visible,
             show_setting_menu,
             show_pane_menu,
             show_popover_menu,
@@ -1197,10 +1324,7 @@ pub fn run() {
                     );
                 }
                 "settings-undo" | "settings-redo" => {
-                    if app
-                        .get_webview_window("settings")
-                        .is_some_and(|w| w.is_visible().unwrap_or(false))
-                    {
+                    if settings_is_visible(app) {
                         let action = if event.id.as_ref() == "settings-undo" {
                             "undo"
                         } else {
@@ -1234,6 +1358,8 @@ pub fn run() {
                     })
                 }
                 tauri::WindowEvent::Focused(true) if window.label() == "settings" => {
+                    // With what came while minimized or with the app hidden.
+                    refresh_settings(app, &["focus"]);
                     request_usage(app, true, "reactivation")
                 }
                 tauri::WindowEvent::CloseRequested { api, .. } => {
@@ -1311,8 +1437,12 @@ pub fn run() {
                 &app.state::<AppState>().snapshot.lock().expect("snapshot"),
             );
             let handle = app.handle().clone();
-            let watcher =
-                SettingsWatcher::start(watch, move || request_usage(&handle, false, "debounced"))?;
+            let settings = app.handle().clone();
+            let watcher = SettingsWatcher::start(
+                watch,
+                move || request_usage(&handle, false, "debounced"),
+                move |kinds| refresh_settings(&settings, kinds),
+            )?;
             if app.state::<AppPaths>().test {
                 // Rewrite an enabled login item so it reopens with this launch's folders.
                 use tauri_plugin_autostart::ManagerExt;
@@ -1337,6 +1467,7 @@ pub fn run() {
                 loop {
                     timer.tick().await;
                     request_usage(&handle, true, "timer");
+                    refresh_settings(&handle, &["timer"]);
                 }
             });
             #[cfg(debug_assertions)]

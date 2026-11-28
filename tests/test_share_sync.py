@@ -4,17 +4,19 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import stat
 import subprocess
 import time
 import tomllib
-from unittest.mock import patch
+import unittest
+from unittest.mock import call, patch
 
 from helpers import set_times
 from test_share_plan import FLAGS, MacCopy
 
 from agents_router import fsutil
-from agents_router.share import apply, commands, settings, state
+from agents_router.share import apply, commands, scope, settings, state, watch
 
 YES = ["enable", *FLAGS, "--resolve", "gamma-apikey=skip", "--yes"]
 
@@ -25,6 +27,133 @@ def age(*paths, seconds=60):
     then = time.time() - seconds
     for path in paths:
         set_times(path, then)
+
+
+@unittest.skipIf(shutil.which("git") is None, "needs git")
+class ProjectFixture:
+    def setUp(self):
+        super().setUp()
+        self.repo = self.root / "work" / "app"
+        self.repo.mkdir(parents=True)
+        self.git("init", "-q")
+        self.agent(self.repo / ".claude", "builder", body="Builds the app.", tools="Bash, Read")
+        self.skill(self.repo / ".claude", "release-notes", body="Write the notes.")
+        age(*(self.repo / ".claude").rglob("*"))
+        self.git("add", ".")
+        self.git("commit", "-qm", "project agents")
+
+    def git(self, *args, cwd=None):
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args], cwd=cwd or self.repo,
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+
+class RepoWatchTests(ProjectFixture, MacCopy):
+    def setUp(self):
+        super().setUp()
+        self.assertEqual(self.run_share(*YES)[0], 0)
+        self.tree = self.repo.with_name("feature")
+        self.git("worktree", "add", "-q", str(self.tree))
+        age(*(self.tree / ".claude").rglob("*"))
+        self.quiet = self.repo.with_name("quiet")
+        self.git("init", "-q", str(self.quiet))
+        scope.add(self.repo)
+        scope.add(self.quiet)
+        watch._background_sync("watcher")
+        watch._background_sync("watcher")  # record the files the first sync wrote
+
+    def test_idle_repos_skip_git_checks_unless_forced(self):
+        with patch.object(scope, "busy", wraps=scope.busy) as busy:
+            self.assertFalse(watch.stale(settings.load()))
+            busy.assert_not_called()
+            self.assertEqual(watch._background_sync("watcher"), ("nothing moved", []))
+            busy.assert_not_called()
+            watch._background_sync("command", if_stale=False)
+            self.assertCountEqual(busy.call_args_list, [call(self.repo), call(self.tree), call(self.quiet)])
+
+    def test_a_repo_with_no_folder_shares_runs_no_git_check_on_any_tick(self):
+        """Such a scope never saves a signature, so it looks moved on every tick; it answers before the git check."""
+
+        folders = watch.included_folders
+
+        def none_in_quiet(saved):
+            root = scope.current().root
+            return [] if root is not None and root.resolve() == self.quiet.resolve() else folders(saved)
+
+        with patch.object(watch, "included_folders", side_effect=none_in_quiet), \
+                patch.object(scope, "busy", wraps=scope.busy) as busy:
+            for _ in range(3):
+                outcome, _ = watch._background_sync("watcher")
+                self.assertIn(": no folder shares", outcome)
+            self.assertEqual(busy.call_count, 0, busy.call_args_list)
+
+    def test_busy_edits_wait_while_the_worktree_syncs(self):
+        merge = self.repo / ".git" / "MERGE_HEAD"
+        merge.write_text("0" * 40 + "\n")
+        for root in (self.repo, self.tree):
+            age(self.agent(root / ".claude", "builder", body="Edited."))
+        with scope.use(scope.Scope(self.repo)):
+            before = watch.signature_path().read_bytes()
+        with patch.object(scope, "busy", wraps=scope.busy) as busy:
+            self.assertTrue(watch.stale(settings.load()))
+            self.assertEqual(busy.call_args_list, [call(self.repo), call(self.tree)])
+            busy.reset_mock()
+            watch._background_sync("watcher")
+            self.assertEqual(busy.call_args_list, [call(self.repo), call(self.tree)])
+        with scope.use(scope.Scope(self.repo)):
+            self.assertEqual(watch.signature_path().read_bytes(), before)
+        copy = ".kiro/agents/builder.json"
+        self.assertEqual(json.loads((self.tree / copy).read_text())["prompt"], "Edited.")
+        self.assertEqual(json.loads((self.repo / copy).read_text())["prompt"], "Builds the app.")
+        merge.unlink()
+        watch._background_sync("watcher")
+        self.assertEqual(json.loads((self.repo / copy).read_text())["prompt"], "Edited.")
+
+    def test_conflicted_settings_skip_only_the_merging_repo(self):
+        path = self.repo / ".agt" / "settings.toml"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text("<<<<<<< HEAD\n[share.targets]\n=======\n>>>>>>> branch\n")
+        (self.repo / ".git" / "MERGE_HEAD").write_text("0" * 40 + "\n")
+        with patch.object(scope, "busy", wraps=scope.busy) as busy:
+            self.assertFalse(watch.stale(settings.load()))
+            busy.assert_called_once_with(self.repo)
+            age(self.agent(self.tree / ".claude", "builder", body="Independent edit."))
+            self.assertTrue(watch.stale(settings.load()))
+            busy.reset_mock()
+            outcome, _ = watch._background_sync("watcher")
+            self.assertEqual(busy.call_args_list, [call(self.repo), call(self.tree)])
+        self.assertNotIn("stopped", outcome)
+        copy = self.tree / ".kiro" / "agents" / "builder.json"
+        self.assertEqual(json.loads(copy.read_text())["prompt"], "Independent edit.")
+
+    def unusable_settings_in_a_merging_repo(self, raw):
+        """`raw` as the merging repo's `.agt/settings.toml`: that repo waits and the worktree after it still
+        syncs; once the merge is over the repo names its file and the worktree syncs again."""
+
+        path = self.repo / ".agt" / "settings.toml"
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(raw)
+        merge = self.repo / ".git" / "MERGE_HEAD"
+        merge.write_text("0" * 40 + "\n")
+        copy = self.tree / ".kiro" / "agents" / "builder.json"
+        age(self.agent(self.tree / ".claude", "builder", body="While it merges."))
+        code, out = self.run_share("sync", "--if-stale", "--trigger", "watcher")
+        self.assertEqual(code, 0, "the pass stopped at the merging repo")
+        self.assertNotIn("stopped", out)
+        self.assertEqual(json.loads(copy.read_text())["prompt"], "While it merges.")
+        self.run_share("sync", "--if-stale", "--trigger", "watcher")  # record the files that sync wrote
+        self.assertFalse(watch.stale(settings.load()))
+        merge.unlink()
+        age(self.agent(self.tree / ".claude", "builder", body="After the merge."))
+        code, out = self.run_share("sync", "--if-stale", "--trigger", "watcher")
+        self.assertEqual(code, 0, "the pass stopped at the repo with the unusable file")
+        self.assertIn(f"{self.repo.name}: stopped: {path}", out)
+        self.assertEqual(json.loads(copy.read_text())["prompt"], "After the merge.")
+
+    def test_a_merging_repo_whose_share_is_not_a_table_lets_later_repos_sync(self):
+        self.unusable_settings_in_a_merging_repo(b"share = false\n")
+
+    def test_a_merging_repo_whose_settings_are_not_utf8_lets_later_repos_sync(self):
+        self.unusable_settings_in_a_merging_repo(b'[share.targets]\n"agents/caf\xe9" = "off"\n')
 
 
 class SyncTests(MacCopy):

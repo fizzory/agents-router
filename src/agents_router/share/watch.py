@@ -171,24 +171,50 @@ def watched_files(saved: settings.Settings, included: list[providers.Provider]) 
 
 
 def repo_scopes(saved: settings.Settings) -> list[scope.Scope]:
-    """The listed repos (and their worktrees) a background run covers; one in the middle of a merge waits."""
+    """The listed repos (and their worktrees) a background run covers."""
 
     if not saved.enabled:
         return []
-    return [target for target in scope.scopes(worktrees_join=saved.worktrees == "auto") if not scope.busy(target.root)]
+    return scope.scopes(worktrees_join=saved.worktrees == "auto")
+
+
+def _repo_settings(target: scope.Scope) -> settings.Settings | None:
+    try:
+        return settings.load()
+    except settings.SettingsError:
+        if scope.busy(target.root):
+            return None  # a merge can leave conflict markers in .agt/settings.toml
+        raise
+
+
+def _moved(included: list[providers.Provider], extra: list[Path], if_stale: bool = True) -> bool:
+    return not (if_stale and signature(included, extra) == saved_signature())
+
+
+def _merging() -> bool:
+    """The current repo is mid-merge (a git call): its edits wait. Your user folders never do."""
+
+    root = scope.current().root
+    return root is not None and scope.busy(root)
+
+
+def _needs_sync(included: list[providers.Provider], extra: list[Path], if_stale: bool = True) -> bool:
+    return _moved(included, extra, if_stale) and not _merging()
 
 
 def stale(saved: settings.Settings, included: list[providers.Provider] | None = None) -> bool:
     """Whether anything moved since the last background sync: in your user folders or in a listed repo."""
 
     included = included_folders(saved) if included is None else included
-    if signature(included, watched_files(saved, included)) != saved_signature():
+    if _needs_sync(included, watched_files(saved, included)):
         return True
     for target in repo_scopes(saved):
         with scope.use(target):
-            inner = settings.load()
+            inner = _repo_settings(target)
+            if inner is None:
+                continue
             mine = included_folders(inner)
-            if signature(mine, watched_files(inner, mine)) != saved_signature():
+            if _needs_sync(mine, watched_files(inner, mine)):
                 return True
     return False
 
@@ -223,7 +249,10 @@ def _background_sync(trigger: str, *, if_stale: bool = True) -> tuple[str, list[
     for target in repo_scopes(saved):
         with scope.use(target):
             try:
-                inner_outcome, inner_written = _scope_sync(settings.load(), trigger, if_stale)
+                inner = _repo_settings(target)
+                if inner is None:
+                    continue
+                inner_outcome, inner_written = _scope_sync(inner, trigger, if_stale)
             except settings.SettingsError as exc:
                 inner_outcome, inner_written = f"stopped: {exc}", []
         if inner_outcome != "nothing moved":
@@ -238,10 +267,13 @@ def _scope_sync(saved: settings.Settings, trigger: str, if_stale: bool) -> tuple
     from agents_router.share import commands
 
     included = included_folders(saved)
+    extra = watched_files(saved, included)
+    if not _moved(included, extra, if_stale):
+        return "nothing moved", []
+    # A scope with no folder shares never saves a signature: answer before the git check, or it runs every tick.
     if not included:
         return "no folder shares", []
-    extra = watched_files(saved, included)
-    if if_stale and signature(included, extra) == saved_signature():
+    if _merging():
         return "nothing moved", []
     args = argparse.Namespace(json=False, dry_run=False, trigger=trigger)
     try:

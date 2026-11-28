@@ -367,7 +367,7 @@
       "old_present": false,
       "new_present": true,
       "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
-      "command": "agt share status --json",
+      "command": "agt share status --user-only --json",
       "by": "command",
       "user_said": null,
       "id": "2027-01:16"
@@ -385,7 +385,7 @@
       "old_present": false,
       "new_present": true,
       "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
-      "command": "agt share status --json",
+      "command": "agt share status --user-only --json",
       "by": "command",
       "user_said": null,
       "id": "2027-01:15"
@@ -403,7 +403,7 @@
       "old_present": false,
       "new_present": true,
       "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
-      "command": "agt share status --json",
+      "command": "agt share status --user-only --json",
       "by": "command",
       "user_said": null,
       "id": "2027-01:14"
@@ -424,7 +424,7 @@
       "old_present": false,
       "new_present": true,
       "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
-      "command": "agt share status --json",
+      "command": "agt share status --user-only --json",
       "by": "command",
       "user_said": null,
       "id": "2027-01:13"
@@ -453,7 +453,7 @@
       "old_present": false,
       "new_present": true,
       "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
-      "command": "agt share status --json",
+      "command": "agt share status --user-only --json",
       "by": "command",
       "user_said": null,
       "id": "2027-01:12"
@@ -471,7 +471,7 @@
       "old_present": false,
       "new_present": true,
       "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
-      "command": "agt share status --json",
+      "command": "agt share status --user-only --json",
       "by": "command",
       "user_said": null,
       "id": "2027-01:11"
@@ -489,7 +489,7 @@
       "old_present": false,
       "new_present": true,
       "backup": "<ROOT>/agt/state/backups/settings/<BACKUP>.toml",
-      "command": "agt share status --json",
+      "command": "agt share status --user-only --json",
       "by": "command",
       "user_said": null,
       "id": "2027-01:10"

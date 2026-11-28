@@ -2,20 +2,21 @@
 
 import contextlib
 import io
+import json
 import os
 import re
 import unittest
 from unittest.mock import patch
 
 from test_share_plan import FLAGS, MacCopy
-from test_share_sync import YES
+from test_share_sync import ProjectFixture, YES, age
 
 from pathlib import Path
 
 from test_ui import HAVE_RICH
 
 from agents_router import cli, fsutil
-from agents_router.share import attention, status_view, watch
+from agents_router.share import attention, commands, scope, status_view, watch
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -169,6 +170,33 @@ class StatusTests(MacCopy):
         code, out = run("share", "sync")
         self.assertEqual(out.splitlines()[:2], ["agt share sync  nothing to write",
                                                 "  1 thing waits for you: `agt share status` lists it."])
+
+
+class UserOnlyTests(ProjectFixture, MacCopy):
+    def test_user_only_skips_a_listed_repo_conflict(self):
+        self.assertEqual(run("share", *YES)[0], 0)
+        self.assertEqual(run("share", "repo", "add", str(self.repo))[0], 0)
+        source = self.agent(self.repo / ".claude", "builder", body="One edit.")
+        copy = self.repo / ".kiro" / "agents" / "builder.json"
+        copy.write_text(json.dumps({**json.loads(copy.read_text()), "prompt": "Another edit."}))
+        age(source, copy)
+        code, out = run("share", "status", "--json")
+        self.assertEqual(code, 1, out)
+        full = json.loads(out)
+        self.assertEqual(full["repos"][0]["conflicts"], ["builder"])
+        with (patch.object(commands, "_repo_scopes") as listed, patch.object(commands, "_repo_status") as report,
+              patch.object(scope, "busy") as busy):
+            code, out = run("share", "status", "--user-only", "--json")
+            self.assertEqual(code, 0, out)
+            self.assertEqual(json.loads(out), {**full, "repos": []})
+            code, out = run("share", "status", "--user-only")
+            self.assertEqual(code, 0, out)
+            self.assertIn("all in sync", out)
+            self.assertNotIn("Repos", out)
+            listed.assert_not_called()
+            report.assert_not_called()
+            busy.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

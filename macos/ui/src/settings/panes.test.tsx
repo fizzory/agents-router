@@ -95,7 +95,7 @@ describe('Accounts', () => {
     const updated = structuredClone(fixtures.accountsList);
     Object.assign(updated.runtimes[0]!.accounts[1]!, { auth: { loggedIn: false } });
     api.accountsList.mockResolvedValue(updated);
-    await emit('onSettingsStatus', envelope(2));
+    await emit('onSettingsRefresh', { kinds: ['focus'] });
     const out = [...document.querySelectorAll<HTMLElement>('.settings-account')].find(item =>
       item.querySelector('.row-action')?.textContent === 'Log in…')!;
     api.accountsLogin.mockResolvedValueOnce({ status: 'terminal_failed', copy_command: 'Row fallback' });

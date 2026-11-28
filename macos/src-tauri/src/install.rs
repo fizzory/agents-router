@@ -144,6 +144,8 @@ impl InstallPaths {
         let mut env: ChildEnv = vec![
             ("AGT_APP_SUPPORT", Some(self.support.clone().into())),
             ("AGT_BIN_DIR", Some(self.bin.clone().into())),
+            ("AGT_JOB_ID", None),
+            ("AGT_DEPTH", None),
             ("PYTHONPATH", None),
             ("PYTHONHOME", None),
         ];
@@ -545,12 +547,8 @@ pub fn foreign_cli(paths: &InstallPaths) -> Option<ForeignCli> {
         source: source.into(),
     })
 }
-async fn output(
-    paths: &InstallPaths,
-    exe: &Path,
-    args: &[&str],
-    deadline: Duration,
-) -> Result<Vec<u8>> {
+/// The child `output` spawns.
+fn command(paths: &InstallPaths, exe: &Path, args: &[&str]) -> Result<Command> {
     let mut cmd = Command::new(exe);
     cmd.args(args)
         .current_dir(paths.checked_child_home()?)
@@ -561,6 +559,15 @@ async fn output(
             None => cmd.env_remove(name),
         };
     }
+    Ok(cmd)
+}
+async fn output(
+    paths: &InstallPaths,
+    exe: &Path,
+    args: &[&str],
+    deadline: Duration,
+) -> Result<Vec<u8>> {
+    let mut cmd = command(paths, exe, args)?;
     let out = timeout(deadline, cmd.output())
         .await
         .map_err(|_| "Timed out".to_owned())?
@@ -1102,6 +1109,18 @@ mod tests {
             .expect("lock retry hung after contention")
             .expect("failed lock attempt kept the lock");
     }
+    /// The spawned command itself drops the variables of an agt worker the app was started from.
+    pub(crate) fn removes_worker_env(command: &Command) {
+        for key in ["AGT_JOB_ID", "AGT_DEPTH"] {
+            assert!(
+                command
+                    .as_std()
+                    .get_envs()
+                    .any(|(name, value)| name == key && value.is_none()),
+                "{key} is not removed from the child"
+            );
+        }
+    }
     #[tokio::test]
     async fn installer_children_follow_the_build_and_launchers_carry_test_folders() {
         let root = crate::terminal::tests::Scratch::new("install-env");
@@ -1117,6 +1136,7 @@ mod tests {
             explicit_agt_home: false,
             isolated: None,
         };
+        removes_worker_env(&command(&paths, &probe, &[]).unwrap());
         // The release passes AGT_HOME only when the person set it.
         let release = output(&paths, &probe, &[], Duration::from_secs(10))
             .await
@@ -1135,6 +1155,7 @@ mod tests {
             config: base.join("config"),
             exclude: exclude.clone(),
         });
+        removes_worker_env(&command(&paths, &probe, &[]).unwrap());
         let test = output(&paths, &probe, &[], Duration::from_secs(10))
             .await
             .unwrap();

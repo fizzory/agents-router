@@ -10,6 +10,7 @@ fn main() {
             "set_popover_height",
             "open_settings",
             "get_settings_target",
+            "settings_visible",
             "show_setting_menu",
             "show_pane_menu",
             "show_popover_menu",

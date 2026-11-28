@@ -125,7 +125,7 @@ def load(location: Path | None = None, *, user: Settings | None = None) -> Setti
         text = location.read_text(encoding="utf-8")
     except FileNotFoundError:
         return Settings()
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:  # bytes that aren't UTF-8 are a ValueError, not an OSError
         raise SettingsError(f"{location} can't be read ({exc})", file=location) from None
     try:
         data = tomllib.loads(text).get("share", {})
@@ -277,8 +277,10 @@ def _load_project(current, user: Settings | None = None) -> Settings:
         data = tomllib.loads(location.read_text(encoding="utf-8")).get("share", {})
     except FileNotFoundError:
         return result
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise SettingsError(f"{location}: {exc}", file=location, line=getattr(exc, "lineno", None)) from None
+    if not isinstance(data, dict):  # `share = false`, or a merge's leftovers that still parse
+        raise SettingsError(f"{location}: [share] must be a table", file=location)
     picks = parse({"targets": data.get("targets", {})}, location)
     result.off, result.not_in, result.only = picks.off, picks.not_in, picks.only
     return result

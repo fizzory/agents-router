@@ -45,6 +45,8 @@ export const openSettingsFile = (file, line = 1) => invoke("open_settings_file",
 export const chooseWorkspace = () => invoke("choose_workspace");
 export const getOpenAtLogin = () => invoke("get_open_at_login");
 export const setOpenAtLogin = (enabled) => invoke("set_open_at_login", { enabled });
+export const settingsVisible = () => invoke("settings_visible");
+export const onSettingsRefresh = (handler) => listen("settings-refresh", ({ payload }) => handler(payload));
 export const getSettingsTarget = () => invoke("get_settings_target");
 export const showSettingMenu = (key) => invoke("show_setting_menu", { key });
 export const onSettingsHistory = (handler) => listen("settings-history", ({ payload }) => handler(payload));

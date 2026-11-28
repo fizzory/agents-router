@@ -293,7 +293,8 @@ impl AgtClient {
         self.execute(&request).await
     }
 
-    async fn execute(&self, request: &Request) -> Result<CommandOutcome, ClientError> {
+    /// The child `execute` spawns for `request`.
+    pub(crate) fn command(&self, request: &Request) -> Command {
         let mut command = Command::new(&self.inner.launcher);
         command
             .args(request.argv())
@@ -308,6 +309,11 @@ impl AgtClient {
         if let Some(path) = request.workspace.as_ref().or(self.inner.cwd.as_ref()) {
             command.current_dir(path);
         }
+        command
+    }
+
+    async fn execute(&self, request: &Request) -> Result<CommandOutcome, ClientError> {
+        let mut command = self.command(request);
         let output = timeout(self.inner.deadline, command.output())
             .await
             .map_err(|_| ClientError::TimedOut)?

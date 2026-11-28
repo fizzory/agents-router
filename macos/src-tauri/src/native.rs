@@ -727,8 +727,12 @@ fn apply_glyph(app: &tauri::AppHandle, glyph: Glyph) -> tauri::Result<bool> {
 }
 
 /// Retain the webview across close/reopen and bring Settings ahead of other apps.
-pub fn open_settings(app: &tauri::AppHandle, mtm: MainThreadMarker, target: serde_json::Value) {
+pub fn open_settings(app: &tauri::AppHandle, mtm: MainThreadMarker, mut target: serde_json::Value) {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use tauri::{Emitter, Manager};
+    // The retained target and its event can reach a mounting webview in either order.
+    static OPEN_ID: AtomicU64 = AtomicU64::new(1);
+    target["open_id"] = OPEN_ID.fetch_add(1, Ordering::Relaxed).into();
     hide(app, mtm, "settings");
     *app.state::<app::AppState>()
         .settings_target
@@ -744,6 +748,9 @@ pub fn open_settings(app: &tauri::AppHandle, mtm: MainThreadMarker, target: serd
         let _ = window.unminimize();
         let _ = window.set_focus();
         let _ = app.show();
+        // The target's catch-up rereads everything: the focus this open causes
+        // must not bring the kinds kept while Settings was closed as well.
+        app::clear_missed_refresh(app);
         let _ = app.emit_to("settings", "settings-target", target);
     }
     app::trace("Settings shown activation=Regular; webview retained; target delivered");

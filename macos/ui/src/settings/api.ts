@@ -26,7 +26,8 @@ export interface ConfigRow {
   levels: Partial<Record<Level, LevelValue>>;
 }
 export interface ConfigShow { workspace?: string | null; files: { level: string; file: string; exists: boolean }[]; error?: unknown; settings: ConfigRow[] }
-export interface SettingsTarget { pane?: string; runtime?: string | null; account?: string | null; key?: string; level?: Level; workspace?: string | null; preserveSearch?: boolean }
+export type RefreshKind = 'config' | 'share' | 'activity' | 'focus' | 'timer';
+export interface SettingsTarget { open_id?: number; pane?: string; runtime?: string | null; account?: string | null; key?: string; level?: Level; workspace?: string | null; preserveSearch?: boolean }
 export interface InstallStatus {
   dialog: string | null;
   message?: string | null;
@@ -67,6 +68,8 @@ export interface SettingsApi {
   chooseWorkspace: Call<[], string | null>;
   getOpenAtLogin: Call<[], boolean>;
   setOpenAtLogin: Call<[enabled: boolean], boolean>;
+  settingsVisible: Call<[], boolean>;
+  onSettingsRefresh: Listen<{ kinds: RefreshKind[] }>;
   getSettingsTarget: Call<[], SettingsTarget>;
   showSettingMenu: Call<[key: string]>;
   showPaneMenu: Call<[token: string, actions: string[]]>;
